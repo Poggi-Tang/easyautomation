@@ -1,0 +1,118 @@
+[build-system]
+requires = ["setuptools>=80", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "easy_uiauto"
+version = "0.1.1"
+description = "UI automation toolkit based on pyautogui and uiautomation"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "pyautogui>=0.9.54",
+    "pynput>=1.8.1",
+    "uiautomation>=2.0.29",
+    "pyperclip>=1.8.0",
+    "build>=1.4.0",
+]
+keywords = ["auto", "ui", "uiauto", "automation", "gui-testing"]
+authors = [
+    {name = "poggio", email = "2322806855@qq.com"}
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Software Development :: Testing",
+]
+
+[project.urls]
+Homepage = "https://github.com/poggiotzx/easy_uiauto"
+Repository = "https://github.com/poggiotzx/easy_uiauto.git"
+Issues = "https://github.com/poggiotzx/easy_uiauto/issues"
+Changelog = "https://github.com/poggiotzx/easy_uiauto/blob/master/CHANGELOG.md"
+Documentation = "https://github.com/poggiotzx/easy_uiauto/blob/master/README.md"
+
+[project.scripts]
+easy_uiauto = "easy_uiauto:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["src"]
+namespaces = false
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+addopts = "-ra --strict-markers --strict-config"
+testpaths = ["test"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+src = ["src", "test"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+ignore = []
+
+[tool.coverage.run]
+source = ["src/easy_uiauto"]
+branch = true
+omit = ["*/test/*", "*/__pycache__/*"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+]
+
+[tool.semantic_release]
+branch = "master"
+version_toml = ["pyproject.toml:project.version"]
+version_variables = ["src/easy_uiauto/__init__.py:__version__"]
+changelog_file = "CHANGELOG.md"
+build_command = "python -m build"
+dist_path = "dist/"
+upload_to_pypi = false
+upload_to_release = true
+commit_message = "chore(release): {version} [skip ci]"
+tag_format = "v{version}"
+commit_parser = "conventional"
+major_on_zero = false
+allow_zero_version = true
+
+[tool.semantic_release.remote]
+name = "origin"
+
+[tool.semantic_release.publish]
+dist_glob_patterns = ["dist/*"]
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true
+check_untyped_defs = true
+
+[tool.isort]
+profile = "black"
+line_length = 100
+known_first_party = ["easy_uiauto"]
