@@ -388,8 +388,8 @@ def run_record(write_file=True):
         with open(f"Record{RUN_TIME}.py", "a", encoding="utf-8") as f:
             f.write(f'# -*- coding: utf-8 -*-\n'
                     f'# @Name:      {RUN_TIME}.py\n'
-                    f'from easy_uiauto.ui_ctrl import kl_run_action\n'
-                    f'from easy_uiauto.utils import push_message,compile_controls\n'
+                    f'from easyuiauto.ui_ctrl import kl_run_action\n'
+                    f'from easyuiauto.utils import push_message,compile_controls\n'
                     f'# compile_controls(max_depth=1)\n')
     record_help()
     # 创建录制线程

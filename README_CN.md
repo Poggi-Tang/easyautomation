@@ -1,14 +1,14 @@
-# easy_uiauto
+# easyuiauto
 
 [English](README.md) | 简体中文
 
-[![PyPI](https://img.shields.io/pypi/v/easy_uiauto)](https://pypi.org/project/easy_uiauto/)
-[![Python](https://img.shields.io/pypi/pyversions/easy_uiauto)](https://pypi.org/project/easy_uiauto/)
-[![License](https://img.shields.io/github/license/poggiotzx/easy_uiauto)](LICENSE)
-[![CI](https://github.com/poggiotzx/easy_uiauto/actions/workflows/ci.yml/badge.svg)](https://github.com/poggiotzx/easy_uiauto/actions/workflows/ci.yml)
-[![Publish](https://github.com/poggiotzx/easy_uiauto/actions/workflows/publish.yml/badge.svg)](https://github.com/poggiotzx/easy_uiauto/actions/workflows/publish.yml)
+[![PyPI](https://img.shields.io/pypi/v/easyuiauto)](https://pypi.org/project/easyuiauto/)
+[![Python](https://img.shields.io/pypi/pyversions/easyuiauto)](https://pypi.org/project/easyuiauto/)
+[![License](https://img.shields.io/github/license/poggiotzx/easyuiauto)](LICENSE)
+[![CI](https://github.com/poggiotzx/easyuiauto/actions/workflows/ci.yml/badge.svg)](https://github.com/poggiotzx/easyuiauto/actions/workflows/ci.yml)
+[![Publish](https://github.com/poggiotzx/easyuiauto/actions/workflows/publish.yml/badge.svg)](https://github.com/poggiotzx/easyuiauto/actions/workflows/publish.yml)
 
-`easy_uiauto` 是一个基于 pyautogui 和 uiautomation 的 UI 自动化测试工具包。
+`easyuiauto` 是一个基于 pyautogui 和 uiautomation 的 UI 自动化测试工具包。
 
 它提供了一套全面的 GUI 自动化 API，包括鼠标控制、键盘输入、窗口管理和控件定位等功能。适用于自动化测试、RPA（机器人流程自动化）以及其他桌面自动化场景。
 
@@ -28,14 +28,14 @@
 从 PyPI 安装：
 
 ```bash
-pip install easy_uiauto
+pip install easyuiauto
 ```
 
 或从源码安装：
 
 ```bash
-git clone https://github.com/poggiotzx/easy_uiauto.git
-cd easy_uiauto
+git clone https://github.com/poggiotzx/easyuiauto.git
+cd easyuiauto
 pip install -e .
 ```
 
@@ -44,7 +44,7 @@ pip install -e .
 ### 基本控件操作
 
 ```python
-from easy_uiauto.ctrl import KlController
+from easyuiauto.ctrl import KlController
 
 # 左键点击控件
 KlController.kl_left_click(
@@ -92,7 +92,7 @@ KlController.kl_key_group(
 ### 录制用户操作
 
 ```python
-from easy_uiauto.record import run_record
+from easyuiauto.record import run_record
 
 # 开始录制用户操作
 run_record(write_file=True)
@@ -103,14 +103,14 @@ run_record(write_file=True)
 ## 项目结构
 
 ```text
-easy_uiauto
+easyuiauto
 ├── .github/
 │   └── workflows/
 │       ├── ci.yml
 │       ├── publish.yml
 │       └── release.yml
 ├── src/
-│   └── easy_uiauto/
+│   └── easyuiauto/
 │       ├── __init__.py
 │       ├── ctrl.py          # 核心控制器（鼠标/键盘操作）
 │       ├── draw.py          # 视觉反馈（控件高亮）

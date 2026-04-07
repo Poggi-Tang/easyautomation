@@ -1,14 +1,14 @@
-# easy_uiauto
+# easyuiauto
 
 English | [简体中文](README_CN.md)
 
-[![PyPI](https://img.shields.io/pypi/v/easy_uiauto)](https://pypi.org/project/easy_uiauto/)
-[![Python](https://img.shields.io/pypi/pyversions/easy_uiauto)](https://pypi.org/project/easy_uiauto/)
-[![License](https://img.shields.io/github/license/poggiotzx/easy_uiauto)](LICENSE)
-[![CI](https://github.com/poggiotzx/easy_uiauto/actions/workflows/ci.yml/badge.svg)](https://github.com/poggiotzx/easy_uiauto/actions/workflows/ci.yml)
-[![Publish](https://github.com/poggiotzx/easy_uiauto/actions/workflows/publish.yml/badge.svg)](https://github.com/poggiotzx/easy_uiauto/actions/workflows/publish.yml)
+[![PyPI](https://img.shields.io/pypi/v/easyuiauto)](https://pypi.org/project/easyuiauto/)
+[![Python](https://img.shields.io/pypi/pyversions/easyuiauto)](https://pypi.org/project/easyuiauto/)
+[![License](https://img.shields.io/github/license/poggiotzx/easyuiauto)](LICENSE)
+[![CI](https://github.com/poggiotzx/easyuiauto/actions/workflows/ci.yml/badge.svg)](https://github.com/poggiotzx/easyuiauto/actions/workflows/ci.yml)
+[![Publish](https://github.com/poggiotzx/easyuiauto/actions/workflows/publish.yml/badge.svg)](https://github.com/poggiotzx/easyuiauto/actions/workflows/publish.yml)
 
-`easy_uiauto` is a UI automation toolkit based on pyautogui and uiautomation.
+`easyuiauto` is a UI automation toolkit based on pyautogui and uiautomation.
 
 It provides a comprehensive set of APIs for GUI automation, including mouse control, keyboard input, 
 window management, and control location. It is suitable for automated testing, RPA (Robotic Process 
@@ -30,14 +30,14 @@ Automation), and other desktop automation scenarios.
 Install from PyPI:
 
 ```bash
-pip install easy_uiauto
+pip install easyuiauto
 ```
 
 Or install from source:
 
 ```bash
-git clone https://github.com/poggiotzx/easy_uiauto.git
-cd easy_uiauto
+git clone https://github.com/poggiotzx/easyuiauto.git
+cd easyuiauto
 pip install -e .
 ```
 
@@ -46,7 +46,7 @@ pip install -e .
 ### Basic Control Operations
 
 ```python
-from easy_uiauto.ctrl import KlController
+from easyuiauto.ctrl import KlController
 
 # Left click on a control
 KlController.kl_left_click(
@@ -94,7 +94,7 @@ KlController.kl_key_group(
 ### Recording User Actions
 
 ```python
-from easy_uiauto.record import run_record
+from easyuiauto.record import run_record
 
 # Start recording user actions
 run_record(write_file=True)
@@ -105,14 +105,14 @@ run_record(write_file=True)
 ## Project Structure
 
 ```text
-easy_uiauto
+easyuiauto
 ├── .github/
 │   └── workflows/
 │       ├── ci.yml
 │       ├── publish.yml
 │       └── release.yml
 ├── src/
-│   └── easy_uiauto/
+│   └── easyuiauto/
 │       ├── __init__.py
 │       ├── ctrl.py          # Core controller (mouse/keyboard actions)
 │       ├── draw.py          # Visual feedback (control highlighting)
