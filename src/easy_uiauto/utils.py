@@ -346,7 +346,8 @@ def set_top_window(window_title):
         push_message(f"未找到窗口")
         return False
     except Exception as e:
-        push_message(f"激活异常{e}")
+        if "无效的窗口句柄" not in e:
+            push_message(f"激活异常{e}")
         return False
 
 
@@ -612,10 +613,19 @@ def generate_cache_key(xpath):
         key_parts.append(item_key)
     return "|".join(key_parts)
 
+def _brothers(ctrl):
+    while 10:
+        children = ctrl.GetChildren()
+        if len( children)>1:
+            return  children
+        if len(children)==1:
+            ctrl = children[0]
+        else:
+            return  ctrl
 
 # @timeit
-def find_control_by_xpath(xpath):
-    """获取控件的Xpath路径"""
+def find_control_by_xpath(xpath,debug=False):
+    """通过控件的Xpath路径获取控件"""
     key_with, key_without = generate_cache_keys(xpath)
     try:
         # current_ctrl = CONTROL_CACHE.get(key1,CONTROL_CACHE.get(key2,None))
@@ -627,7 +637,8 @@ def find_control_by_xpath(xpath):
             rect = get_check_point_by_control(current_ctrl)
             if rect.check_pos != (0, 0):
                 # 检测成功
-                # push_message("使用缓存", current_ctrl)
+                if debug:
+                    push_message("使用缓存", current_ctrl)
                 return current_ctrl
         raise Exception("使用缓存失败，重新建立缓存")
     except Exception as e:
@@ -653,7 +664,8 @@ def find_control_by_xpath(xpath):
                     del xpath_copy[i]['AutomationId']
                 # ===============节点类型直接匹配===============
                 if item_type in ITEM_TYPE_NAMES or item_foundIndex not in [-1, 0, 1]:
-                    brothers = current_ctrl.GetChildren()
+                    # brothers = current_ctrl.GetChildren()
+                    brothers = _brothers(current_ctrl)
                     found_index = 1
                     matched = {}
                     for brother in brothers:
@@ -669,7 +681,8 @@ def find_control_by_xpath(xpath):
                         current_ctrl = matched[matched_keys[0]]
                         CONTROL_CACHE[key_with] = current_ctrl
                         CONTROL_CACHE[key_without] = current_ctrl
-                        # push_message(f'第【{i}】层{current_ctrl}')
+                        if debug:
+                            push_message(f'第【{i}】层{current_ctrl}')
                         return current_ctrl
                     elif matched_keys_count > 1:
                         index = item.get('foundIndex', 0)
@@ -684,13 +697,16 @@ def find_control_by_xpath(xpath):
                             current_ctrl = matched[matched_keys[0]]
                         CONTROL_CACHE[key_with] = current_ctrl
                         CONTROL_CACHE[key_without] = current_ctrl
-                        # push_message('添加缓存2', current_ctrl)
+                        if debug:
+                            push_message('添加缓存2', current_ctrl)
                         current_ctrl = CONTROL_CACHE.get(key_with, CONTROL_CACHE.get(key_without, None))
-                        # push_message("重新使用缓存", current_ctrl)
-                        # push_message(f'第【{i}】层{current_ctrl}')
+                        if debug:
+                            push_message("重新使用缓存", current_ctrl)
+                            push_message(f'第【{i}】层{current_ctrl}')
                         return current_ctrl
                     else:
-                        # push_message(f'第【{i}】层{last_ctrl}')
+                        if debug:
+                            push_message(f'定位失败，使用上一级控件\n    {last_ctrl}\n')
                         return last_ctrl
                 # ===============匹配程序（root、Win32/Qt）===============
                 abs_model = True  # qt
@@ -709,8 +725,8 @@ def find_control_by_xpath(xpath):
                     if 'foundIndex' in xpath_copy[i]:
                         del xpath_copy[i]['foundIndex']
                     current_ctrl = current_ctrl.Control(**xpath_copy[i])
-                # debug
-                # push_message(f'第【{i}】层{current_ctrl}')
+                if debug:
+                    push_message(f'第【{i}】层{current_ctrl}')
                 last_ctrl = current_ctrl
             CONTROL_CACHE[key_with] = current_ctrl
             CONTROL_CACHE[key_without] = current_ctrl
@@ -824,9 +840,9 @@ def redirect_control(name, ctrl):
 #     pass
 # auto.Logger.Write = log_decorator(auto.Logger.Write)
 # ########################################################
-def strategy_xpath(name, class_name, control_type, Xpath):
+def strategy_xpath(name, class_name, control_type, Xpath,debug=False):
     try:
-        ctrl = find_control_by_xpath(Xpath)
+        ctrl = find_control_by_xpath(Xpath, debug)
 
         if ctrl == uiautomation:
             return False
@@ -848,12 +864,13 @@ def strategy_xpath(name, class_name, control_type, Xpath):
             rollsize = ctrl_hight * 0.5
             find_count = 0
             while True:
-                current_ctrl = find_control_by_xpath(Xpath)
+                current_ctrl = find_control_by_xpath(Xpath, debug)
                 if current_ctrl and current_ctrl.ControlTypeName == control_type and current_ctrl.Name == name and current_ctrl.ClassName == class_name:
                     ctrl = current_ctrl
                     break
                 current_ctrl = redirect_control(name, current_ctrl)
-                # push_message('重定向当前控件：{}'.format(current_ctrl))
+                if debug:
+                    push_message('重定向当前控件：{}'.format(current_ctrl))
 
                 if current_ctrl and current_ctrl.ControlTypeName == control_type and current_ctrl.Name == name and current_ctrl.ClassName == class_name:
                     ctrl = current_ctrl
@@ -870,26 +887,30 @@ def strategy_xpath(name, class_name, control_type, Xpath):
                 else:
                     find_count = 0
                 lastchild_name = current_lastchild_name
-            push_message(f'策略 Xpath 滚动定位成功')
+            if debug:
+                push_message(f'策略 Xpath 滚动定位成功')
             return ctrl
         return False
     except Exception as e:
-        push_message(f'策略 Xpath 错误: {str(e)}')
+        if debug:
+            push_message(f'策略 Xpath 错误: {str(e)}')
         return False
 
 
 @timeit
-def find_control(LOCATION):
+def find_control(LOCATION,debug= False):
     """
     根据配置列表获取控件
     此版本支持Name、ClassName、Type、Xpath、foundIndex、AutomationId
-    :param LOCATION: 定位器字典，包含：
-        - WindowName: 父窗口名称
-        - Name: 控件名称
-        - ClassName: 控件类名
-        - Type: 控件类型
-        - Xpath: 层级路径
-        - foundIndex: 索引位置
+    :param
+         debug: 是否打印调试日志
+         LOCATION: 定位器字典，包含：
+            - WindowName: 父窗口名称
+            - Name: 控件名称
+            - ClassName: 控件类名
+            - Type: 控件类型
+            - Xpath: 层级路径
+            - foundIndex: 索引位置
     :return: 控件对象或None
     """
     global CURRENT_APP_NAME
@@ -928,7 +949,7 @@ def find_control(LOCATION):
             CURRENT_APP_NAME = WindowName
 
     start_time = int(datetime.now().timestamp() * 1000)
-    control = strategy_xpath(Name, ClassName, ControlTypeName, xpath)
+    control = strategy_xpath(Name, ClassName, ControlTypeName, xpath, debug)
     if control:
         current_time_ms = int(datetime.now().timestamp() * 1000)
         push_message(f"[计时] strategy_dictionary 执行耗时: {current_time_ms - start_time}ms")

@@ -7,7 +7,7 @@ import tkinter as tk
 from dataclasses import dataclass
 import uiautomation
 
-from utils import get_control_info
+from .utils import get_control_info
 
 
 # ================= 可见区域算法（输出 rect_map） =================

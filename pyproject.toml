@@ -3,7 +3,7 @@ requires = ["setuptools>=80", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "easyuiauto"
+name = "easy_uiauto"
 version = "0.0.1"
 description = "UI automation toolkit based on pyautogui and uiautomation"
 readme = "README.md"
@@ -32,11 +32,11 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/poggiotzx/easyuiauto"
-Repository = "https://github.com/poggiotzx/easyuiauto.git"
-Issues = "https://github.com/poggiotzx/easyuiauto/issues"
-Changelog = "https://github.com/poggiotzx/easyuiauto/blob/master/CHANGELOG.md"
-Documentation = "https://github.com/poggiotzx/easyuiauto/blob/master/README.md"
+Homepage = "https://github.com/Poggi-Tang/easyautomation"
+Repository = "https://github.com/Poggi-Tang/easyautomation.git"
+Issues = "https://github.com/Poggi-Tang/easyautomation/issues"
+Changelog = "https://github.com/Poggi-Tang/easyautomation/blob/master/CHANGELOG.md"
+Documentation = "https://github.com/Poggi-Tang/easyautomation/blob/master/README.md"
 
 [project.scripts]
 easyuiauto = "easyuiauto:main"

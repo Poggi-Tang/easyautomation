@@ -10,8 +10,8 @@ import tkinter as tk
 from comtypes import CoInitialize, CoUninitialize
 from pynput import mouse, keyboard
 from pynput.mouse import Button
-from draw import ScreenLineBox
-from utils import VK_KEY_NAME, INPUT_VK_KEY, format_action_data_by_xpath, push_message, \
+from .draw import ScreenLineBox
+from .utils import VK_KEY_NAME, INPUT_VK_KEY, format_action_data_by_xpath, push_message, \
     get_control_info, MODIFIER_VK
 
 RUN_TIME = time.strftime("%Y%m%d%H%M%S", time.localtime())
@@ -349,10 +349,12 @@ def on_action_callback(action_data):
     global RUN_TIME
     action_name = f"TEST_INFO_{action_data['TEST_ID']}"
     push_message(f'\n{action_name} = {action_data}')
-    push_message(f"push_message(kl_run_action({action_name}))")
+    push_message(f"push_message(run_action({action_name}))")
     with open(f"Record{RUN_TIME}.py", "a", encoding="utf-8") as f:
         f.write(f'\n{action_name} = {action_data}\n'
-                f'push_message(kl_run_action({action_name}))\n')
+                f'push_message(run_action({action_name}))\n'
+                f'# print(find_control({action_name}["LOCATION"],debug=True))\n'
+                )
     return
 
 
@@ -388,8 +390,8 @@ def run_record(write_file=True):
         with open(f"Record{RUN_TIME}.py", "a", encoding="utf-8") as f:
             f.write(f'# -*- coding: utf-8 -*-\n'
                     f'# @Name:      {RUN_TIME}.py\n'
-                    f'from easyuiauto.ui_ctrl import kl_run_action\n'
-                    f'from easyuiauto.utils import push_message,compile_controls\n'
+                    f'from easy_uiauto import run_action\n'
+                    f'from easy_uiauto import push_message, compile_controls,find_control\n'
                     f'# compile_controls(max_depth=1)\n')
     record_help()
     # 创建录制线程
@@ -414,3 +416,4 @@ def run_record(write_file=True):
 
 if __name__ == '__main__':
     run_record(True)
+

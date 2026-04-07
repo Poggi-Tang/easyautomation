@@ -4,9 +4,9 @@
 
 [![PyPI](https://img.shields.io/pypi/v/easyuiauto)](https://pypi.org/project/easyuiauto/)
 [![Python](https://img.shields.io/pypi/pyversions/easyuiauto)](https://pypi.org/project/easyuiauto/)
-[![License](https://img.shields.io/github/license/poggiotzx/easyuiauto)](LICENSE)
-[![CI](https://github.com/poggiotzx/easyuiauto/actions/workflows/ci.yml/badge.svg)](https://github.com/poggiotzx/easyuiauto/actions/workflows/ci.yml)
-[![Publish](https://github.com/poggiotzx/easyuiauto/actions/workflows/publish.yml/badge.svg)](https://github.com/poggiotzx/easyuiauto/actions/workflows/publish.yml)
+[![License](https://img.shields.io/github/license/Poggi-Tang/easyautomation)](LICENSE)
+[![CI](https://github.com/Poggi-Tang/easyautomation/actions/workflows/ci.yml/badge.svg)](https://github.com/Poggi-Tang/easyautomation/actions/workflows/ci.yml)
+[![Publish](https://github.com/Poggi-Tang/easyautomation/actions/workflows/publish.yml/badge.svg)](https://github.com/Poggi-Tang/easyautomation/actions/workflows/publish.yml)
 
 `easyuiauto` 是一个基于 pyautogui 和 uiautomation 的 UI 自动化测试工具包。
 
@@ -34,7 +34,7 @@ pip install easyuiauto
 或从源码安装：
 
 ```bash
-git clone https://github.com/poggiotzx/easyuiauto.git
+git clone https://github.com/Poggi-Tang/easyautomation.git
 cd easyuiauto
 pip install -e .
 ```

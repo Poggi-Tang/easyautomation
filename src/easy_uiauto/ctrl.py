@@ -11,8 +11,8 @@ import pyautogui
 import pyperclip
 import uiautomation
 
-from draw import ScreenLineBox
-from utils import find_control, package_location, get_control_coordinates, correct_ctrl_position, push_message
+from .draw import ScreenLineBox
+from .utils import find_control, package_location, get_control_coordinates, correct_ctrl_position, push_message
 
 
 def _show_thread(control_obj, show_time):
@@ -135,7 +135,7 @@ def update_message_type(current_message_type):
     _message_type = current_message_type
 
 
-class KlController:
+class Controller:
     """将原有顶层控制函数迁移为类方法，保持行为不变并复用公共构造逻辑。"""
 
     @classmethod
@@ -145,7 +145,7 @@ class KlController:
                                 foundIndex, AutomationId, Xpath, Img, PARAMETERS)
 
     @classmethod
-    def kl_left_click(cls, ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex,
+    def left_click(cls, ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex,
                       AutomationId, Xpath, Img, PARAMETERS):
         _MESSAGE_TYPE = _MESSAGE.INFO
         MESSAGE = ""
@@ -173,7 +173,7 @@ class KlController:
             return MESSAGE
 
     @classmethod
-    def kl_mouse_left_press(cls, ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
+    def mouse_left_press(cls, ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
                             PARAMETERS):
         _MESSAGE_TYPE = _MESSAGE.INFO
         MESSAGE = ""
@@ -196,7 +196,7 @@ class KlController:
             return MESSAGE
 
     @classmethod
-    def kl_mouse_left_release(cls, ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
+    def mouse_left_release(cls, ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
                               PARAMETERS):
         _MESSAGE_TYPE = _MESSAGE.INFO
         MESSAGE = ""
@@ -218,7 +218,7 @@ class KlController:
             return MESSAGE
 
     @classmethod
-    def kl_right_click(cls, ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
+    def right_click(cls, ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
                        PARAMETERS):
         _MESSAGE_TYPE = _MESSAGE.INFO
         MESSAGE = ""
@@ -241,7 +241,7 @@ class KlController:
             return MESSAGE
 
     @classmethod
-    def kl_mouse_right_press(cls, ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
+    def mouse_right_press(cls, ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
                              PARAMETERS):
         _MESSAGE_TYPE = _MESSAGE.INFO
         MESSAGE = ""
@@ -264,7 +264,7 @@ class KlController:
             return MESSAGE
 
     @classmethod
-    def kl_mouse_right_release(cls, ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
+    def mouse_right_release(cls, ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
                               PARAMETERS):
         _MESSAGE_TYPE = _MESSAGE.INFO
         MESSAGE = ""
@@ -286,7 +286,7 @@ class KlController:
             return MESSAGE
 
     @classmethod
-    def kl_centre_click(cls, ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
+    def centre_click(cls, ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
                         PARAMETERS):
         _MESSAGE_TYPE = _MESSAGE.INFO
         MESSAGE = ""
@@ -309,7 +309,7 @@ class KlController:
             return MESSAGE
 
     @classmethod
-    def kl_double_click(cls, ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
+    def double_click(cls, ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
                         PARAMETERS):
         _MESSAGE_TYPE = _MESSAGE.INFO
         MESSAGE = ""
@@ -333,7 +333,7 @@ class KlController:
             return MESSAGE
 
     @classmethod
-    def kl_mouse_move_pos(cls, ActionTitle, x, y):
+    def mouse_move_pos(cls, ActionTitle, x, y):
         _MESSAGE_TYPE = _MESSAGE.INFO
         MESSAGE = ""
         try:
@@ -347,7 +347,7 @@ class KlController:
             return MESSAGE
 
     @classmethod
-    def kl_mouse_move_control(cls, ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
+    def mouse_move_control(cls, ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
                               PARAMETERS):
         _MESSAGE_TYPE = _MESSAGE.INFO
         MESSAGE = ""
@@ -380,7 +380,7 @@ class KlController:
         uiautomation.DragDrop(current_coord_x, current_coord_y, target_coord_x, target_coord_y)
 
     @classmethod
-    def kl_drag_control(cls, ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
+    def drag_control(cls, ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
                         PARAMETERS):
         _MESSAGE_TYPE = _MESSAGE.INFO
         MESSAGE = ""
@@ -417,7 +417,7 @@ class KlController:
             return MESSAGE
 
     @classmethod
-    def kl_set_text(cls, ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
+    def set_text(cls, ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
                     PARAMETERS):
         _MESSAGE_TYPE = _MESSAGE.INFO
         MESSAGE = ""
@@ -438,7 +438,7 @@ class KlController:
             return MESSAGE
 
     @classmethod
-    def kl_input_text(cls, ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
+    def input_text(cls, ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
                       PARAMETERS):
         _MESSAGE_TYPE = _MESSAGE.INFO
         MESSAGE = ""
@@ -460,7 +460,7 @@ class KlController:
             return MESSAGE
 
     @classmethod
-    def kl_key_click(cls, ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
+    def key_click(cls, ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
                      PARAMETERS):
         _MESSAGE_TYPE = _MESSAGE.INFO
         MESSAGE = ""
@@ -481,7 +481,7 @@ class KlController:
             return MESSAGE
 
     @classmethod
-    def kl_key_press(cls, ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
+    def key_press(cls, ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
                      PARAMETERS):
         _MESSAGE_TYPE = _MESSAGE.INFO
         MESSAGE = ""
@@ -502,7 +502,7 @@ class KlController:
             return MESSAGE
 
     @classmethod
-    def kl_key_release(cls, ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
+    def key_release(cls, ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
                        PARAMETERS):
         _MESSAGE_TYPE = _MESSAGE.INFO
         MESSAGE = ""
@@ -523,7 +523,7 @@ class KlController:
             return MESSAGE
 
     @classmethod
-    def kl_key_group(cls, ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
+    def key_group(cls, ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
                      PARAMETERS):
         _MESSAGE_TYPE = _MESSAGE.INFO
         MESSAGE = ""
@@ -554,7 +554,7 @@ class KlController:
             return MESSAGE
 
     @classmethod
-    def kl_activate_window(cls, WindowTitle):
+    def activate_window(cls, WindowTitle):
         if pyautogui.getActiveWindowTitle() != WindowTitle:
             windows = pyautogui.getAllWindows()
             for window in windows:
@@ -566,7 +566,7 @@ class KlController:
 # ==============================鼠标动作==============================
 
 
-def kl_left_click(ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex,
+def left_click(ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex,
                   AutomationId, Xpath, Img, PARAMETERS):
     """
     鼠标左键点击控件
@@ -586,8 +586,8 @@ def kl_left_click(ActionTitle, WindowName, Name, ClassName, ControlType, foundIn
     :return
         str: 执行结果信息
     """
-    return KlController.kl_left_click(ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex,
-                                       AutomationId, Xpath, Img, PARAMETERS)
+    return Controller.left_click(ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex,
+                                 AutomationId, Xpath, Img, PARAMETERS)
 
 
 def get_pos(control, PARAMETERS: dict):
@@ -611,7 +611,7 @@ def get_pos(control, PARAMETERS: dict):
     return x, y
 
 
-def kl_mouse_left_press(ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
+def mouse_left_press(ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
                         PARAMETERS):
     """
     鼠标左键按下
@@ -631,11 +631,11 @@ def kl_mouse_left_press(ActionTitle, WindowName, Name, ClassName, ControlType, f
     :return
         str: 执行结果信息
     """
-    return KlController.kl_mouse_left_press(ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
-                                            PARAMETERS)
+    return Controller.mouse_left_press(ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
+                                       PARAMETERS)
 
 
-def kl_mouse_left_release(ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
+def mouse_left_release(ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
                           PARAMETERS):
     """
     鼠标左键释放
@@ -655,11 +655,11 @@ def kl_mouse_left_release(ActionTitle, WindowName, Name, ClassName, ControlType,
     :return
         str: 执行结果信息
     """
-    return KlController.kl_mouse_left_release(ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
-                                             PARAMETERS)
+    return Controller.mouse_left_release(ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
+                                         PARAMETERS)
 
 
-def kl_right_click(ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
+def right_click(ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
                    PARAMETERS):
     """
     鼠标右键点击
@@ -679,11 +679,11 @@ def kl_right_click(ActionTitle, WindowName, Name, ClassName, ControlType, foundI
     :return
         str: 执行结果信息
     """
-    return KlController.kl_right_click(ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
-                                      PARAMETERS)
+    return Controller.right_click(ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
+                                  PARAMETERS)
 
 
-def kl_mouse_right_press(ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
+def mouse_right_press(ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
                          PARAMETERS):
     """
     鼠标右键按下
@@ -703,11 +703,11 @@ def kl_mouse_right_press(ActionTitle, WindowName, Name, ClassName, ControlType, 
     :return
         str: 执行结果信息
     """
-    return KlController.kl_mouse_right_press(ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
-                                           PARAMETERS)
+    return Controller.mouse_right_press(ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
+                                        PARAMETERS)
 
 
-def kl_mouse_right_release(ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
+def mouse_right_release(ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
                            PARAMETERS):
     """
     鼠标右键释放
@@ -727,11 +727,11 @@ def kl_mouse_right_release(ActionTitle, WindowName, Name, ClassName, ControlType
     :return
         str: 执行结果信息
     """
-    return KlController.kl_mouse_right_release(ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
-                                            PARAMETERS)
+    return Controller.mouse_right_release(ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
+                                          PARAMETERS)
 
 
-def kl_centre_click(ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
+def centre_click(ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
                     PARAMETERS):
     """
     中键点击
@@ -751,11 +751,11 @@ def kl_centre_click(ActionTitle, WindowName, Name, ClassName, ControlType, found
     :return
         str: 执行结果信息
     """
-    return KlController.kl_centre_click(ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
-                                       PARAMETERS)
+    return Controller.centre_click(ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
+                                   PARAMETERS)
 
 
-def kl_double_click(ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
+def double_click(ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
                     PARAMETERS):
     """
     鼠标左键双击
@@ -775,11 +775,11 @@ def kl_double_click(ActionTitle, WindowName, Name, ClassName, ControlType, found
     :return
         str: 执行结果信息
     """
-    return KlController.kl_double_click(ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
-                                       PARAMETERS)
+    return Controller.double_click(ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
+                                   PARAMETERS)
 
 
-def kl_mouse_move_pos(ActionTitle, x, y):
+def mouse_move_pos(ActionTitle, x, y):
     """
     移动鼠标到坐标位置
 
@@ -791,10 +791,10 @@ def kl_mouse_move_pos(ActionTitle, x, y):
     :return
         str: 执行结果信息
     """
-    return KlController.kl_mouse_move_pos(ActionTitle, x, y)
+    return Controller.mouse_move_pos(ActionTitle, x, y)
 
 
-def kl_mouse_move_control(ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
+def mouse_move_control(ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
                           PARAMETERS):
     """
     移动鼠标到控件位置
@@ -814,8 +814,8 @@ def kl_mouse_move_control(ActionTitle, WindowName, Name, ClassName, ControlType,
     :return
         str: 执行结果信息
     """
-    return KlController.kl_mouse_move_control(ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
-                                             PARAMETERS)
+    return Controller.mouse_move_control(ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
+                                         PARAMETERS)
 
 
 def drag_control_by_control(current_control, target_control):
@@ -825,10 +825,10 @@ def drag_control_by_control(current_control, target_control):
     :param current_control: 当前控件对象
     :param target_control: 目标控件对象
     """
-    return KlController.drag_control_by_control(current_control, target_control)
+    return Controller.drag_control_by_control(current_control, target_control)
 
 
-def kl_drag_control(ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
+def drag_control(ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
                     PARAMETERS):
     """
     通过控件拖拽
@@ -848,12 +848,12 @@ def kl_drag_control(ActionTitle, WindowName, Name, ClassName, ControlType, found
     :return
         str: 执行结果信息
     """
-    return KlController.kl_drag_control(ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
-                                       PARAMETERS)
+    return Controller.drag_control(ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
+                                   PARAMETERS)
 
 
 # ==============================键盘动作==============================
-def kl_set_text(ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
+def set_text(ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
                 PARAMETERS):
     """
     设置文本（直接设置控件文本内容）
@@ -873,11 +873,11 @@ def kl_set_text(ActionTitle, WindowName, Name, ClassName, ControlType, foundInde
     :return
         str: 执行结果信息
     """
-    return KlController.kl_set_text(ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
-                                   PARAMETERS)
+    return Controller.set_text(ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
+                               PARAMETERS)
 
 
-def kl_input_text(ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
+def input_text(ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
                   PARAMETERS):
     """
     输入文本（通过剪贴板粘贴方式输入文本）
@@ -897,11 +897,11 @@ def kl_input_text(ActionTitle, WindowName, Name, ClassName, ControlType, foundIn
     :return
         str: 执行结果信息
     """
-    return KlController.kl_input_text(ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
-                                     PARAMETERS)
+    return Controller.input_text(ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
+                                 PARAMETERS)
 
 
-def kl_key_click(ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
+def key_click(ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
                  PARAMETERS):
     """
     键盘按键点击（按下并释放）
@@ -921,11 +921,11 @@ def kl_key_click(ActionTitle, WindowName, Name, ClassName, ControlType, foundInd
     :return
         str: 执行结果信息
     """
-    return KlController.kl_key_click(ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
-                                    PARAMETERS)
+    return Controller.key_click(ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
+                                PARAMETERS)
 
 
-def kl_key_press(ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
+def key_press(ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
                  PARAMETERS):
     """
     键盘按键按下
@@ -945,11 +945,11 @@ def kl_key_press(ActionTitle, WindowName, Name, ClassName, ControlType, foundInd
     :return
         str: 执行结果信息
     """
-    return KlController.kl_key_press(ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
-                                    PARAMETERS)
+    return Controller.key_press(ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
+                                PARAMETERS)
 
 
-def kl_key_release(ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
+def key_release(ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
                    PARAMETERS):
     """
     键盘按键释放
@@ -969,11 +969,11 @@ def kl_key_release(ActionTitle, WindowName, Name, ClassName, ControlType, foundI
     :return
         str: 执行结果信息
     """
-    return KlController.kl_key_release(ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
-                                      PARAMETERS)
+    return Controller.key_release(ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
+                                  PARAMETERS)
 
 
-def kl_key_group(ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
+def key_group(ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
                  PARAMETERS):
     """
     组合键操作
@@ -993,18 +993,18 @@ def kl_key_group(ActionTitle, WindowName, Name, ClassName, ControlType, foundInd
     :return
         str: 执行结果信息
     """
-    return KlController.kl_key_group(ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
-                                    PARAMETERS)
+    return Controller.key_group(ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
+                                PARAMETERS)
 
 
-def kl_activate_window(WindowTitle):
+def activate_window(WindowTitle):
     """
     激活指定标题的窗口
 
     :param
         WindowTitle (str): 窗口标题
     """
-    return KlController.kl_activate_window(WindowTitle)
+    return Controller.activate_window(WindowTitle)
 
 
 def generate_action_title(record_info):
@@ -1041,7 +1041,7 @@ def generate_action_title(record_info):
 
 
 # @timeit
-def kl_run_action(record_info):
+def run_action(record_info):
     """
     执行动作
 
@@ -1061,21 +1061,21 @@ def kl_run_action(record_info):
 
 
 Execute_Function = {
-    '点击': kl_left_click,
-    '按下鼠标左键': kl_mouse_left_press,
-    '释放鼠标左键': kl_mouse_left_release,
-    '右击': kl_right_click,
-    '按下鼠标右键': kl_mouse_right_press,
-    '释放鼠标右键': kl_mouse_right_release,
-    '中击': kl_centre_click,
-    '双击': kl_double_click,
-    '移动鼠标到坐标': kl_mouse_move_pos,
-    '移动鼠标到控件': kl_mouse_move_control,
-    '设置文本': kl_set_text,
-    '输入文本': kl_input_text,
-    '键盘点击': kl_key_click,
-    '键盘按下': kl_key_press,
-    '键盘释放': kl_key_release,
-    '拖拽': kl_drag_control,
-    '组合键': kl_key_group,
+    '点击': left_click,
+    '按下鼠标左键': mouse_left_press,
+    '释放鼠标左键': mouse_left_release,
+    '右击': right_click,
+    '按下鼠标右键': mouse_right_press,
+    '释放鼠标右键': mouse_right_release,
+    '中击': centre_click,
+    '双击': double_click,
+    '移动鼠标到坐标': mouse_move_pos,
+    '移动鼠标到控件': mouse_move_control,
+    '设置文本': set_text,
+    '输入文本': input_text,
+    '键盘点击': key_click,
+    '键盘按下': key_press,
+    '键盘释放': key_release,
+    '拖拽': drag_control,
+    '组合键': key_group,
 }

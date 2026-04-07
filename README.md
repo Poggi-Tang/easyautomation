@@ -4,9 +4,9 @@ English | [简体中文](README_CN.md)
 
 [![PyPI](https://img.shields.io/pypi/v/easyuiauto)](https://pypi.org/project/easyuiauto/)
 [![Python](https://img.shields.io/pypi/pyversions/easyuiauto)](https://pypi.org/project/easyuiauto/)
-[![License](https://img.shields.io/github/license/poggiotzx/easyuiauto)](LICENSE)
-[![CI](https://github.com/poggiotzx/easyuiauto/actions/workflows/ci.yml/badge.svg)](https://github.com/poggiotzx/easyuiauto/actions/workflows/ci.yml)
-[![Publish](https://github.com/poggiotzx/easyuiauto/actions/workflows/publish.yml/badge.svg)](https://github.com/poggiotzx/easyuiauto/actions/workflows/publish.yml)
+[![License](https://img.shields.io/github/license/Poggi-Tang/easyautomation)](LICENSE)
+[![CI](https://github.com/Poggi-Tang/easyautomation/actions/workflows/ci.yml/badge.svg)](https://github.com/Poggi-Tang/easyautomation/actions/workflows/ci.yml)
+[![Publish](https://github.com/Poggi-Tang/easyautomation/actions/workflows/publish.yml/badge.svg)](https://github.com/Poggi-Tang/easyautomation/actions/workflows/publish.yml)
 
 `easyuiauto` is a UI automation toolkit based on pyautogui and uiautomation.
 
@@ -36,7 +36,7 @@ pip install easyuiauto
 Or install from source:
 
 ```bash
-git clone https://github.com/poggiotzx/easyuiauto.git
+git clone https://github.com/Poggi-Tang/easyautomation.git
 cd easyuiauto
 pip install -e .
 ```
