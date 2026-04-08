@@ -8,8 +8,8 @@ The format is based on Keep a Changelog and is maintained automatically by Seman
 
 ### Added
 
-- Initial public release of `easyuiauto`
-- `KlController` class for mouse and keyboard control
+- Initial public release of `easy_uiauto`
+- `Controller` class for mouse and keyboard control
 - Control location using XPath-based positioning strategy
 - Action recording with visual feedback (ScreenLineBox)
 - Utility functions for control caching and window management

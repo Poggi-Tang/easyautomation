@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: pypi
-      url: https://pypi.org/p/easyuiauto
+      url: https://pypi.org/p/easy_uiauto
 
     steps:
       - uses: actions/checkout@v4

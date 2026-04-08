@@ -204,7 +204,7 @@ class Controller:
             LOCATION = cls._make_location(WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
                                            PARAMETERS)
 
-            result = cls.kl_mouse_move_control(ActionTitle, **LOCATION)
+            result = cls.mouse_move_control(ActionTitle, **LOCATION)
             if result[0] == _MESSAGE.INFO:
                 uiautomation.ReleaseMouse()
                 MESSAGE = f"步骤：{ActionTitle} 控件【{Name}】 执行动作 鼠标左键释放 成功！"
@@ -272,7 +272,7 @@ class Controller:
             LOCATION = cls._make_location(WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
                                            PARAMETERS)
 
-            result = cls.kl_mouse_move_control(ActionTitle, **LOCATION)
+            result = cls.mouse_move_control(ActionTitle, **LOCATION)
             if result[0] == _MESSAGE.INFO:
                 uiautomation.RightReleaseMouse()
                 MESSAGE = f"步骤：{ActionTitle} 控件【{Name}】 执行动作 鼠标右键释放 成功！"

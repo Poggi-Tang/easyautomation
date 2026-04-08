@@ -1,14 +1,14 @@
-# easyuiauto
+# easy_uiauto
 
 English | [简体中文](README_CN.md)
 
-[![PyPI](https://img.shields.io/pypi/v/easy-uiauto)](https://pypi.org/project/easy-uiauto/)
-[![Python](https://img.shields.io/pypi/pyversions/easy-uiauto)](https://pypi.org/project/easy-uiauto/)
+[![PyPI](https://img.shields.io/pypi/v/easy_uiauto)](https://pypi.org/project/easy_uiauto/)
+[![Python](https://img.shields.io/pypi/pyversions/easy_uiauto)](https://pypi.org/project/easy_uiauto/)
 [![License](https://img.shields.io/github/license/Poggi-Tang/easyautomation)](LICENSE)
 [![CI](https://github.com/Poggi-Tang/easyautomation/actions/workflows/ci.yml/badge.svg)](https://github.com/Poggi-Tang/easyautomation/actions/workflows/ci.yml)
 [![Publish](https://github.com/Poggi-Tang/easyautomation/actions/workflows/publish.yml/badge.svg)](https://github.com/Poggi-Tang/easyautomation/actions/workflows/publish.yml)
 
-`easyuiauto` is a UI automation toolkit based on pyautogui and uiautomation.
+`easy_uiauto` is a UI automation toolkit based on pyautogui and uiautomation.
 
 It provides a comprehensive set of APIs for GUI automation, including mouse control, keyboard input, 
 window management, and control location. It is suitable for automated testing, RPA (Robotic Process 
@@ -30,14 +30,14 @@ Automation), and other desktop automation scenarios.
 Install from PyPI:
 
 ```bash
-pip install easyuiauto
+pip install easy_uiauto
 ```
 
 Or install from source:
 
 ```bash
 git clone https://github.com/Poggi-Tang/easyautomation.git
-cd easyuiauto
+cd easyautomation
 pip install -e .
 ```
 
@@ -46,10 +46,10 @@ pip install -e .
 ### Basic Control Operations
 
 ```python
-from easyuiauto.ctrl import KlController
+from easy_uiauto.ctrl import Controller
 
 # Left click on a control
-KlController.kl_left_click(
+Controller.left_click(
     ActionTitle="Click OK Button",
     WindowName="My Application",
     Name="OK",
@@ -63,7 +63,7 @@ KlController.kl_left_click(
 )
 
 # Input text into a field
-KlController.kl_input_text(
+Controller.input_text(
     ActionTitle="Enter Username",
     WindowName="Login Dialog",
     Name="Username",
@@ -77,7 +77,7 @@ KlController.kl_input_text(
 )
 
 # Keyboard shortcut
-KlController.kl_key_group(
+Controller.key_group(
     ActionTitle="Save File",
     WindowName="Notepad",
     Name="",
@@ -94,7 +94,7 @@ KlController.kl_key_group(
 ### Recording User Actions
 
 ```python
-from easyuiauto.record import run_record
+from easy_uiauto.record import run_record
 
 # Start recording user actions
 run_record(write_file=True)
@@ -105,14 +105,14 @@ run_record(write_file=True)
 ## Project Structure
 
 ```text
-easyuiauto
+easyautomation
 ├── .github/
 │   └── workflows/
 │       ├── ci.yml
 │       ├── publish.yml
 │       └── release.yml
 ├── src/
-│   └── easyuiauto/
+│   └── easy_uiauto/
 │       ├── __init__.py
 │       ├── ctrl.py          # Core controller (mouse/keyboard actions)
 │       ├── draw.py          # Visual feedback (control highlighting)
@@ -145,7 +145,7 @@ ruff check .
 
 ## Usage Examples
 
-For more examples, please refer to the test files in the `test/` directory or check the docstrings in the source code.
+For more examples, please refer to the test files in the `demo/` directory or check the docstrings in the source code.
 
 ## License
 

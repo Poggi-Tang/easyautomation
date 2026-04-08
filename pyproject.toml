@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "easy_uiauto"
-version = "0.0.3"
+version = "0.1.0"
 description = "UI automation toolkit based on pyautogui and uiautomation"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -38,7 +38,7 @@ Changelog = "https://github.com/Poggi-Tang/easyautomation/blob/master/CHANGELOG.
 Documentation = "https://github.com/Poggi-Tang/easyautomation/blob/master/README.md"
 
 [project.scripts]
-easyuiauto = "easyuiauto:main"
+easy_uiauto = "easy_uiauto:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
@@ -65,7 +65,7 @@ select = ["E", "F", "I", "B", "UP"]
 ignore = []
 
 [tool.coverage.run]
-source = ["src/easyuiauto"]
+source = ["src/easy_uiauto"]
 branch = true
 omit = ["*/test/*", "*/__pycache__/*"]
 
@@ -84,7 +84,7 @@ exclude_lines = [
 [tool.semantic_release]
 branch = "master"
 version_toml = ["pyproject.toml:project.version"]
-version_variables = ["src/easyuiauto/__init__.py:__version__"]
+version_variables = ["src/easy_uiauto/__init__.py:__version__"]
 changelog_file = "CHANGELOG.md"
 build_command = "python -m build"
 dist_path = "dist/"
@@ -112,4 +112,4 @@ check_untyped_defs = true
 [tool.isort]
 profile = "black"
 line_length = 100
-known_first_party = ["easyuiauto"]
+known_first_party = ["easy_uiauto"]
