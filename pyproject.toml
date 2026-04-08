@@ -3,8 +3,8 @@ requires = ["setuptools>=80", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "easy_uiauto"
-version = "0.1.0"
+name = "easy-uiauto"
+version = "0.1.1"
 description = "UI automation toolkit based on pyautogui and uiautomation"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -38,7 +38,7 @@ Changelog = "https://github.com/Poggi-Tang/easyautomation/blob/master/CHANGELOG.
 Documentation = "https://github.com/Poggi-Tang/easyautomation/blob/master/README.md"
 
 [project.scripts]
-easy_uiauto = "easy_uiauto:main"
+easy-uiauto = "easyautomation:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
@@ -112,4 +112,4 @@ check_untyped_defs = true
 [tool.isort]
 profile = "black"
 line_length = 100
-known_first_party = ["easy_uiauto"]
+known_first_party = ["easy-uiauto"]

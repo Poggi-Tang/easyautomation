@@ -1,14 +1,14 @@
-# easy_uiauto
+# easy-uiauto
 
 [English](README.md) | 简体中文
 
-[![PyPI](https://img.shields.io/pypi/v/easy_uiauto)](https://pypi.org/project/easy_uiauto/)
-[![Python](https://img.shields.io/pypi/pyversions/easy_uiauto)](https://pypi.org/project/easy_uiauto/)
+[![PyPI](https://img.shields.io/pypi/v/easy-uiauto)](https://pypi.org/project/easy-uiauto/)
+[![Python](https://img.shields.io/pypi/pyversions/easy-uiauto)](https://pypi.org/project/easy-uiauto/)
 [![License](https://img.shields.io/github/license/Poggi-Tang/easyautomation)](LICENSE)
 [![CI](https://github.com/Poggi-Tang/easyautomation/actions/workflows/ci.yml/badge.svg)](https://github.com/Poggi-Tang/easyautomation/actions/workflows/ci.yml)
 [![Publish](https://github.com/Poggi-Tang/easyautomation/actions/workflows/publish.yml/badge.svg)](https://github.com/Poggi-Tang/easyautomation/actions/workflows/publish.yml)
 
-`easy_uiauto` 是一个基于 pyautogui 和 uiautomation 的 UI 自动化测试工具包。
+`easy-uiauto` 是一个基于 pyautogui 和 uiautomation 的 UI 自动化测试工具包。
 
 它提供了一套全面的 GUI 自动化 API，包括鼠标控制、键盘输入、窗口管理和控件定位等功能。适用于自动化测试、RPA（机器人流程自动化）以及其他桌面自动化场景。
 
@@ -28,7 +28,7 @@
 从 PyPI 安装：
 
 ```bash
-pip install easy_uiauto
+pip install easy-uiauto
 ```
 
 或从源码安装：
@@ -110,7 +110,7 @@ easyautomation
 │       ├── publish.yml
 │       └── release.yml
 ├── src/
-│   └── easy_uiauto/
+│   └── easy-uiauto/
 │       ├── __init__.py
 │       ├── ctrl.py          # 核心控制器（鼠标/键盘操作）
 │       ├── draw.py          # 视觉反馈（控件高亮）

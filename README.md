@@ -1,14 +1,14 @@
-# easy_uiauto
+# easy-uiauto
 
 English | [简体中文](README_CN.md)
 
-[![PyPI](https://img.shields.io/pypi/v/easy_uiauto)](https://pypi.org/project/easy_uiauto/)
-[![Python](https://img.shields.io/pypi/pyversions/easy_uiauto)](https://pypi.org/project/easy_uiauto/)
+[![PyPI](https://img.shields.io/pypi/v/easy-uiauto)](https://pypi.org/project/easy-uiauto/)
+[![Python](https://img.shields.io/pypi/pyversions/easy-uiauto)](https://pypi.org/project/easy-uiauto/)
 [![License](https://img.shields.io/github/license/Poggi-Tang/easyautomation)](LICENSE)
 [![CI](https://github.com/Poggi-Tang/easyautomation/actions/workflows/ci.yml/badge.svg)](https://github.com/Poggi-Tang/easyautomation/actions/workflows/ci.yml)
 [![Publish](https://github.com/Poggi-Tang/easyautomation/actions/workflows/publish.yml/badge.svg)](https://github.com/Poggi-Tang/easyautomation/actions/workflows/publish.yml)
 
-`easy_uiauto` is a UI automation toolkit based on pyautogui and uiautomation.
+`easy-uiauto` is a UI automation toolkit based on pyautogui and uiautomation.
 
 It provides a comprehensive set of APIs for GUI automation, including mouse control, keyboard input, 
 window management, and control location. It is suitable for automated testing, RPA (Robotic Process 
@@ -30,7 +30,7 @@ Automation), and other desktop automation scenarios.
 Install from PyPI:
 
 ```bash
-pip install easy_uiauto
+pip install easy-uiauto
 ```
 
 Or install from source:
@@ -112,7 +112,7 @@ easyautomation
 │       ├── publish.yml
 │       └── release.yml
 ├── src/
-│   └── easy_uiauto/
+│   └── easy-uiauto/
 │       ├── __init__.py
 │       ├── ctrl.py          # Core controller (mouse/keyboard actions)
 │       ├── draw.py          # Visual feedback (control highlighting)
