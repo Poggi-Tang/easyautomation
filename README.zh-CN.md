@@ -1,5 +1,7 @@
 # easy-uiauto
 
+(https://github.com/Poggi-Tang/easyautomation/blob/main/src/image/easy-uiauto.png)
+
 [English](https://github.com/Poggi-Tang/easyautomation/blob/main/README.md) | 简体中文
 
 [![PyPI](https://img.shields.io/pypi/v/easy_uiauto?cacheSeconds=300)](https://pypi.org/project/easy-uiauto/)
