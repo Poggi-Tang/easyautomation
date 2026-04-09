@@ -36,7 +36,7 @@ wheels = [
 
 [[package]]
 name = "easy-uiauto"
-version = "0.0.1"
+version = "0.1.8"
 source = { editable = "." }
 dependencies = [
     { name = "build" },

@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   publish:
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     environment:
       name: pypi
       url: https://pypi.org/p/easy-uiauto
