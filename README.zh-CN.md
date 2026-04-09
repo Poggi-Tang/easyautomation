@@ -1,6 +1,6 @@
 # easy-uiauto
 
-(https://github.com/Poggi-Tang/easyautomation/blob/main/src/image/easy-uiauto.png)
+![logo](https://github.com/Poggi-Tang/easyautomation/blob/main/src/image/easy-uiauto.png)
 
 [English](https://github.com/Poggi-Tang/easyautomation/blob/main/README.md) | 简体中文
 
