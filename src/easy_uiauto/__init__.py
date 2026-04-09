@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """easy-uiauto - UI automation toolkit based on pyautogui and uiautomation"""
 
-__version__ = "0.1.7"
+__version__ = "0.1.8"
 __author__ = "Poggi-Tang"
 
 from .ctrl import (

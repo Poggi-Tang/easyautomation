@@ -2,7 +2,7 @@
 
 English | [简体中文](https://github.com/Poggi-Tang/easyautomation/blob/main/README.zh-CN.md)
 
-[![PyPI](https://img.shields.io/pypi/v/easy-uiauto?cacheSeconds=300)](https://pypi.org/project/easy-uiauto/)
+[![PyPI](https://img.shields.io/pypi/v/easy_uiauto?cacheSeconds=300)](https://pypi.org/project/easy-uiauto/)
 [![Python](https://img.shields.io/pypi/pyversions/easy-uiauto?cacheSeconds=300)](https://pypi.org/project/easy-uiauto/)
 [![License](https://img.shields.io/github/license/Poggi-Tang/easyautomation)](https://github.com/Poggi-Tang/easyautomation/blob/main/LICENSE)
 [![CI](https://github.com/Poggi-Tang/easyautomation/actions/workflows/ci.yml/badge.svg)](https://github.com/Poggi-Tang/easyautomation/actions/workflows/ci.yml)
