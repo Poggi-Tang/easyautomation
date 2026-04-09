@@ -150,3 +150,9 @@ For more examples, please refer to the test files in the `demo/` directory or ch
 ## License
 
 MIT License. See [LICENSE](https://github.com/Poggi-Tang/easyautomation/blob/main/LICENSE).
+
+## Contact
+
+Scan the QR code to add me on WeChat:
+
+![WeChat QR Code](https://github.com/Poggi-Tang/easyautomation/blob/main/src/image/or_code.bmp)

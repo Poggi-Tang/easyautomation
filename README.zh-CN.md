@@ -148,3 +148,9 @@ ruff check .
 ## 许可证
 
 MIT License，详见 [LICENSE](https://github.com/Poggi-Tang/easyautomation/blob/main/LICENSE)。
+
+## 联系方式
+
+扫描以下二维码添加我的微信：
+
+![微信二维码](https://github.com/Poggi-Tang/easyautomation/blob/main/src/image/or_code.bmp)
