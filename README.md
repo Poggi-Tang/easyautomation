@@ -16,6 +16,8 @@ It provides a comprehensive set of APIs for GUI automation, including mouse cont
 window management, and control location. It is suitable for automated testing, RPA (Robotic Process 
 Automation), and other desktop automation scenarios.
 
+![logo](https://github.com/Poggi-Tang/easyautomation/blob/main/src/image/easy-uiauto.png)
+
 ## Features
 
 - Mouse control: click, double-click, right-click, drag and drop

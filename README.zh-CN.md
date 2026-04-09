@@ -1,7 +1,4 @@
 # easy-uiauto
-
-![logo](https://github.com/Poggi-Tang/easyautomation/blob/main/src/image/easy-uiauto.png)
-
 [English](https://github.com/Poggi-Tang/easyautomation/blob/main/README.md) | 简体中文
 
 [![PyPI](https://img.shields.io/pypi/v/easy_uiauto?cacheSeconds=300)](https://pypi.org/project/easy-uiauto/)
@@ -13,6 +10,8 @@
 `easy-uiauto` 是一个基于 pyautogui 和 uiautomation 的 UI 自动化测试工具包。
 
 它提供了一套全面的 GUI 自动化 API，包括鼠标控制、键盘输入、窗口管理和控件定位等功能。适用于自动化测试、RPA（机器人流程自动化）以及其他桌面自动化场景。
+
+![logo](https://github.com/Poggi-Tang/easyautomation/blob/main/src/image/easy-uiauto.png)
 
 ## 功能特点
 
