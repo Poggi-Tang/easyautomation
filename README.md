@@ -1,6 +1,6 @@
 # easy-uiauto
 
-English | [简体中文](README_CN.md)
+English | [简体中文](https://github.com/Poggi-Tang/easyautomation/blob/main/README.zh-CN.md)
 
 [![PyPI](https://img.shields.io/pypi/v/easy-uiauto?cacheSeconds=300)](https://pypi.org/project/easy-uiauto/)
 [![Python](https://img.shields.io/pypi/pyversions/easy-uiauto?cacheSeconds=300)](https://pypi.org/project/easy-uiauto/)
@@ -122,7 +122,7 @@ easyautomation
 ├── CHANGELOG.md
 ├── LICENSE
 ├── README.md
-├── README_CN.md
+├── README.zh-CN.md
 └── pyproject.toml
 ```
 
@@ -149,4 +149,4 @@ For more examples, please refer to the test files in the `demo/` directory or ch
 
 ## License
 
-MIT License. See [LICENSE](LICENSE).
+MIT License. See [LICENSE](https://github.com/Poggi-Tang/easyautomation/blob/main/LICENSE).

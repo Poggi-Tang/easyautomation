@@ -1,6 +1,6 @@
 # easy-uiauto
 
-[English](README.md) | 简体中文
+[English](https://github.com/Poggi-Tang/easyautomation/blob/main/README.md) | 简体中文
 
 [![PyPI](https://img.shields.io/pypi/v/easy-uiauto?cacheSeconds=300)](https://pypi.org/project/easy-uiauto/)
 [![Python](https://img.shields.io/pypi/pyversions/easy-uiauto?cacheSeconds=300)](https://pypi.org/project/easy-uiauto/)
@@ -147,4 +147,4 @@ ruff check .
 
 ## 许可证
 
-MIT License，详见 [LICENSE](LICENSE)。
+MIT License，详见 [LICENSE](https://github.com/Poggi-Tang/easyautomation/blob/main/LICENSE)。
