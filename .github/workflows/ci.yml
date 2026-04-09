@@ -31,7 +31,7 @@ jobs:
           uv add pytest
 
       - name: Run tests
-        run: pytest -q
+        run: uv pytest -q
 
   build:
     runs-on: ubuntu-latest
