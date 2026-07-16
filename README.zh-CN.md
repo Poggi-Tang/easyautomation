@@ -64,13 +64,26 @@ pip install -e .[mcp]
 easy-uiauto-mcp
 ```
 
-MCP 服务提供 `list_windows`、`find_control`、`inspect_control` 和
-`perform_action`。所有 UIAutomation/COM 对象只在一个专用工作线程中创建和使用，
-工具只返回 JSON 快照和短期控件引用。
+MCP 服务提供发现与检查工具（`list_windows`、`find_control`、`inspect_control`、
+`list_children`、`get_control_tree`）、缓存与引用维护工具（`cache_stats`、
+`clear_caches`、`invalidate_control`）、录制/高亮会话以及 `perform_action`。
+所有 UIAutomation/COM 对象只在一个专用工作线程中创建和使用，工具只返回 JSON
+快照和短期控件引用。Tk 高亮层运行在独立解释器进程中，可由 stdio MCP 客户端安全启停。
+
+`perform_action` 支持 dry-run、动作前后快照、可选观察控件和点分路径后置条件。
+provider 返回成功并不等于桌面状态已改变：只要 provider 暴露了相应状态，文本、切换、
+选择和展开/折叠动作都会验证实际 UI Automation 状态。
 
 组合键、鼠标按住/释放和拖拽等高风险动作默认禁用；设置
 `EASY_UIAUTO_MCP_ALLOW_HIGH_RISK=1` 后启用。图片路径默认禁用；设置
-`EASY_UIAUTO_MCP_ALLOW_IMAGE_PATHS=1` 后启用。
+`EASY_UIAUTO_MCP_ALLOW_IMAGE_PATHS=1` 后启用。名称看起来会触发运行、编译、删除、
+清空、关闭或导入的目标，需要逐次传入 `confirm_high_impact=true`，或设置
+`EASY_UIAUTO_MCP_ALLOW_HIGH_IMPACT=1`。全局输入录制默认禁用，只有 MCP 子进程明确设置
+`EASY_UIAUTO_MCP_ALLOW_RECORDING=1` 时才会启用。
+
+部分 Qt accessibility provider 会在非可编辑 ComboBox 选择或 Tree 展开时返回成功，
+但并未真正提交状态；后置条件发现状态未变化时，本项目会返回失败。物理鼠标/键盘回退仍
+依赖 Windows 前台输入权限，在阻止 `SendInput` 的会话中不能保证可用。
 
 ## 快速示例
 

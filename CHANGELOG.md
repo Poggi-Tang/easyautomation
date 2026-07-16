@@ -10,7 +10,10 @@ The format is based on Keep a Changelog and is maintained automatically by Seman
 
 - Working `easy-uiauto` CLI and optional local stdio MCP server
 - Dedicated MCP UIAutomation worker thread, JSON control snapshots, TTL references, and safety policy
+- Paginated child listing, bounded control trees, cache/reference tools, verified actions, and dry runs
+- MCP recording and click-through highlight sessions with isolated highlight worker processes
 - Native Win32 and Qt fixtures plus Explorer, desktop/taskbar, and reversible SimuNPS integration tests
+- MCP stdio integration tests for Win32, Qt, recording lifecycle, and reversible SimuNPS actions
 - Semantic Toggle, Selection, Expand/Collapse, scroll, and image-control actions
 
 ### Changed
@@ -18,6 +21,7 @@ The format is based on Keep a Changelog and is maintained automatically by Seman
 - XPath replay validates structure, uses exact depth, preserves desktop-root semantics, and verifies indexed cache entries
 - Recording preserves click/drag offsets, handles consecutive shortcuts and horizontal scrolling, and rejects incomplete drags
 - UI highlighting and recording cleanup tolerate transient command, listener, and Tk refresh failures
+- Tk overlays run in dedicated interpreter processes instead of background threads
 - Release workflow is manual; normal development pushes do not publish a Python package
 
 ### Fixed
@@ -26,6 +30,7 @@ The format is based on Keep a Changelog and is maintained automatically by Seman
 - Mouse release cleanup, background-window physical input, clipboard restoration, and failed-locator keyboard continuation
 - False double-click merging, stale indexed cache reuse, parent-window image lookup, and Win+D lookup side effects
 - Desktop/taskbar XPath depth, scoped combo-box selection, tri-state toggle verification, and text replacement fallback
+- Qt provider false-success detection, stable control references, structured MCP postconditions, and session cleanup
 
 ## [0.1.0] - 2026-03-16
 

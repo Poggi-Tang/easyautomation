@@ -69,13 +69,29 @@ pip install -e .[mcp]
 easy-uiauto-mcp
 ```
 
-The MCP server exposes `list_windows`, `find_control`, `inspect_control`, and
-`perform_action`. UIAutomation/COM objects stay on one worker thread; tools return JSON
-snapshots and short-lived control references only.
+The MCP server exposes discovery and inspection tools (`list_windows`, `find_control`,
+`inspect_control`, `list_children`, `get_control_tree`), cache/reference maintenance
+(`cache_stats`, `clear_caches`, `invalidate_control`), recording and highlight sessions,
+and `perform_action`. UIAutomation/COM objects stay on one worker thread; tools return JSON
+snapshots and short-lived control references only. Tk highlight overlays run in a separate
+interpreter process so they can be started and stopped safely from stdio MCP clients.
+
+`perform_action` supports dry runs, before/after snapshots, an optional observed control,
+and dotted-path postconditions. A successful provider return is not treated as proof that
+the desktop state changed: value, toggle, selection, and expand/collapse actions are checked
+against the resulting UI Automation state whenever the provider exposes it.
 
 High-risk shortcuts, held mouse buttons, and drag operations are blocked by default.
 Set `EASY_UIAUTO_MCP_ALLOW_HIGH_RISK=1` to enable them. Image paths are blocked unless
-`EASY_UIAUTO_MCP_ALLOW_IMAGE_PATHS=1` is set.
+`EASY_UIAUTO_MCP_ALLOW_IMAGE_PATHS=1` is set. Targets that look like run, compile, delete,
+clear, close, or import actions require `confirm_high_impact=true` per call, or
+`EASY_UIAUTO_MCP_ALLOW_HIGH_IMPACT=1`. Global input recording is disabled unless the MCP
+child process is explicitly started with `EASY_UIAUTO_MCP_ALLOW_RECORDING=1`.
+
+Some Qt accessibility providers report success without committing non-editable combo-box
+selection or tree expansion. These cases are returned as failures when postcondition checks
+show unchanged state. Physical mouse/keyboard fallback still depends on Windows foreground
+input permissions and cannot be guaranteed in a session that blocks `SendInput`.
 
 ## Quick Start
 
