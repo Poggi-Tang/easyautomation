@@ -3,21 +3,43 @@
 # @Author:          tang
 # @LastEditDate:    2025/9/30-9:44
 # @depict:          通用字典、函数
+import ast
 import ctypes
+import logging
 import sys
 import threading
 import time
+from dataclasses import dataclass
 from datetime import datetime
 from functools import wraps
+from pathlib import Path
+from typing import Any
 
 import pyautogui
 import pygetwindow as gw
 import uiautomation
-from comtypes import CoUninitialize, CoInitialize
+
+_UIA_THREAD_STATE = threading.local()
+LOGGER = logging.getLogger("easy_uiauto")
+if not LOGGER.handlers:
+    _handler = logging.StreamHandler(sys.stderr)
+    _handler.setFormatter(logging.Formatter("%(message)s"))
+    LOGGER.addHandler(_handler)
+LOGGER.setLevel(logging.INFO)
+LOGGER.propagate = False
+
+
+def ensure_uiautomation_thread():
+    """Initialize UIAutomation once for the current thread."""
+    initializer = getattr(_UIA_THREAD_STATE, "initializer", None)
+    if initializer is None:
+        initializer = uiautomation.UIAutomationInitializerInThread()
+        _UIA_THREAD_STATE.initializer = initializer
+    return initializer
 
 # 虚拟按键
 MODIFIER_VK = {
-    160, 161, 162, 163, 164, 165  # 修饰键（Shift、Ctrl、Alt等）的虚拟键码集合
+    91, 92, 160, 161, 162, 163, 164, 165  # Win、Shift、Ctrl、Alt
 }
 VK_KEY_NAME = {
     # ===================数字=====================#
@@ -156,7 +178,7 @@ INPUT_VK_KEY = [  # 可输入的虚拟键码列表
     109, 110, 111, 186, 187, 188, 189, 190,
     191, 192, 219, 220, 221, 222]
 # 当前软件名称
-CURRENT_APP_NAME = 'uiautomation'
+CURRENT_APP_NAME = None
 CONTROL_TYPE_IDS = {  # 控件类型名称到ID的映射字典
     'AppBarControl': 50040,
     'ButtonControl': 50000,
@@ -219,13 +241,14 @@ CONTAINER_TYPE_NAMES = [  # 容器类型控件名称列表
     'TabControl',
 ]
 # 控件缓存
-CONTROL_CACHE = {}  # 控件缓存字典，存储XPath到控件的映射
-CACHE_METADATA = {}  # 缓存元数据字典
-CACHE_QUEUE = []  # 缓存队列，用于异步处理
+CONTROL_CACHE: dict[str, object] = {}  # 控件缓存字典，存储XPath到控件的映射
+CACHE_METADATA: dict[str, dict[str, object]] = {}  # 缓存元数据字典
+CACHE_QUEUE: list[tuple[str, object]] = []  # 缓存队列，用于异步处理
 CACHE_PROCESSING = False  # 缓存处理状态标志
-CONTROL_CACHE_TIMEOUT = 5000  # 控件缓存超时时间（毫秒）
+CONTROL_CACHE_TIMEOUT = 5.0  # 控件缓存超时时间（秒）
+CACHE_LOCK = threading.RLock()
 # 编译缓存
-APP = []  # 应用程序列表
+APP: list[str] = []  # 应用程序列表
 COMPILE_COUNT = 0  # 编译计数器
 COMPILE_PROGRESS = 120  # 编译进度基准值
 
@@ -238,7 +261,7 @@ def timeit(func):
         start_time = time.perf_counter()  # 高精度计时开始
         result = func(*args, **kwargs)  # 执行目标函数
         elapsed = time.perf_counter() - start_time  # 计算耗时
-        push_message(f"[计时] {func.__name__} 执行耗时: {elapsed * 1000:.3f} 毫秒")
+        LOGGER.debug("[计时] %s 执行耗时: %.3f 毫秒", func.__name__, elapsed * 1000)
         return result  # 返回原函数结果
 
     return wrapper
@@ -252,10 +275,11 @@ def push_message(log, log_path=''):
     :param log_path: 保存文件路径
     :return:
     """
-    print(log)
+    message = str(log)
+    LOGGER.info(message)
     if log_path:
         with open(log_path, 'a', encoding='utf-8') as file:
-            file.write(log)
+            file.write(message + "\n")
     return
 
 
@@ -299,55 +323,40 @@ def set_top_window(window_title):
     :param window_title:
     :return: 激活结果 通过True 失败False
     """
-    try:
-        # 使用uiautomation检查
-        window = uiautomation.WindowControl(Name=window_title, searchDepth=1)
-        if window.Exists(0):
-            window_title = get_window_title_by_handle(window.NativeWindowHandle)
-            if window.FrameworkId == 'Win32':
-                windows = gw.getWindowsWithTitle(window_title)
-                if windows:
-                    for window in windows:
-                        if window.title == window_title:
-                            window.activate()
-                            # time.sleep(0.2)
-                            active_window = gw.getActiveWindow()
-                            if active_window and active_window.title == window_title:
-                                push_message(f"使用pygetwindow激活成功")
-                                return True
-                push_message(f"未找到窗口")
-                return False
-            elif 'dialog' in window.Name or window.ClassName == 'Window':
-                push_message("对话框不支持激活")
-                return False
-            elif 'Menu' in window.Name or 'Menu' in window.ClassName:
-                push_message("菜单不支持激活")
-                return False
-            elif window.GetTopLevelControl() != window:
-                push_message("非主窗口不支持激活")
-                return False
-            window.SetActive()
-            # time.sleep(0.2)
-            active_window = gw.getActiveWindow()
-            if active_window and active_window.title in window_title:
-                push_message(f"使用uiautomation激活成功")
-                return True
-            push_message(f"激活失败，尝试通过pygetwindow激活")
-        windows = gw.getWindowsWithTitle(window_title)
-        if windows:
-            for window in windows:
-                if window.title == window_title:
-                    window.activate()
-                    time.sleep(0.2)
-                    active_window = gw.getActiveWindow()
-                    if active_window and active_window.title == window_title:
-                        push_message(f"使用pygetwindow激活成功")
-                        return True
-        push_message(f"未找到窗口")
+    if not window_title:
         return False
-    except Exception as e:
-        if "无效的窗口句柄" not in e:
-            push_message(f"激活异常{e}")
+    try:
+        ensure_uiautomation_thread()
+        window = uiautomation.WindowControl(Name=window_title, searchDepth=1)
+        if not window.Exists(0):
+            return False
+        handle = int(window.NativeWindowHandle or 0)
+        user32 = ctypes.windll.user32
+        if handle:
+            if user32.IsIconic(handle):
+                user32.ShowWindow(handle, 9)
+            try:
+                window.SetActive()
+            except Exception:
+                user32.SetForegroundWindow(handle)
+            if int(user32.GetForegroundWindow() or 0) == handle:
+                return True
+
+        real_title = get_window_title_by_handle(handle) or window_title
+        for candidate in gw.getWindowsWithTitle(real_title):
+            if candidate.title != real_title:
+                continue
+            candidate_handle = int(getattr(candidate, "_hWnd", 0) or 0)
+            if handle and candidate_handle != handle:
+                continue
+            try:
+                candidate.activate()
+            except Exception:
+                continue
+            if int(user32.GetForegroundWindow() or 0) == (handle or candidate_handle):
+                return True
+        return False
+    except Exception:
         return False
 
 
@@ -358,11 +367,11 @@ def get_control_info(x, y):
     :param y: 纵坐标
     :return: 控件Xpath、控件
     """
-    uiautomation.SetGlobalSearchTimeout(3)
-    CoInitialize()
-
+    ensure_uiautomation_thread()
     try:
         control = uiautomation.ControlFromPoint(x, y)
+        if control is None:
+            return [], None
         child = control.GetFirstChildControl()
         while child:
             # print(child)
@@ -375,12 +384,23 @@ def get_control_info(x, y):
             else:
                 break
         xpath = get_control_xpath(control, x, y)
-        CoUninitialize()
         return xpath, control
 
     except Exception as e:
         push_message(f"获取控件信息异常: {e}")
-        CoUninitialize()
+        return [], None
+
+
+def get_focused_control_info():
+    """Return the focused control's XPath and Control in the current thread."""
+    ensure_uiautomation_thread()
+    try:
+        control = uiautomation.GetFocusedControl()
+        if control is None:
+            return [], None
+        return get_control_xpath(control), control
+    except Exception as exc:
+        push_message(f"获取焦点控件异常: {exc}")
         return [], None
 
 
@@ -389,25 +409,27 @@ def auto_scroll(pixels, duration=0, direction='down'):
     滚动鼠标
     :param pixels: 滚动距离(像素)
     :param duration: 滚动持续时间(秒)
-    :param direction: 滚动方向('up'或'down')
+    :param direction: 滚动方向('up'、'down'、'left'或'right')
     """
-    try:
-        if direction.lower() not in ['up', 'down']:
-            raise ValueError("方向参数必须是'up'或'down'")
-
-        scroll = -pixels if direction == 'up' else pixels
-        pyautogui.scroll(scroll, _pause=False)
-        if duration > 0:
-            time.sleep(duration)
-        # push_message(f"已滚动{scroll}像素")
-    except Exception as e:
-        push_message(f"发生错误: {e}")
+    normalized = direction.lower()
+    if normalized not in {'up', 'down', 'left', 'right'}:
+        raise ValueError("方向参数必须是'up'、'down'、'left'或'right'")
+    amount = abs(int(pixels))
+    if normalized in {'up', 'down'}:
+        pyautogui.scroll(amount if normalized == 'up' else -amount, _pause=False)
+    else:
+        pyautogui.hscroll(amount if normalized == 'right' else -amount, _pause=False)
+    if duration > 0:
+        time.sleep(duration)
 
 
 # #######################编译#############################
 def set_global_control_cache_timeout(seconds):
     """设置全局控件缓存超时时间"""
     global CONTROL_CACHE_TIMEOUT
+    seconds = float(seconds)
+    if seconds < 0:
+        raise ValueError("缓存超时时间不能为负数")
     CONTROL_CACHE_TIMEOUT = seconds
 
 
@@ -419,81 +441,107 @@ def compile_controls(control=None, max_depth=15, compile_log=False):
     :param max_depth: 最大遍历深度
     :param compile_log: 编译日志
     """
+    if max_depth < 1:
+        raise ValueError("max_depth 必须大于 0")
     push_message(f"\n编译开始预计耗时：{max_depth * 0.8}秒")
-    uiautomation.SetGlobalSearchTimeout(1)
-    global COMPILE_PROGRESS
-    COMPILE_PROGRESS = COMPILE_PROGRESS * max_depth
+    ensure_uiautomation_thread()
+    global COMPILE_COUNT, COMPILE_PROGRESS
+    COMPILE_COUNT = 0
+    COMPILE_PROGRESS = max(1, 120 * max_depth)
+    APP.clear()
     if control is None:
-        compile_app = uiautomation.GetRootControl().GetChildren()
-        for app in compile_app:
-            xpath = get_control_xpath(app)[1:]
-            _recursive_cache_controls(app, xpath, max_depth, 1, compile_log)
+        for app in uiautomation.GetRootControl().GetChildren():
+            _recursive_cache_controls(app, [], max_depth, 1, compile_log)
     else:
-        xpath = get_control_xpath(control)[1:]
-        _recursive_cache_controls(control, xpath, max_depth, 1, compile_log)
-
-    uiautomation.SetGlobalSearchTimeout(5)
-    sys.stdout.write("\r编译进度: |%s%s| %d%%" % ('█' * int(100), ' ' * (100 - int(100)), 100))
-    sys.stdout.flush()
+        parent = control.GetParentControl()
+        parent_xpath = get_control_xpath(parent) if parent else []
+        _recursive_cache_controls(control, parent_xpath, max_depth, 1, compile_log)
+    if compile_log:
+        push_message("编译进度: 100%")
     push_message(f"\n编译完成，已添加 {len(CONTROL_CACHE)} 个控件")
 
 
 def generate_cache_keys(xpath):
-    """
-    生成XPath路径的缓存键，每个控件生成两个key：
-    1. 带foundIndex的key（用于精确匹配）
-    2. 不带foundIndex的key（用于备选匹配）
-    """
-    keys_with_foundindex = []
-    keys_without_foundindex = []
+    """生成带索引和不带索引的稳定 XPath 缓存键。"""
+    return _build_cache_key(xpath, True), _build_cache_key(xpath, False)
 
-    for item in xpath:
-        if item.get('ControlType') not in {'DesktopControl', 'CustomControl', 'GroupControl'} and \
-                item.get('ClassName') not in {'QWidget',
-                                              'GroupControl',
-                                              'CustomControl',
-                                              'WindowControl', '#32769'}:
-            # 生成带foundIndex的key
-            item_keys_with = []
-            if item.get('ControlType'):
-                ControlType = uiautomation.ControlTypeNames.get(item['ControlType'], item['ControlType'])
-                item_keys_with.append(ControlType)
-            if item.get('Name'):
-                item_keys_with.append(f"Name:{item['Name']}")
-            if item.get('ClassName'):
-                item_keys_with.append(f"ClassName:{item['ClassName']}")
-            if item.get('AutomationId'):
-                item_keys_with.append(f"AutomationId:{item['AutomationId']}")
-            if 'searchDepth' in item:
-                item_keys_with.append(f"searchDepth:{str(item['searchDepth'])}")
-            # 只有当foundIndex存在且大于0时才添加
-            if item.get('foundIndex'):
-                item_keys_with.append(f"foundIndex:{str(item['foundIndex'])}")
 
-            key_with = ",".join(item_keys_with)
-            keys_with_foundindex.append(key_with)
+def _build_cache_key(xpath, include_found_index):
+    parts = []
+    for item in xpath or []:
+        control_type = item.get("ControlType", "")
+        if isinstance(control_type, int):
+            control_type = uiautomation.ControlTypeNames.get(control_type, str(control_type))
+        fields = [
+            ("ControlType", control_type),
+            ("Name", item.get("Name", "")),
+            ("ClassName", item.get("ClassName", "")),
+            ("AutomationId", item.get("AutomationId", "")),
+            ("searchDepth", item.get("searchDepth", 1)),
+        ]
+        if include_found_index:
+            fields.append(("foundIndex", item.get("foundIndex", 1)))
+        encoded = ",".join(f"{name}:{value!r}" for name, value in fields)
+        parts.append(encoded)
+    return "|".join(parts)
 
-            # 生成不带foundIndex的key（移除foundIndex字段）
-            item_keys_without = item_keys_with[:]
-            # 如果有foundIndex字段，则从不带foundIndex的key中移除
-            for i, key_part in enumerate(item_keys_without):
-                if key_part.startswith("foundIndex:"):
-                    item_keys_without.pop(i)
-                    break
 
-            key_without = ",".join(item_keys_without)
-            keys_without_foundindex.append(key_without)
+def _store_cached_control(cache_key, control):
+    with CACHE_LOCK:
+        CONTROL_CACHE[cache_key] = control
+        CACHE_METADATA[cache_key] = {
+            "last_verified": time.monotonic(),
+            "window_handle": getattr(control, "NativeWindowHandle", 0),
+            "thread_id": threading.get_ident(),
+            "signature": _control_signature(control),
+        }
 
-    # 返回两个完整路径键
-    return "|".join(keys_with_foundindex), "|".join(keys_without_foundindex)
+
+def _get_cached_control(cache_key):
+    with CACHE_LOCK:
+        control = CONTROL_CACHE.get(cache_key)
+        metadata = CACHE_METADATA.get(cache_key)
+        if control is None or metadata is None:
+            return None
+        if metadata.get("thread_id") != threading.get_ident():
+            return None
+        last_verified = metadata.get("last_verified", 0.0)
+        if not isinstance(last_verified, (int, float)):
+            return None
+        age = time.monotonic() - last_verified
+        if CONTROL_CACHE_TIMEOUT and age > CONTROL_CACHE_TIMEOUT:
+            CONTROL_CACHE.pop(cache_key, None)
+            CACHE_METADATA.pop(cache_key, None)
+            return None
+    try:
+        if hasattr(control, "Exists") and not control.Exists(0):
+            raise LookupError("cached control no longer exists")
+        if metadata.get("signature") != _control_signature(control):
+            raise LookupError("cached control identity changed")
+        get_control_coordinates(control)
+    except Exception:
+        with CACHE_LOCK:
+            CONTROL_CACHE.pop(cache_key, None)
+            CACHE_METADATA.pop(cache_key, None)
+        return None
+    with CACHE_LOCK:
+        CACHE_METADATA[cache_key]["last_verified"] = time.monotonic()
+    return control
+
+
+def _control_signature(control):
+    return tuple(
+        getattr(control, attr, "")
+        for attr in ("ControlTypeName", "Name", "ClassName", "AutomationId", "NativeWindowHandle")
+    )
 
 
 def _recursive_cache_controls(ctrl, parent_xpath, max_depth, current_depth, compile_log=False):
     """递归缓存控件及其子控件"""
     global COMPILE_COUNT, COMPILE_PROGRESS
-    progress = (COMPILE_COUNT / COMPILE_PROGRESS) * 100
-    sys.stdout.write("\r编译进度: |%s%s| %d%%" % ('█' * int(progress), ' ' * (100 - int(progress)), progress))
-    sys.stdout.flush()
+    progress = min(100, (COMPILE_COUNT / COMPILE_PROGRESS) * 100)
+    if compile_log:
+        push_message(f"编译进度: {int(progress)}%")
     if current_depth > max_depth:
         return
 
@@ -538,15 +586,15 @@ def _recursive_cache_controls(ctrl, parent_xpath, max_depth, current_depth, comp
         if compile_log:
             push_message(f"编译控件：{current_info}")
         # 同时缓存两个key指向同一个控件
-        CONTROL_CACHE[key_with] = ctrl
-        CONTROL_CACHE[key_without] = ctrl
+        _store_cached_control(key_with, ctrl)
+        _store_cached_control(key_without, ctrl)
         COMPILE_COUNT += 1
         if current_depth < max_depth:
             try:
                 children = ctrl.GetChildren()
-                for idx, child in enumerate(children):
+                for child in children:
                     _recursive_cache_controls(child, ctrl_xpath, max_depth, current_depth + 1, compile_log)
-            except Exception as e:
+            except Exception:
                 # 获取子控件失败时不中断流程
                 pass
 
@@ -577,162 +625,102 @@ def _cache_sibling_controls(parent_ctrl, parent_xpath):
 
 def _async_cache_control(cache_key, control):
     """异步添加控件到缓存"""
-    global CACHE_PROCESSING
-    CACHE_QUEUE.append((cache_key, control))
-    if not CACHE_PROCESSING:
-        CACHE_PROCESSING = True
-        threading.Thread(target=_process_cache_queue, daemon=True).start()
+    _store_cached_control(cache_key, control)
 
 
 def _process_cache_queue():
     """处理缓存队列"""
     global CACHE_PROCESSING
-    while CACHE_QUEUE:
-        cache_key, control = CACHE_QUEUE.pop(0)
-        if cache_key not in CONTROL_CACHE:
-            CONTROL_CACHE[cache_key] = control
-            CACHE_METADATA[cache_key] = {
-                'last_verified': time.time(),
-                'window_handle': getattr(control, 'NativeWindowHandle', 0)
-            }
-        time.sleep(0.001)
-    CACHE_PROCESSING = False
+    try:
+        while True:
+            with CACHE_LOCK:
+                if not CACHE_QUEUE:
+                    break
+                cache_key, control = CACHE_QUEUE.pop(0)
+            if _get_cached_control(cache_key) is None:
+                _store_cached_control(cache_key, control)
+            time.sleep(0.001)
+    finally:
+        with CACHE_LOCK:
+            CACHE_PROCESSING = False
 
 
 def generate_cache_key(xpath):
     """生成XPath路径的缓存键"""
-    key_parts = []
-    for item in xpath:
-        item_key = (
-            f"ControlType:{item.get('ControlType', '')},"
-            f"Name:{item.get('Name', '')},"
-            f"ClassName:{item.get('ClassName', '')},"
-            f"AutomationId:{item.get('AutomationId', '')},"
-            f"searchDepth:{item.get('searchDepth', 0)}"
-        )
-        key_parts.append(item_key)
-    return "|".join(key_parts)
+    return _build_cache_key(xpath, True)
 
-def _brothers(ctrl):
-    while 10:
-        children = ctrl.GetChildren()
-        if len( children)>1:
-            return  children
-        if len(children)==1:
-            ctrl = children[0]
-        else:
-            return  ctrl
-
-# @timeit
-def find_control_by_xpath(xpath,debug=False):
-    """通过控件的Xpath路径获取控件"""
+def find_control_by_xpath(xpath, debug=False, use_cache=True):
+    """通过完整 XPath 顺序定位控件，并使用带过期校验的缓存。"""
+    ensure_uiautomation_thread()
+    xpath = _parse_xpath(xpath)
+    if not xpath:
+        return None
     key_with, key_without = generate_cache_keys(xpath)
-    try:
-        # current_ctrl = CONTROL_CACHE.get(key1,CONTROL_CACHE.get(key2,None))
-        current_ctrl = CONTROL_CACHE.get(key_with, None)
-        if current_ctrl:
-            # 快速检测
-            isExists = current_ctrl.ControlType
-            # 计算控件可见区域
-            rect = get_check_point_by_control(current_ctrl)
-            if rect.check_pos != (0, 0):
-                # 检测成功
-                if debug:
-                    push_message("使用缓存", current_ctrl)
-                return current_ctrl
-        raise Exception("使用缓存失败，重新建立缓存")
-    except Exception as e:
-        # push_message(e)
-        try:
-            current_ctrl = uiautomation.GetRootControl()
-            last_ctrl = current_ctrl
-            # 创建xpath的副本，避免修改原始数据
-            xpath_copy = [item.copy() for item in xpath]
-            for i, item in enumerate(xpath_copy):
-                item_name = item.get('Name', '')
-                item_class = item.get('ClassName', '')
-                item_type = item.get('ControlType', '')
-                if i != len(xpath_copy) - 1 and item_type in {"CustomControl", "GroupControl"} or item_class in {'#32769'}:
-                    continue
-                if "Area" in item_name or "Area" in item_class or "Splitter" in item_name or "Splitter" in item_class:
-                    continue
-                item_foundIndex = item.get('foundIndex', -1)
-                if item_foundIndex in [0, 1]:
-                    del xpath_copy[i]['foundIndex']
-                item_automation = item.get('AutomationId', -1)
-                if item_automation == '':
-                    del xpath_copy[i]['AutomationId']
-                # ===============节点类型直接匹配===============
-                if item_type in ITEM_TYPE_NAMES or item_foundIndex not in [-1, 0, 1]:
-                    # brothers = current_ctrl.GetChildren()
-                    brothers = _brothers(current_ctrl)
-                    found_index = 1
-                    matched = {}
-                    for brother in brothers:
-                        if brother.ControlTypeName == item['ControlType']:
-                            if brother.Name == item.get('Name', '') and \
-                                    brother.ClassName == item.get('ClassName', '') \
-                                    and brother.AutomationId == item.get('AutomationId', ''):
-                                matched[found_index] = brother
-                            found_index += 1
-                    matched_keys = list(matched.keys())
-                    matched_keys_count = len(matched_keys)
-                    if matched_keys_count == 1:
-                        current_ctrl = matched[matched_keys[0]]
-                        CONTROL_CACHE[key_with] = current_ctrl
-                        CONTROL_CACHE[key_without] = current_ctrl
-                        if debug:
-                            push_message(f'第【{i}】层{current_ctrl}')
-                        return current_ctrl
-                    elif matched_keys_count > 1:
-                        index = item.get('foundIndex', 0)
-                        if index <= 1:
-                            current_ctrl = matched[matched_keys[0]]
-                        elif index in matched_keys:
-                            current_ctrl = matched[index]
-                        else:
-                            current_ctrl = matched[matched_keys[-1]]
-                        if current_ctrl is None:
-                            # 均未找到匹配的index就返回第一个
-                            current_ctrl = matched[matched_keys[0]]
-                        CONTROL_CACHE[key_with] = current_ctrl
-                        CONTROL_CACHE[key_without] = current_ctrl
-                        if debug:
-                            push_message('添加缓存2', current_ctrl)
-                        current_ctrl = CONTROL_CACHE.get(key_with, CONTROL_CACHE.get(key_without, None))
-                        if debug:
-                            push_message("重新使用缓存", current_ctrl)
-                            push_message(f'第【{i}】层{current_ctrl}')
-                        return current_ctrl
-                    else:
-                        if debug:
-                            push_message(f'定位失败，使用上一级控件\n    {last_ctrl}\n')
-                        return last_ctrl
-                # ===============匹配程序（root、Win32/Qt）===============
-                abs_model = True  # qt
-                TopLeve = last_ctrl.GetTopLevelControl()
-                if TopLeve:
-                    if TopLeve.FrameworkId == 'Win32':
-                        abs_model = False
-                else:  # root
-                    abs_model = False
+    cached = _get_cached_control(key_with) if use_cache else None
+    if (
+        use_cache
+        and cached is None
+        and all(int(item.get("foundIndex", 1) or 1) <= 1 for item in xpath)
+    ):
+        cached = _get_cached_control(key_without)
+    if cached is not None:
+        if any("foundIndex" in item for item in xpath):
+            fresh = _find_control_from_root(xpath, debug=debug)
+            try:
+                same = fresh is not None and uiautomation.ControlsAreSame(cached, fresh)
+            except Exception:
+                same = cached is fresh
+            if not same:
+                with CACHE_LOCK:
+                    CONTROL_CACHE.pop(key_with, None)
+                    CACHE_METADATA.pop(key_with, None)
+                    CONTROL_CACHE.pop(key_without, None)
+                    CACHE_METADATA.pop(key_without, None)
+                cached = None
+        if cached is None:
+            return find_control_by_xpath(xpath, debug=debug, use_cache=False)
+        if debug:
+            push_message(f"使用缓存: {cached}")
+        return cached
 
-                if abs_model:
-                    xpath_copy[i]['ControlType'] = CONTROL_TYPE_IDS[xpath_copy[i]['ControlType']]
-                    current_ctrl = current_ctrl.Control(**xpath_copy[i])
-                else:
-                    xpath_copy[i]['ControlType'] = CONTROL_TYPE_IDS[xpath_copy[i]['ControlType']]
-                    if 'foundIndex' in xpath_copy[i]:
-                        del xpath_copy[i]['foundIndex']
-                    current_ctrl = current_ctrl.Control(**xpath_copy[i])
-                if debug:
-                    push_message(f'第【{i}】层{current_ctrl}')
-                last_ctrl = current_ctrl
-            CONTROL_CACHE[key_with] = current_ctrl
-            CONTROL_CACHE[key_without] = current_ctrl
-            return current_ctrl
-        except Exception as e:
-            push_message(e)
+    control = _find_control_from_root(xpath, debug=debug)
+    if use_cache and control is not None:
+        _store_cached_control(key_with, control)
+        if all(int(item.get("foundIndex", 1) or 1) <= 1 for item in xpath):
+            _store_cached_control(key_without, control)
+    return control
+
+
+def _find_control_from_root(xpath, debug=False):
+    current: Any = uiautomation.GetRootControl()
+    try:
+        for index, item in enumerate(xpath):
+            if not isinstance(item, dict):
+                raise ValueError("XPath 节点必须是字典")
+            control_type_name = item.get("ControlType")
+            if control_type_name not in CONTROL_TYPE_IDS:
+                raise ValueError(f"未知控件类型: {control_type_name}")
+            conditions: dict[str, Any] = {
+                "ControlType": CONTROL_TYPE_IDS[control_type_name],
+                "foundIndex": max(1, int(item.get("foundIndex", 1) or 1)),
+            }
+            depth = max(1, int(item.get("searchDepth", 1) or 1))
+            conditions["searchDepth"] = depth
+            conditions["Depth"] = depth
+            for field in ("Name", "ClassName", "AutomationId"):
+                value = item.get(field)
+                if value not in (None, ""):
+                    conditions[field] = value
+            current = current.Control(**conditions)
+            if not current.Refind(maxSearchSeconds=0, raiseException=False):
+                return None
+            if debug:
+                push_message(f"第【{index}】层: {current}")
+        return current
+    except (AttributeError, LookupError, TypeError, ValueError) as exc:
+        if debug:
+            push_message(f"XPath 定位失败: {exc}")
+        return None
 
 
 def get_control_xpath(control, x=None, y=None):
@@ -744,70 +732,87 @@ def get_control_xpath(control, x=None, y=None):
     :return: Xpath
     """
 
-    xpath = []
-    over_tag = False
-    search_depth = 0
-    search_depth_list = []
-    # desktop = True
+    if control is None:
+        return []
 
-    while control:
-        foundIndex = 0
-        search_depth += 1
-        if control.ControlTypeName not in {'DesktopControl'} and \
-                control.ClassName not in {'QWidget',
-                                          'GroupControl',
-                                          'CustomControl',
-                                          'WindowControl', '#32769'}:
-            if control.ControlTypeName in ITEM_TYPE_NAMES:
-                for child in control.GetParentControl().GetChildren():
-                    if child.ControlType == control.ControlType:
-                        foundIndex += 1
-                    if child.Name == control.Name:
-                        if x and y:
-                            boundingRect = child.BoundingRectangle
-                            if boundingRect.left <= x <= boundingRect.right and boundingRect.top <= y <= boundingRect.bottom:
-                                control = child
-                                break
-                        else:
-                            control = child
-            current_control_info = {
-                "ControlType": control.ControlTypeName,
-            }
-
-            if control.Name:
-                current_control_info['Name'] = control.Name
-            if control.ClassName:
-                current_control_info['ClassName'] = control.ClassName
-            if control.AutomationId:
-                current_control_info['AutomationId'] = control.AutomationId
-            if foundIndex != 0:
-                current_control_info['foundIndex'] = foundIndex
-            # else:
-            #     current_control_info['foundIndex'] = 1
-
-            xpath.append(current_control_info)
-            search_depth_list.append(search_depth)
-
-        control = control.GetParentControl()
-        if over_tag:
+    raw_path = []
+    current = control
+    seen = set()
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        raw_path.append(current)
+        if getattr(current, "ControlTypeName", "") == "DesktopControl":
             break
-        parent = control.GetParentControl()
-        if control and parent:
-            if control.ControlTypeName == 'WindowControl' and \
-                    parent.ControlTypeName not in [
-                'TableControl', 'ListControl', 'TreeControl', 'TabControl', 'WindowControl', 'GroupControl', 'CustomControl']:
-                # print(control.GetParentControl())
-                over_tag = True
-        else:
-            over_tag = True
+        try:
+            current = current.GetParentControl()
+        except Exception:
+            break
+    raw_path.reverse()
 
-    # if xpath and xpath[0].get('ClassName', '') == '#32769' and desktop:
-    #     xpath = xpath[1:]
-    xpath = xpath[::-1]
-    for index in range(len(xpath)):
-        xpath[index]['searchDepth'] = search_depth_list[index]
+    xpath = []
+    depth_since_last = 0
+    for current in raw_path:
+        control_type = getattr(current, "ControlTypeName", "")
+        class_name = getattr(current, "ClassName", "")
+        if control_type == "DesktopControl" or class_name == "#32769":
+            continue
+        depth_since_last += 1
+        if control_type in {"CustomControl", "GroupControl"} or class_name in {
+            "QWidget",
+            "GroupControl",
+            "CustomControl",
+            "WindowControl",
+        }:
+            continue
 
+        info = {"ControlType": control_type, "searchDepth": depth_since_last}
+        for attr, key in (
+            ("Name", "Name"),
+            ("ClassName", "ClassName"),
+            ("AutomationId", "AutomationId"),
+        ):
+            value = getattr(current, attr, "")
+            if value:
+                info[key] = value
+        found_index = _control_found_index(current, x=x, y=y)
+        if found_index > 1 or control_type in ITEM_TYPE_NAMES:
+            info["foundIndex"] = found_index
+        xpath.append(info)
+        depth_since_last = 0
     return xpath
+
+
+def _control_found_index(control, x=None, y=None):
+    try:
+        parent = control.GetParentControl()
+        siblings = parent.GetChildren() if parent else []
+    except Exception:
+        return 1
+    matched_index = 0
+    identity_attributes = ["ControlTypeName"]
+    identity_attributes.extend(
+        attr
+        for attr in ("Name", "ClassName", "AutomationId")
+        if getattr(control, attr, "") not in (None, "")
+    )
+    for sibling in siblings:
+        if any(
+            getattr(sibling, attr, "") != getattr(control, attr, "")
+            for attr in identity_attributes
+        ):
+            continue
+        matched_index += 1
+        try:
+            if uiautomation.ControlsAreSame(sibling, control):
+                return matched_index
+        except Exception:
+            if sibling is control:
+                return matched_index
+        if x is not None and y is not None:
+            rect = sibling.BoundingRectangle
+            if rect.left <= x <= rect.right and rect.top <= y <= rect.bottom:
+                return matched_index
+    return max(1, matched_index)
 
 
 def redirect_control(name, ctrl):
@@ -840,65 +845,96 @@ def redirect_control(name, ctrl):
 #     pass
 # auto.Logger.Write = log_decorator(auto.Logger.Write)
 # ########################################################
-def strategy_xpath(name, class_name, control_type, Xpath,debug=False):
+def strategy_xpath(name, class_name, control_type, Xpath, debug=False, automation_id=""):
+    """使用 XPath 定位；虚拟化列表节点会进行有限次数滚动重试。"""
+    if not Xpath:
+        return None
     try:
-        ctrl = find_control_by_xpath(Xpath, debug)
+        control = find_control_by_xpath(Xpath, debug)
+        if _control_matches(control, name, class_name, control_type, automation_id):
+            return control
+        if control_type not in ITEM_TYPE_NAMES or len(Xpath) < 2:
+            return None
 
-        if ctrl == uiautomation:
-            return False
-        if ctrl and ctrl.ControlTypeName == control_type and ctrl.Name == name and ctrl.ClassName == class_name:
-            return ctrl
-
-        elif ctrl and control_type in ITEM_TYPE_NAMES:
-            if ctrl.ControlTypeName in ITEM_TYPE_NAMES:
-                ctrl = ctrl.GetParentControl()
-            ctrl.MoveCursorToInnerPos(simulateMove=False)
-            Children = ctrl.GetChildren()
-            ctrl_hight = ctrl.BoundingRectangle.height()
-            child_hight = Children[0].BoundingRectangle.height()
-            lastchild_name = Children[0].Name
-
-            if ctrl_hight * 0.8 < child_hight * len(Children):
-                for i in range(50):
-                    auto_scroll(500, direction='down')
-            rollsize = ctrl_hight * 0.5
-            find_count = 0
-            while True:
-                current_ctrl = find_control_by_xpath(Xpath, debug)
-                if current_ctrl and current_ctrl.ControlTypeName == control_type and current_ctrl.Name == name and current_ctrl.ClassName == class_name:
-                    ctrl = current_ctrl
-                    break
-                current_ctrl = redirect_control(name, current_ctrl)
-                if debug:
-                    push_message('重定向当前控件：{}'.format(current_ctrl))
-
-                if current_ctrl and current_ctrl.ControlTypeName == control_type and current_ctrl.Name == name and current_ctrl.ClassName == class_name:
-                    ctrl = current_ctrl
-                    break
-                auto_scroll(int(rollsize), direction='up')
-                # 校验是否滚动到底
-
-                current_lastchild_name = ctrl.GetChildren()[0].Name
-                if current_lastchild_name == lastchild_name:
-                    find_count += 1
-                    if find_count == 4:
-                        ctrl = current_ctrl
+        container = find_control_by_xpath(Xpath[:-1], debug)
+        if container is None:
+            return None
+        try:
+            scroll_pattern = container.GetScrollPattern()
+            if scroll_pattern is None:
+                return None
+            original_scroll = (
+                scroll_pattern.HorizontalScrollPercent,
+                scroll_pattern.VerticalScrollPercent,
+            )
+        except Exception:
+            return None
+        found = False
+        try:
+            for direction in ("up", "down"):
+                scroll_pattern.SetScrollPercent(*original_scroll)
+                unchanged_count = 0
+                previous_signature = None
+                amount = (
+                    uiautomation.ScrollAmount.SmallDecrement
+                    if direction == "up"
+                    else uiautomation.ScrollAmount.SmallIncrement
+                )
+                for _ in range(20):
+                    if not scroll_pattern.Scroll(
+                        uiautomation.ScrollAmount.NoAmount, amount, waitTime=0
+                    ):
                         break
-                else:
-                    find_count = 0
-                lastchild_name = current_lastchild_name
-            if debug:
-                push_message(f'策略 Xpath 滚动定位成功')
-            return ctrl
-        return False
-    except Exception as e:
+                    control = _find_control_from_root(Xpath, debug=debug)
+                    if _control_matches(
+                        control, name, class_name, control_type, automation_id
+                    ):
+                        key_with, _ = generate_cache_keys(Xpath)
+                        _store_cached_control(key_with, control)
+                        found = True
+                        return control
+                    children = container.GetChildren()
+                    signature = tuple(
+                        (
+                            getattr(child, "ControlTypeName", ""),
+                            getattr(child, "Name", ""),
+                            getattr(child, "AutomationId", ""),
+                        )
+                        for child in children[:20]
+                    )
+                    unchanged_count = (
+                        unchanged_count + 1 if signature == previous_signature else 0
+                    )
+                    previous_signature = signature
+                    if unchanged_count >= 3:
+                        break
+        finally:
+            if not found:
+                try:
+                    scroll_pattern.SetScrollPercent(*original_scroll)
+                except Exception:
+                    pass
+        return None
+    except Exception as exc:
         if debug:
-            push_message(f'策略 Xpath 错误: {str(e)}')
+            push_message(f"策略 XPath 错误: {exc}")
+        return None
+
+
+def _control_matches(control, name, class_name, control_type, automation_id=""):
+    if control is None:
         return False
+    expected = {
+        "ControlTypeName": control_type,
+        "Name": name,
+        "ClassName": class_name,
+        "AutomationId": automation_id,
+    }
+    return all(not value or getattr(control, attr, "") == value for attr, value in expected.items())
 
 
 @timeit
-def find_control(LOCATION,debug= False):
+def find_control(LOCATION, debug=False):
     """
     根据配置列表获取控件
     此版本支持Name、ClassName、Type、Xpath、foundIndex、AutomationId
@@ -913,84 +949,105 @@ def find_control(LOCATION,debug= False):
             - foundIndex: 索引位置
     :return: 控件对象或None
     """
+    ensure_uiautomation_thread()
+    if not isinstance(LOCATION, dict):
+        raise TypeError("LOCATION 必须是字典")
+
     global CURRENT_APP_NAME
+    window_name = LOCATION.get("WindowName", "") or ""
+    name = LOCATION.get("Name", "") or ""
+    class_name = LOCATION.get("ClassName", "") or ""
+    control_type = LOCATION.get("ControlType", "") or ""
+    automation_id = LOCATION.get("AutomationId", "") or ""
+    xpath = _parse_xpath(LOCATION.get("Xpath", []))
+    if xpath is None:
+        return None
 
-    WindowName, Name, ClassName, ControlTypeName, AutomationId, searchDepth, foundIndex = \
-        '', '', '', '', '', 0xFFFFFFFF, 0
-    # 参数提取与初始化
-    WindowName = LOCATION.get('WindowName', '')
-    if LOCATION.get('Name'): Name = LOCATION['Name']
-    if LOCATION.get('ClassName'): ClassName = LOCATION['ClassName']
-    if LOCATION.get('ControlType'): ControlTypeName = LOCATION['ControlType']
-    if LOCATION.get('Xpath'): xpath = LOCATION['Xpath']
-    if LOCATION.get('AutomationId'): AutomationId = LOCATION['AutomationId']
-    searchDepth = LOCATION.get('searchDepth', 0xFFFFFFFF)
-    foundIndex = LOCATION.get('foundIndex', 0)
-    push_message(f"\033[1;32m{'-' * 20}开始进行控件定位{'-' * 20}\033[0m")
-    push_message(f"\033[1;32m控件名称：{Name}\033[0m")
-    push_message(f"\033[1;32m控件类名：{ClassName}\033[0m")
-    push_message(f"\033[1;32m控件类型：{ControlTypeName}\033[0m")
-    push_message(f"\033[1;32m控件所在窗口：{WindowName}\033[0m")
+    if debug:
+        push_message(
+            f"定位控件: window={window_name!r}, name={name!r}, "
+            f"class={class_name!r}, type={control_type!r}"
+        )
 
-    # 处理Xpath格式（字符串转列表）
-    if isinstance(LOCATION.get('Xpath'), str):
-        xpath = eval(LOCATION['Xpath'])
-    else:
-        xpath = LOCATION.get('Xpath', [])
-    if 'WorkerW' == xpath[0].get('ClassName'):
-        uiautomation.SendKeys('{Win}d', 0, 0)
-        push_message("桌面已激活")
-    if WindowName and WindowName != CURRENT_APP_NAME:
-        # 激活窗口
-        if WindowName == '任务栏' or xpath[0].get('Name') == '任务栏' or xpath[0].get('ClassName') == 'Shell_TrayWnd':
-            push_message(f"Windos任务栏无需激活")
-            return True
-        if set_top_window(window_title=WindowName):
-            CURRENT_APP_NAME = WindowName
+    first_node = xpath[0] if xpath else {}
+    is_desktop = first_node.get("ClassName") == "WorkerW"
+    is_taskbar = (
+        window_name == "任务栏"
+        or first_node.get("Name") == "任务栏"
+        or first_node.get("ClassName") == "Shell_TrayWnd"
+    )
+    if window_name and not is_desktop and not is_taskbar:
+        CURRENT_APP_NAME = window_name
 
-    start_time = int(datetime.now().timestamp() * 1000)
-    control = strategy_xpath(Name, ClassName, ControlTypeName, xpath, debug)
-    if control:
-        current_time_ms = int(datetime.now().timestamp() * 1000)
-        push_message(f"[计时] strategy_dictionary 执行耗时: {current_time_ms - start_time}ms")
-        return control
-    start_time = int(datetime.now().timestamp() * 1000)
-    # 精准匹配
     if xpath:
-        window = strategy_dictionary(xpath[0])
-        if window:
-            control = strategy_dictionary(xpath[-1], window)
-            if control:
-                current_time_ms = int(datetime.now().timestamp() * 1000)
-                push_message(f"[计时] strategy_dictionary 执行耗时: {current_time_ms - start_time}ms")
-                return control
-        push_message(f"\n所有定位策略均失败，未找到控件")
-        return False
-    else:
-        window_dictionary = {'ControlType': 'WindowControl', 'Name': WindowName}
-        pane_dictionary = {'ControlType': 'PaneControl', 'Name': WindowName}
-        # control_dictionary = {'ControlType': ControlTypeName, 'Name': Name,
-        #                       'ClassName': ClassName, 'AutomationId': AutomationId,
-        #                       'searchDepth':searchDepth,'foundIndex': foundIndex}
-        control_dictionary = {'ControlType': ControlTypeName, 'Name': Name,
-                              'ClassName': ClassName, 'AutomationId': AutomationId}
-        window = strategy_dictionary(window_dictionary)
-        if window:
-            control = strategy_dictionary(control_dictionary, window)
-        else:
-            pane = strategy_dictionary(pane_dictionary)
-            if pane:
-                control = strategy_dictionary(control_dictionary, pane)
-        current_time_ms = int(datetime.now().timestamp() * 1000)
-        push_message(f"[计时] find_control_dictionary 执行耗时: {current_time_ms - start_time}ms")
-        if control:
+        control = strategy_xpath(
+            name, class_name, control_type, xpath, debug, automation_id=automation_id
+        )
+        if control is not None:
             return control
-        else:
-            push_message(f"\n所有定位策略均失败，未找到控件")
-            return False
+
+    parent = None
+    if window_name:
+        for parent_type in ("WindowControl", "PaneControl"):
+            parent = strategy_dictionary({"ControlType": parent_type, "Name": window_name})
+            if parent is not None:
+                break
+
+    target_requested = any((name, class_name, control_type, automation_id))
+    if target_requested and control_type:
+        dictionary = {
+            "ControlType": control_type,
+            "Name": name,
+            "ClassName": class_name,
+            "AutomationId": automation_id,
+            "searchDepth": LOCATION.get("searchDepth", 0xFFFFFFFF),
+            "foundIndex": LOCATION.get("foundIndex", 1),
+        }
+        if parent is not None or not window_name:
+            control = strategy_dictionary(dictionary, parent)
+            if control is not None:
+                return control
+    elif parent is not None and not target_requested and not LOCATION.get("Img"):
+        return parent
+
+    image_control = _find_image_control(LOCATION)
+    if image_control is not None:
+        return image_control
+    if debug:
+        push_message("所有定位策略均失败，未找到控件")
+    return None
 
 
-def strategy_dictionary(dictionary, Prant=uiautomation.GetRootControl(), timeout=10):
+def _parse_xpath(value):
+    if value in (None, ""):
+        return []
+    if isinstance(value, list):
+        parsed = value
+    elif not isinstance(value, str):
+        return None
+    else:
+        try:
+            parsed = ast.literal_eval(value)
+        except (SyntaxError, ValueError):
+            return None
+    if not isinstance(parsed, list):
+        return None
+    for item in parsed:
+        if not isinstance(item, dict):
+            return None
+        if item.get("ControlType") not in CONTROL_TYPE_IDS:
+            return None
+        try:
+            if int(item.get("searchDepth", 1) or 1) < 1:
+                return None
+            if int(item.get("foundIndex", 1) or 1) < 1:
+                return None
+        except (TypeError, ValueError):
+            return None
+    return parsed
+
+
+def strategy_dictionary(dictionary, parent=None, timeout=0):
     """
     uiautomation.Control重构
     :param timeout: 查找超时时间
@@ -1004,26 +1061,28 @@ def strategy_dictionary(dictionary, Prant=uiautomation.GetRootControl(), timeout
         dictionary['foundIndex']    索引
     :return:
     """
-    uiautomation.SetGlobalSearchTimeout(timeout)
-    conditions = {
-        'ControlType': CONTROL_TYPE_IDS[dictionary['ControlType']],
-        'Name': None if dictionary.get('Name') == '' else dictionary.get('Name', None),
-        'ClassName': None if dictionary.get('ClassName') == '' else dictionary.get('ClassName', None),
-        'AutomationId': None if dictionary.get('AutomationId') == '' else dictionary.get('AutomationId', None),
-        # 'searchDepth': dictionary.get('searchDepth', 0xFFFFFFFF),
-        # 'foundIndex': dictionary.get('foundIndex', 1)
-    }
     try:
-        control = Prant.Control(**conditions)
-        state = control.Refind(maxSearchSeconds=0, raiseException=False)
+        ensure_uiautomation_thread()
+        control_type = dictionary.get("ControlType")
+        if control_type not in CONTROL_TYPE_IDS:
+            return None
+        parent = parent or uiautomation.GetRootControl()
+        conditions = {
+            "ControlType": CONTROL_TYPE_IDS[control_type],
+            "searchDepth": max(1, int(dictionary.get("searchDepth", 0xFFFFFFFF) or 1)),
+            "foundIndex": max(1, int(dictionary.get("foundIndex", 1) or 1)),
+        }
+        for field in ("Name", "ClassName", "AutomationId"):
+            value = dictionary.get(field)
+            if value not in (None, ""):
+                conditions[field] = value
+        control = parent.Control(**conditions)
+        state = control.Refind(maxSearchSeconds=max(0, float(timeout)), raiseException=False)
         if state:
             return control
-        return state
-    except:
-        return False
-
-
-from dataclasses import dataclass
+        return None
+    except (AttributeError, KeyError, TypeError, ValueError):
+        return None
 
 
 @dataclass
@@ -1045,12 +1104,103 @@ class RectStruct:
     def check_pos(self) -> tuple[int, int]:
         x = self.left + (self.right - self.left) // 2
         y = self.top + (self.bottom - self.top) // 2
-        if x < 0 or y < 0:
-            return 0, 0
         return x, y
 
     def is_valid(self) -> bool:
         return self.width > 0 and self.height > 0
+
+
+class _ImageParentControl:
+    ControlTypeName = "PaneControl"
+    Name = "Screen"
+    ClassName = "Screen"
+    AutomationId = ""
+
+    @property
+    def BoundingRectangle(self):
+        return get_system_rect()[0]
+
+    def GetParentControl(self):
+        return None
+
+
+class ImageControl:
+    """Minimal UIA-compatible adapter around an on-screen image match."""
+
+    ControlTypeName = "ImageControl"
+    ControlType = CONTROL_TYPE_IDS["ImageControl"]
+    ClassName = "ImageMatch"
+    AutomationId = ""
+    IsEnabled = True
+    NativeWindowHandle = 0
+    FrameworkId = "Image"
+
+    def __init__(self, image_path, left, top, width, height):
+        self.image_path = str(image_path)
+        self.Name = Path(image_path).name
+        self.BoundingRectangle = RectStruct(
+            int(left), int(top), int(left + width), int(top + height)
+        )
+        self._parent = _ImageParentControl()
+
+    def Exists(self, *_args, **_kwargs):
+        return self.BoundingRectangle.is_valid()
+
+    def GetParentControl(self):
+        return self._parent
+
+    def GetTopLevelControl(self):
+        return self._parent
+
+    def MoveCursorToInnerPos(self, x=None, y=None, ratioX=0.5, ratioY=0.5, **_kwargs):
+        rect = self.BoundingRectangle
+        x = int(rect.width * ratioX) if x is None else int(x)
+        y = int(rect.height * ratioY) if y is None else int(y)
+        absolute_x = (rect.left if x >= 0 else rect.right) + x
+        absolute_y = (rect.top if y >= 0 else rect.bottom) + y
+        pyautogui.moveTo(absolute_x, absolute_y)
+        return absolute_x, absolute_y
+
+    def Click(self, x=None, y=None, **_kwargs):
+        point = self.MoveCursorToInnerPos(x, y)
+        pyautogui.click(*point)
+
+    def RightClick(self, x=None, y=None, **_kwargs):
+        point = self.MoveCursorToInnerPos(x, y)
+        pyautogui.rightClick(*point)
+
+    def MiddleClick(self, x=None, y=None, **_kwargs):
+        point = self.MoveCursorToInnerPos(x, y)
+        pyautogui.middleClick(*point)
+
+    def DoubleClick(self, x=None, y=None, **_kwargs):
+        point = self.MoveCursorToInnerPos(x, y)
+        pyautogui.doubleClick(*point)
+
+
+def _find_image_control(location):
+    image_path = location.get("Img")
+    if not image_path:
+        return None
+    path = Path(image_path).expanduser()
+    if not path.is_file():
+        return None
+    parameters = location.get("PARAMETERS") or {}
+    locate_kwargs = {}
+    try:
+        if isinstance(parameters, dict) and parameters.get("confidence") is not None:
+            locate_kwargs["confidence"] = float(parameters["confidence"])
+        match = pyautogui.locateOnScreen(str(path), **locate_kwargs)
+    except Exception as exc:
+        push_message(f"图像定位失败: {exc}")
+        return None
+    if match is None:
+        return None
+    if hasattr(match, "left"):
+        left, top, width, height = match.left, match.top, match.width, match.height
+    else:
+        left, top, width, height = match
+    return ImageControl(path, left, top, width, height)
 
 
 def to_rect(rect_like) -> RectStruct:
@@ -1061,18 +1211,25 @@ def to_rect(rect_like) -> RectStruct:
         return RectStruct(*rect_like)
     if isinstance(rect_like, RectStruct):
         return rect_like
+    if all(hasattr(rect_like, name) for name in ("left", "top", "right", "bottom")):
+        return RectStruct(rect_like.left, rect_like.top, rect_like.right, rect_like.bottom)
 
     raise TypeError(f"不支持的 rect 类型: {type(rect_like)} -> {rect_like}")
 
 
 def get_system_rect():
-    # 系统（上，顶，右，下）最大尺寸
-    system_rect = RectStruct(0, 0, 1920, 1080)
-    system_menu_rect = RectStruct(0, 0, 1920, 40)
+    user32 = ctypes.windll.user32
+    left = user32.GetSystemMetrics(76)
+    top = user32.GetSystemMetrics(77)
+    width = user32.GetSystemMetrics(78)
+    height = user32.GetSystemMetrics(79)
+    menu_height = user32.GetSystemMetrics(15)
+    system_rect = RectStruct(left, top, left + width, top + height)
+    system_menu_rect = RectStruct(left, top, left + width, top + menu_height)
     system_window_max_rect = RectStruct(
-        0,
+        left,
         system_menu_rect.bottom,
-        1920,
+        left + width,
         system_rect.bottom
     )
     return system_rect, system_menu_rect, system_window_max_rect
@@ -1105,6 +1262,8 @@ def get_check_point_by_control(control):
     """
     # print(control)
     parent = control.GetParentControl()
+    if parent is None:
+        return to_rect(get_control_coordinates(control))
     parent_rect = to_rect(get_control_coordinates(parent))
     # push_message(f"父控件坐标: {parent_rect}")
 
@@ -1147,8 +1306,6 @@ def correct_ctrl_position(control):
     x = (right - left) // 2
     y = (bottom - top) // 2
 
-    # 移动光标到控件中心
-    control.MoveCursorToInnerPos(x=x, y=y, simulateMove=False)
     return x, y
 
 
@@ -1200,7 +1357,7 @@ def disassemble_location(LOCATION):
     WindowName = LOCATION.get('WindowName', '')
     Name = LOCATION.get('Name', '')
     ClassName = LOCATION.get('ClassName', '')
-    ControlType = LOCATION.get('Type', '')
+    ControlType = LOCATION.get('ControlType', '')
     foundIndex = LOCATION.get('foundIndex', 0)
     AutomationId = LOCATION.get('AutomationId', '')
     Xpath = LOCATION.get('Xpath', '[]')

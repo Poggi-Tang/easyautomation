@@ -23,6 +23,8 @@
 - 动作录制：录制用户操作并生成脚本
 - 富文本字段支持：基于剪贴板的文本输入
 - 跨框架支持：Win32、Qt 等多种 UI 框架
+- 优先使用 Invoke、Value、Toggle、Selection、Expand/Collapse 等 UIA Pattern
+- 提供单一 UIAutomation 工作线程的本地 stdio MCP 服务
 
 ## 安装
 
@@ -39,6 +41,36 @@ git clone https://github.com/Poggi-Tang/easyautomation.git
 cd easyautomation
 pip install -e .
 ```
+
+按需安装开发、桌面集成和 MCP 依赖：
+
+```bash
+pip install -e .[dev,integration,mcp]
+```
+
+本项目仅支持 Windows，支持 Python 3.11-3.14。
+
+## 命令行
+
+```bash
+easy-uiauto --version
+easy-uiauto --help
+```
+
+## MCP 服务
+
+```bash
+pip install -e .[mcp]
+easy-uiauto-mcp
+```
+
+MCP 服务提供 `list_windows`、`find_control`、`inspect_control` 和
+`perform_action`。所有 UIAutomation/COM 对象只在一个专用工作线程中创建和使用，
+工具只返回 JSON 快照和短期控件引用。
+
+组合键、鼠标按住/释放和拖拽等高风险动作默认禁用；设置
+`EASY_UIAUTO_MCP_ALLOW_HIGH_RISK=1` 后启用。图片路径默认禁用；设置
+`EASY_UIAUTO_MCP_ALLOW_IMAGE_PATHS=1` 后启用。
 
 ## 快速示例
 
@@ -130,7 +162,7 @@ easyautomation
 当前仓库已经按照较完整的 Python 开源库流程整理：
 
 - **CI**：在 push 和 pull request 时自动执行 lint 与测试。
-- **Semantic Release**：自动更新版本号、CHANGELOG、Tag 和 GitHub Release。
+- **Semantic Release**：仅能通过手动触发的 release 工作流执行。
 - **Trusted Publishing**：通过 GitHub Actions 向 PyPI 发布，无需手动维护 PyPI Token。
 - **构建产物**：同时生成 sdist 和 wheel。
 
@@ -141,6 +173,26 @@ pip install -e .[dev]
 pytest
 ruff check .
 ```
+
+运行 Win32、Qt、Explorer、桌面和任务栏真实集成测试：
+
+```powershell
+$env:EASY_UIAUTO_RUN_WINDOWS_TESTS = "1"
+pytest tests/test_windows_integration.py -q -s
+```
+
+在安全的 SimuNPS 会话可用时运行可逆冒烟测试：
+
+```powershell
+$env:EASY_UIAUTO_RUN_SIMUNPS_TESTS = "1"
+pytest tests/test_simunps_integration.py -q -s
+```
+
+SimuNPS 测试只临时修改模型搜索文本和“消息”过滤开关，并在 `finally` 中恢复；
+不会导入、编译、运行、清空或关闭模型。
+
+物理鼠标/键盘回退依赖 Windows 前台输入权限。如果宿主阻止 `SendInput` 或屏幕截图，
+语义 UIAutomation Pattern 仍可能正常工作。
 
 ## 使用示例
 

@@ -12,7 +12,7 @@ jobs:
     runs-on: windows-latest
     strategy:
       matrix:
-        python-version: ["3.11", "3.12", "3.13"]
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
 
     steps:
       - name: Checkout repository
@@ -30,7 +30,10 @@ jobs:
           pip install pytest
 
       - name: Run tests
-        run: pytest -q
+        run: pytest -q --cov=easy_uiauto --cov-report=term-missing
+
+      - name: Run lint
+        run: ruff check .
 
   build:
     runs-on: ubuntu-latest

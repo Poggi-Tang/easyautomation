@@ -26,6 +26,8 @@ Automation), and other desktop automation scenarios.
 - Action recording: record user interactions and generate scripts
 - Rich text field support: clipboard-based text input
 - Cross-framework support: Win32, Qt, and other UI frameworks
+- UI Automation Pattern-first actions for Invoke, Value, Toggle, Selection, and Expand/Collapse
+- Local stdio MCP server with a dedicated UIAutomation worker thread
 
 ## Installation
 
@@ -42,6 +44,38 @@ git clone https://github.com/Poggi-Tang/easyautomation.git
 cd easyautomation
 pip install -e .
 ```
+
+Install development, desktop-integration, or MCP dependencies as needed:
+
+```bash
+pip install -e .[dev,integration,mcp]
+```
+
+The package supports Windows and Python 3.11-3.14.
+
+## Command Line
+
+```bash
+easy-uiauto --version
+easy-uiauto --help
+```
+
+## MCP Server
+
+Install the optional dependency and start the local stdio server:
+
+```bash
+pip install -e .[mcp]
+easy-uiauto-mcp
+```
+
+The MCP server exposes `list_windows`, `find_control`, `inspect_control`, and
+`perform_action`. UIAutomation/COM objects stay on one worker thread; tools return JSON
+snapshots and short-lived control references only.
+
+High-risk shortcuts, held mouse buttons, and drag operations are blocked by default.
+Set `EASY_UIAUTO_MCP_ALLOW_HIGH_RISK=1` to enable them. Image paths are blocked unless
+`EASY_UIAUTO_MCP_ALLOW_IMAGE_PATHS=1` is set.
 
 ## Quick Start
 
@@ -133,7 +167,7 @@ easyautomation
 This repository is prepared for a professional Python package workflow:
 
 - **CI** runs lint and tests on push and pull request.
-- **Semantic Release** updates the version, changelog, tag, and GitHub Release.
+- **Semantic Release** is available only through the manually triggered release workflow.
 - **Trusted Publishing** publishes to PyPI from GitHub Actions without a PyPI API token.
 - **Build artifacts** include both source distribution and wheel.
 
@@ -144,6 +178,26 @@ pip install -e .[dev]
 pytest
 ruff check .
 ```
+
+Run deterministic native Win32, Qt, Explorer, desktop/taskbar integration tests:
+
+```powershell
+$env:EASY_UIAUTO_RUN_WINDOWS_TESTS = "1"
+pytest tests/test_windows_integration.py -q -s
+```
+
+Run the reversible SimuNPS smoke test only while a safe SimuNPS session is available:
+
+```powershell
+$env:EASY_UIAUTO_RUN_SIMUNPS_TESTS = "1"
+pytest tests/test_simunps_integration.py -q -s
+```
+
+The SimuNPS test changes only the model-search text and message-filter toggle and restores
+both values in a `finally` block. It does not import, compile, run, clear, or close models.
+
+Physical mouse/keyboard fallback depends on Windows foreground-input permissions. Semantic
+UIAutomation Patterns can still work when the host blocks `SendInput` or screen capture.
 
 ## Usage Examples
 

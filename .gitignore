@@ -9,3 +9,11 @@ wheels/
 
 # Virtual environments
 .venv
+.coverage
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.tox/
+htmlcov/
+Record*.py
+@AutomationLog.txt

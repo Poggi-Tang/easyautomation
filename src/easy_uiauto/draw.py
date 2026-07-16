@@ -5,9 +5,10 @@
 # @depict:
 import tkinter as tk
 from dataclasses import dataclass
+
 import uiautomation
 
-from .utils import get_control_info
+from .utils import get_control_info, push_message
 
 
 # ================= 可见区域算法（输出 rect_map） =================
@@ -75,16 +76,24 @@ def get_visible_rect_map_by_control(control):
     if c_rect is None:
         return {'top': 0, 'left': 0, 'bottom': 0, 'right': 0, 'width': 0, 'height': 0}
 
+    visible = _to_rect(c_rect)
+    seen = set()
     try:
         parent = control.GetParentControl()
-        p_rect = parent.BoundingRectangle if parent else None
     except Exception:
-        parent, p_rect = None, None
-
-    if p_rect is None:
-        return _to_rect(c_rect).to_rect_map()
-
-    return _intersect_rect(p_rect, c_rect).to_rect_map()
+        parent = None
+    while parent is not None and id(parent) not in seen:
+        seen.add(id(parent))
+        try:
+            parent_rect = _to_rect(parent.BoundingRectangle)
+            if parent_rect.is_valid():
+                visible = _intersect_rect(parent_rect, visible)
+                if not visible.is_valid():
+                    break
+            parent = parent.GetParentControl()
+        except Exception:
+            break
+    return visible.to_rect_map()
 
 
 # ================= 绘制类：ScreenLineBox =================
@@ -138,9 +147,11 @@ class ScreenLineBox:
         # 计算每多少 tick 执行一次遮挡检测（至少1次）
         self._occlusion_tick_mod = max(1, (self.occlusion_check_interval_ms // self.interval_ms) or 1)
         self._tick_counter = 0
+        self._after_id = None
 
         # 状态
         self._control = control
+        self._rect_snapshot = None
         self._tracking_active = False
         self._paused_for_missing = False  # ★保留字段但不再用于暂停
         self._normal_color_cache = self.color
@@ -170,6 +181,7 @@ class ScreenLineBox:
     # ---------- 对外 API ----------
     def set_control(self, control):
         self._control = control
+        self._rect_snapshot = None
         rect_map = get_visible_rect_map_by_control(control) if control is not None else None
         if rect_map and rect_map['width'] > 0 and rect_map['height'] > 0:
             self._enter_normal_mode()  # ★可见先恢复正常色，再根据遮挡判定切蓝
@@ -177,6 +189,16 @@ class ScreenLineBox:
             self._update_from_rect_map(rect_map, run_occlusion_check=False)
             if self.mode == "track":
                 self._tracking_active = True
+        else:
+            self._enter_lost_mode(initial=not self._ever_drawn_valid)
+
+    def set_rect(self, rect_map):
+        """Draw a plain rectangle snapshot without transferring a UIA Control across threads."""
+        self._control = None
+        self._rect_snapshot = dict(rect_map) if rect_map else None
+        if rect_map and rect_map.get("width", 0) > 0 and rect_map.get("height", 0) > 0:
+            self._enter_normal_mode()
+            self._update_from_rect_map(rect_map, run_occlusion_check=False)
         else:
             self._enter_lost_mode(initial=not self._ever_drawn_valid)
 
@@ -194,7 +216,11 @@ class ScreenLineBox:
                     pass
         if line_width is not None:
             self.line_w = max(1, int(line_width))
-            rect_map = get_visible_rect_map_by_control(self._control) if self._control is not None else None
+            rect_map = (
+                get_visible_rect_map_by_control(self._control)
+                if self._control is not None
+                else self._rect_snapshot
+            )
             if rect_map and rect_map['width'] > 0 and rect_map['height'] > 0:
                 self._update_from_rect_map(rect_map, run_occlusion_check=False)
 
@@ -206,21 +232,30 @@ class ScreenLineBox:
         if self.mode == "track":
             self._tracking_active = True
             self._enter_normal_mode()
-            self._tick()
+            self._schedule_tick()
 
     def destroy(self):
         self._tracking_active = False
         self._destroyed = True
-
-        if self._owns_root:
-            self._owns_root = False
+        if self._after_id is not None:
+            try:
+                self.root.after_cancel(self._after_id)
+            except Exception:
+                pass
+            self._after_id = None
 
         for w in self._wins():
             try:
                 w.destroy()
             except Exception:
                 pass
-        self.root.quit()
+        if self._owns_root:
+            self._owns_root = False
+            try:
+                self.root.quit()
+                self.root.destroy()
+            except Exception:
+                pass
 
     # ---------- 内部 ----------
     def _wins(self):
@@ -348,26 +383,40 @@ class ScreenLineBox:
                 self._enter_normal_mode()
 
     def _tick(self):
+        self._after_id = None
         if getattr(self, "_destroyed", False):
             return
         if self.mode != "track":
             return
-        if self.topmost:
-            for w in self._wins():
-                w.wm_attributes("-topmost", True)
-                w.lift()
+        try:
+            if self.topmost:
+                for w in self._wins():
+                    w.wm_attributes("-topmost", True)
+                    w.lift()
 
-        if self._tracking_active:
-            rect_map = get_visible_rect_map_by_control(self._control) if self._control is not None else None
-            if rect_map and rect_map['width'] > 0 and rect_map['height'] > 0:
-                # 先更新位置，再根据遮挡切色（但实际遮挡检测由周期控制）
-                self._tick_counter += 1
-                # 仅在周期到点时传入 True，让 _update_from_rect_map 决定是否执行遮挡检测
-                self._update_from_rect_map(rect_map, run_occlusion_check=True)
-            else:
-                # 丢失：变黄，但不暂停；继续 tick
-                self._enter_lost_mode(initial=False)
-        self.root.after(self.interval_ms, self._tick)
+            if self._tracking_active:
+                rect_map = (
+                    get_visible_rect_map_by_control(self._control)
+                    if self._control is not None
+                    else self._rect_snapshot
+                )
+                if rect_map and rect_map['width'] > 0 and rect_map['height'] > 0:
+                    self._tick_counter += 1
+                    self._update_from_rect_map(rect_map, run_occlusion_check=True)
+                else:
+                    self._enter_lost_mode(initial=False)
+        except Exception as exc:
+            push_message(f"高亮窗口刷新错误: {exc}")
+        finally:
+            self._schedule_tick()
+
+    def _schedule_tick(self):
+        if (
+            self.mode == "track"
+            and not getattr(self, "_destroyed", False)
+            and self._after_id is None
+        ):
+            self._after_id = self.root.after(self.interval_ms, self._tick)
 
     def run(self):
         if self._owns_root:
@@ -400,7 +449,7 @@ def get_pos_top_window_point(x, y, control):
         top_window = pos_control.GetTopLevelControl()
         point_top = get_visible_rect_map_by_control(top_window)
         return point_top
-    except Exception as e:
+    except Exception:
 #         print(e)
         return False
 
@@ -419,31 +468,45 @@ def get_control_visibl(control, rect_map=None):
     if not point or point.get('width', 0) <= 0 or point.get('height', 0) <= 0:
         return False  # 空间上不可见，这里不做遮挡判断
 
-    topx, topy = point['width'] / 2 + point['left'], point['top'] + 7
-    leftx, lefty = point['left'] + 7, point['height'] / 2 + point['top']
-    rightx, righty = point['right'] - 7, point['height'] / 2 + point['top']
-    bottomx, bottomy = point['width'] / 2 + point['left'], point['bottom'] - 7
+    left, top = point["left"], point["top"]
+    width, height = point["width"], point["height"]
+    sample_points = {
+        (left + width * 0.5, top + height * 0.5),
+        (left + width * 0.25, top + height * 0.25),
+        (left + width * 0.75, top + height * 0.25),
+        (left + width * 0.25, top + height * 0.75),
+        (left + width * 0.75, top + height * 0.75),
+    }
+    for x, y in sample_points:
+        try:
+            _, hit_control = get_control_info(int(x), int(y))
+        except Exception:
+            continue
+        if hit_control is not None and not _is_same_or_descendant(hit_control, control):
+            return True
+    return False
 
-    check_map = {'left': True, 'right': True, 'top': True, 'bottom': True}
 
-    point_top = get_pos_top_window_point(topx, topy, control)
-    if point_top:
-        check_map = check_visibl(point, point_top, check_map)
+def _is_same_or_descendant(candidate, target):
+    return _is_ancestor_or_same(target, candidate) or _is_ancestor_or_same(candidate, target)
 
-    point_left = get_pos_top_window_point(leftx, lefty, control)
-    if point_left:
-        check_map = check_visibl(point, point_left, check_map)
 
-    point_right = get_pos_top_window_point(rightx, righty, control)
-    if point_right:
-        check_map = check_visibl(point, point_right, check_map)
-
-    point_bottom = get_pos_top_window_point(bottomx, bottomy, control)
-    if point_bottom:
-        check_map = check_visibl(point, point_bottom, check_map)
-
-    # 任意一侧为 False 即视为被遮挡
-    return not all(check_map.values())
+def _is_ancestor_or_same(ancestor, candidate):
+    seen = set()
+    current = candidate
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        try:
+            if uiautomation.ControlsAreSame(current, ancestor):
+                return True
+        except Exception:
+            if current is ancestor:
+                return True
+        try:
+            current = current.GetParentControl()
+        except Exception:
+            return False
+    return False
 
 
 # ================== 示例用法 ==================

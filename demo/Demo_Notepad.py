@@ -5,8 +5,10 @@
 # Before executing this example, please manually start Notepad. If the operation fails and it is not due to the library,
 # it is because the Windows system version is inconsistent, resulting in different control properties. You can run Demo_Record.py to record your own test script.
 
-from easy_uiauto import run_action
-from easy_uiauto import push_message  # , compile_controls,find_control
+from easy_uiauto import (
+    push_message,  # , compile_controls,find_control
+    run_action,
+)
 
 # compile_controls(max_depth=1)
 

@@ -2,6 +2,7 @@
 # @Name:      Demo_Record.py
 
 import easy_uiauto
+
 easy_uiauto.run_record()
 
 # from easy_uiauto import record

@@ -7,13 +7,15 @@ name = "easy-uiauto"
 version = "0.1.8"
 description = "UI automation toolkit based on pyautogui and uiautomation"
 readme = "README.md"
+license = "MIT"
 requires-python = ">=3.11"
 dependencies = [
+    "comtypes>=1.4.16",
     "pyautogui>=0.9.54",
+    "pygetwindow>=0.0.9",
     "pynput>=1.8.1",
     "uiautomation>=2.0.29",
     "pyperclip>=1.8.0",
-    "build>=1.4.0",
 ]
 keywords = ["auto", "ui", "uiauto", "automation", "gui-testing"]
 authors = [
@@ -22,7 +24,6 @@ authors = [
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
     "Operating System :: Microsoft :: Windows",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
@@ -37,11 +38,30 @@ classifiers = [
 Homepage = "https://github.com/Poggi-Tang/easyautomation"
 Repository = "https://github.com/Poggi-Tang/easyautomation.git"
 Issues = "https://github.com/Poggi-Tang/easyautomation/issues"
-Changelog = "https://github.com/Poggi-Tang/easyautomation/blob/master/CHANGELOG.md"
-Documentation = "https://github.com/Poggi-Tang/easyautomation/blob/master/README.md"
+Changelog = "https://github.com/Poggi-Tang/easyautomation/blob/main/CHANGELOG.md"
+Documentation = "https://github.com/Poggi-Tang/easyautomation/blob/main/README.md"
+
+[project.optional-dependencies]
+dev = [
+    "build>=1.4.0",
+    "mcp>=1.28,<2",
+    "mypy>=1.10",
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
+    "ruff>=0.8",
+    "twine>=5.0",
+]
+integration = [
+    "PySide6>=6.7,<7",
+    "pywin32>=306",
+]
+mcp = [
+    "mcp>=1.28,<2",
+]
 
 [project.scripts]
-easy-uiauto = "easyautomation:main"
+easy-uiauto = "easy_uiauto.cli:main"
+easy-uiauto-mcp = "easy_uiauto.mcp.server:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
@@ -54,18 +74,21 @@ namespaces = false
 [tool.pytest.ini_options]
 minversion = "8.0"
 addopts = "-ra --strict-markers --strict-config"
-testpaths = ["test"]
+testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_functions = ["test_*"]
+markers = [
+    "windows_integration: tests that interact with real Windows desktop applications",
+]
 
 [tool.ruff]
 line-length = 100
-target-version = "py310"
-src = ["src", "test"]
+target-version = "py311"
+src = ["src", "tests"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP"]
-ignore = []
+ignore = ["E501", "UP009"]
 
 [tool.coverage.run]
 source = ["src/easy_uiauto"]
@@ -85,7 +108,7 @@ exclude_lines = [
 ]
 
 [tool.semantic_release]
-branch = "master"
+branch = "main"
 version_toml = ["pyproject.toml:project.version"]
 version_variables = ["src/easy_uiauto/__init__.py:__version__"]
 changelog_file = "CHANGELOG.md"
@@ -115,4 +138,4 @@ check_untyped_defs = true
 [tool.isort]
 profile = "black"
 line_length = 100
-known_first_party = ["easy-uiauto"]
+known_first_party = ["easy_uiauto"]

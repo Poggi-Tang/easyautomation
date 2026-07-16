@@ -6,42 +6,43 @@ __author__ = "Poggi-Tang"
 
 from .ctrl import (
     Controller,
-    left_click,
-    right_click,
-    double_click,
+    activate_window,
     centre_click,
-    mouse_left_press,
-    mouse_left_release,
-    mouse_right_press,
-    mouse_right_release,
-    mouse_move_pos,
-    mouse_move_control,
+    double_click,
     drag_control,
     drag_control_by_control,
-    set_text,
+    expand_collapse_control,
     input_text,
     key_click,
+    key_group,
     key_press,
     key_release,
-    key_group,
-    activate_window,
+    left_click,
+    mouse_left_press,
+    mouse_left_release,
+    mouse_move_control,
+    mouse_move_pos,
+    mouse_right_press,
+    mouse_right_release,
+    right_click,
     run_action,
+    scroll,
+    select_control,
+    set_text,
+    toggle_control,
 )
-
-from .record import run_record, RecordThread
-
+from .draw import ScreenLineBox
+from .record import RecordThread, run_record
 from .utils import (
+    auto_scroll,
+    compile_controls,
     find_control,
     find_control_by_xpath,
     get_control_info,
     get_control_xpath,
-    compile_controls,
     push_message,
     set_top_window,
-    auto_scroll,
 )
-
-from .draw import ScreenLineBox
 
 __all__ = [
     "Controller",
@@ -65,11 +66,16 @@ __all__ = [
     "key_group",
     "activate_window",
     "run_action",
+    "scroll",
+    "select_control",
+    "toggle_control",
+    "expand_collapse_control",
     "run_record",
     "RecordThread",
     "find_control",
     "find_control_by_xpath",
     "get_control_info",
+    "get_control_xpath",
     "compile_controls",
     "push_message",
     "set_top_window",
