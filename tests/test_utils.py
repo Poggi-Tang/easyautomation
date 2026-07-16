@@ -116,6 +116,20 @@ def test_use_cache_false_does_not_store_control(monkeypatch):
     assert utils.CONTROL_CACHE == {}
 
 
+def test_cache_stats_and_clear_release_entries():
+    utils.CONTROL_CACHE.clear()
+    utils.CACHE_METADATA.clear()
+    utils._store_cached_control("one", FakeControl())
+
+    stats = utils.get_control_cache_stats()
+    removed = utils.clear_control_cache()
+
+    assert stats["entries"] == 1
+    assert removed == 1
+    assert utils.CONTROL_CACHE == {}
+    assert utils.CACHE_METADATA == {}
+
+
 def test_cache_rejects_reused_control_with_changed_identity():
     utils.CONTROL_CACHE.clear()
     utils.CACHE_METADATA.clear()

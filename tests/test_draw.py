@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from conftest import FakeControl, FakeRect
 from easy_uiauto import draw
 
@@ -107,3 +109,34 @@ def test_rect_snapshot_survives_track_tick(monkeypatch):
     box._tick()
 
     assert updated == [rect]
+
+
+def test_overlay_window_is_marked_click_through_and_no_activate(monkeypatch):
+    calls = []
+
+    class User32:
+        def GetWindowLongPtrW(self, hwnd, index):
+            assert (hwnd, index) == (123, draw.GWL_EXSTYLE)
+            return 0x100
+
+        GetWindowLongW = GetWindowLongPtrW
+
+        def SetWindowLongPtrW(self, hwnd, index, style):
+            calls.append((hwnd, index, style))
+            return style
+
+        SetWindowLongW = SetWindowLongPtrW
+
+    monkeypatch.setattr(
+        draw.ctypes,
+        "windll",
+        SimpleNamespace(user32=User32()),
+    )
+    window = SimpleNamespace(winfo_id=lambda: 123)
+
+    draw.ScreenLineBox._make_click_through(window)
+
+    expected = (
+        0x100 | draw.WS_EX_TRANSPARENT | draw.WS_EX_NOACTIVATE | draw.WS_EX_TOOLWINDOW
+    )
+    assert calls == [(123, draw.GWL_EXSTYLE, expected)]

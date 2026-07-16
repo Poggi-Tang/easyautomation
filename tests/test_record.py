@@ -135,6 +135,39 @@ def test_windows_key_is_treated_as_modifier(monkeypatch):
     assert recorder.actions_data[0]["LOCATION"]["PARAMETERS"] == {"组合键": "cmd+r"}
 
 
+def test_shift_printable_key_is_recorded_as_text(monkeypatch):
+    recorder = make_recorder(monkeypatch)
+    shift_key = SimpleNamespace(vk=160, char=None)
+    a_key = SimpleNamespace(vk=65, char="A")
+
+    recorder.on_press(shift_key)
+    recorder.on_press(a_key)
+    recorder.on_release(a_key)
+    recorder.on_release(shift_key)
+    recorder.flush_last_input()
+
+    assert [item["ACTION"] for item in recorder.actions_data] == ["输入文本"]
+    assert recorder.actions_data[0]["LOCATION"]["PARAMETERS"] == {"输入文本": "A"}
+
+
+def test_altgr_printable_key_is_recorded_as_text(monkeypatch):
+    recorder = make_recorder(monkeypatch)
+    ctrl_key = SimpleNamespace(vk=162, char=None)
+    altgr_key = SimpleNamespace(vk=165, char=None)
+    q_key = SimpleNamespace(vk=81, char="@")
+
+    recorder.on_press(ctrl_key)
+    recorder.on_press(altgr_key)
+    recorder.on_press(q_key)
+    recorder.on_release(q_key)
+    recorder.on_release(altgr_key)
+    recorder.on_release(ctrl_key)
+    recorder.flush_last_input()
+
+    assert [item["ACTION"] for item in recorder.actions_data] == ["输入文本"]
+    assert recorder.actions_data[0]["LOCATION"]["PARAMETERS"] == {"输入文本": "@"}
+
+
 def test_scroll_records_target_xpath(monkeypatch):
     recorder = make_recorder(monkeypatch)
     recorder.on_scroll(10, 10, 0, -3)
@@ -199,3 +232,49 @@ def test_stop_signals_completion(monkeypatch):
     recorder.stop()
     assert recorder._stop_complete.is_set()
     assert recorder.running is False
+
+
+def test_stop_completes_when_listener_join_raises_oserror(monkeypatch):
+    recorder = make_recorder(monkeypatch)
+    monkeypatch.setattr(recorder.mouse_listener, "stop", lambda: None)
+    monkeypatch.setattr(recorder.keyboard_listener, "stop", lambda: None)
+    monkeypatch.setattr(
+        recorder.mouse_listener,
+        "join",
+        lambda **_kwargs: (_ for _ in ()).throw(OSError("join failed")),
+    )
+    monkeypatch.setattr(recorder.keyboard_listener, "join", lambda **_kwargs: None)
+
+    recorder.stop()
+
+    assert recorder._stop_complete.is_set()
+    assert recorder.running is False
+    assert recorder.cleanup_errors == ["join failed"]
+
+
+def test_stop_reports_listener_stop_failure(monkeypatch):
+    recorder = make_recorder(monkeypatch)
+    monkeypatch.setattr(
+        recorder.mouse_listener,
+        "stop",
+        lambda: (_ for _ in ()).throw(OSError("stop failed")),
+    )
+    monkeypatch.setattr(recorder.keyboard_listener, "stop", lambda: None)
+    monkeypatch.setattr(recorder.mouse_listener, "join", lambda **_kwargs: None)
+    monkeypatch.setattr(recorder.keyboard_listener, "join", lambda **_kwargs: None)
+
+    recorder.stop()
+
+    assert recorder._stop_complete.is_set()
+    assert recorder.cleanup_errors == ["鼠标监听器停止失败: stop failed"]
+
+
+def test_record_highlight_process_starts_and_stops_cleanly():
+    recorder = record.RecordThread()
+
+    recorder.start_ui_thread()
+    assert recorder.ui_process is not None
+    assert recorder.ui_process.poll() is None
+    recorder._stop_ui_process()
+
+    assert recorder.ui_process.poll() is not None

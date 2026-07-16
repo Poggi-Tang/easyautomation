@@ -3,12 +3,18 @@
 # @Author:    tang
 # @Date:      2025/10/9-18:40
 # @depict:
+import ctypes
 import tkinter as tk
 from dataclasses import dataclass
 
 import uiautomation
 
 from .utils import get_control_info, push_message
+
+GWL_EXSTYLE = -20
+WS_EX_TRANSPARENT = 0x00000020
+WS_EX_TOOLWINDOW = 0x00000080
+WS_EX_NOACTIVATE = 0x08000000
 
 
 # ================= 可见区域算法（输出 rect_map） =================
@@ -284,7 +290,26 @@ class ScreenLineBox:
             w.wm_attributes("-toolwindow", True)
         except tk.TclError:
             pass
+        self.root.update_idletasks()
+        self._make_click_through(w)
         return w
+
+    @staticmethod
+    def _make_click_through(window):
+        """Prevent overlay bars from taking focus or intercepting recorded input."""
+        try:
+            hwnd = int(window.winfo_id())
+            user32 = ctypes.windll.user32
+            getter = getattr(user32, "GetWindowLongPtrW", user32.GetWindowLongW)
+            setter = getattr(user32, "SetWindowLongPtrW", user32.SetWindowLongW)
+            style = int(getter(hwnd, GWL_EXSTYLE))
+            setter(
+                hwnd,
+                GWL_EXSTYLE,
+                style | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW,
+            )
+        except Exception as exc:
+            push_message(f"设置高亮窗口穿透样式失败: {exc}")
 
     def _reveal(self):
         for w in self._wins():

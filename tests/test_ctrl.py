@@ -232,6 +232,21 @@ def test_set_control_value_uses_value_pattern_and_rejects_read_only():
     assert read_only.calls == []
 
 
+def test_set_control_value_rejects_provider_false_success(monkeypatch):
+    pattern = FakeValuePattern(value="Alpha")
+    pattern.SetValue = lambda value, **_kwargs: pattern.calls.append(value) or True
+
+    class GenericControl:
+        def GetPattern(self, _pattern_id):
+            return pattern
+
+    monotonic_values = iter([0.0, 1.0])
+    monkeypatch.setattr(ctrl.time, "monotonic", lambda: next(monotonic_values))
+
+    assert not ctrl._set_control_value(GenericControl(), "Beta")
+    assert pattern.Value == "Alpha"
+
+
 def test_left_click_prefers_invoke_pattern(monkeypatch, prepared_control):
     invoked = []
 
@@ -260,7 +275,9 @@ def test_left_click_stops_when_target_window_cannot_be_activated(
     assert not any(event[0] == "click" for event in prepared_control.events)
 
 
-def test_left_click_preserves_explicit_recorded_offset(monkeypatch, prepared_control):
+def test_left_click_with_recorded_offset_still_prefers_semantic_action(
+    monkeypatch, prepared_control
+):
     invoked = []
 
     class InvokePattern:
@@ -271,6 +288,25 @@ def test_left_click_preserves_explicit_recorded_offset(monkeypatch, prepared_con
     prepared_control.GetPattern = lambda _pattern_id: InvokePattern()
 
     message = ctrl.Controller.left_click(*action_args({"x": 2, "y": 3}))
+
+    assert "成功" in message
+    assert invoked == [True]
+    assert not any(event[0] == "click" for event in prepared_control.events)
+
+
+def test_left_click_can_force_recorded_coordinates(monkeypatch, prepared_control):
+    invoked = []
+
+    class InvokePattern:
+        def Invoke(self):
+            invoked.append(True)
+            return True
+
+    prepared_control.GetPattern = lambda _pattern_id: InvokePattern()
+
+    message = ctrl.Controller.left_click(
+        *action_args({"x": 2, "y": 3, "强制坐标": True})
+    )
 
     assert "成功" in message
     assert invoked == []
@@ -379,6 +415,37 @@ def test_select_named_item_is_scoped_to_target_control(monkeypatch):
     )
     assert ctrl._select_named_item(ComboControl(), "Beta")
     assert selection.IsSelected
+
+
+def test_select_named_item_rejects_provider_false_success():
+    selection = FakeSelectionPattern()
+    value = FakeValuePattern(value="Alpha")
+    expand = FakeExpandPattern()
+
+    class Item:
+        def Exists(self, _timeout):
+            return True
+
+        def GetPattern(self, _pattern_id):
+            return selection
+
+    class ComboControl:
+        def GetPattern(self, pattern_id):
+            if pattern_id == ctrl.uiautomation.PatternId.ExpandCollapsePattern:
+                return expand
+            if pattern_id == ctrl.uiautomation.PatternId.ValuePattern:
+                return value
+            return None
+
+        def ListItemControl(self, **_kwargs):
+            return Item()
+
+        def GetTopLevelControl(self):
+            return self
+
+    assert not ctrl._select_named_item(ComboControl(), "Beta")
+    assert selection.IsSelected
+    assert value.Value == "Alpha"
 
 
 def test_set_text_fallback_replaces_existing_text(monkeypatch, prepared_control):

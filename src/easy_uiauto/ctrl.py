@@ -239,7 +239,15 @@ def _set_control_value(control, value):
             return False
         if getattr(pattern, "IsReadOnly", False):
             return False
-        return bool(pattern.SetValue(str(value)))
+        expected = str(value)
+        if not pattern.SetValue(expected):
+            return False
+        deadline = time.monotonic() + 0.25
+        while time.monotonic() <= deadline:
+            if pattern.Value == expected:
+                return True
+            time.sleep(0.01)
+        return False
     except Exception:
         return False
 
@@ -296,19 +304,35 @@ def _select_named_item(control, item_name):
                 uiautomation.PatternId.SelectionItemPattern,
             )
             if pattern is not None and pattern.Select(waitTime=0):
+                is_selected = False
                 try:
-                    if bool(pattern.IsSelected):
-                        return True
+                    is_selected = bool(pattern.IsSelected)
                 except Exception:
+                    pass
+                try:
                     value_pattern = _get_pattern(
                         control, "GetValuePattern", uiautomation.PatternId.ValuePattern
                     )
-                    if value_pattern is None or value_pattern.Value == item_name:
+                except Exception:
+                    value_pattern = None
+                if value_pattern is not None:
+                    if value_pattern.Value == item_name:
                         return True
+                    continue
+                if is_selected:
+                    return True
         except Exception:
             continue
     if hasattr(control, "Select"):
-        return bool(control.Select(item_name))
+        if not control.Select(item_name):
+            return False
+        try:
+            value_pattern = _get_pattern(
+                control, "GetValuePattern", uiautomation.PatternId.ValuePattern
+            )
+        except Exception:
+            value_pattern = None
+        return value_pattern is None or value_pattern.Value == item_name
     return False
 
 
@@ -334,10 +358,10 @@ class Controller:
             if not getattr(control, "IsEnabled", True):
                 raise Exception('控件不可点击')
             parameters = _parse_parameters(PARAMETERS)
-            has_explicit_offset = any(
-                parameters.get(axis, -1) not in (-1, None) for axis in ("x", "y")
+            force_coordinates = _coerce_optional_bool(
+                parameters.get("强制坐标", False), "强制坐标"
             )
-            if has_explicit_offset or not _invoke_semantic_action(control):
+            if force_coordinates or not _invoke_semantic_action(control):
                 _activate_target_window(WindowName)
                 control.Click(x, y)
 

@@ -433,6 +433,32 @@ def set_global_control_cache_timeout(seconds):
     CONTROL_CACHE_TIMEOUT = seconds
 
 
+def get_control_cache_stats():
+    """Return JSON-safe cache statistics without exposing cached COM objects."""
+    with CACHE_LOCK:
+        thread_counts: dict[str, int] = {}
+        for metadata in CACHE_METADATA.values():
+            thread_id = str(metadata.get("thread_id", "unknown"))
+            thread_counts[thread_id] = thread_counts.get(thread_id, 0) + 1
+        return {
+            "entries": len(CONTROL_CACHE),
+            "metadata_entries": len(CACHE_METADATA),
+            "queue_entries": len(CACHE_QUEUE),
+            "timeout_seconds": CONTROL_CACHE_TIMEOUT,
+            "entries_by_thread": thread_counts,
+        }
+
+
+def clear_control_cache():
+    """Release all cached control references and pending cache work."""
+    with CACHE_LOCK:
+        removed = len(CONTROL_CACHE)
+        CONTROL_CACHE.clear()
+        CACHE_METADATA.clear()
+        CACHE_QUEUE.clear()
+    return removed
+
+
 # @timeit
 def compile_controls(control=None, max_depth=15, compile_log=False):
     """
@@ -741,7 +767,7 @@ def get_control_xpath(control, x=None, y=None):
     while current is not None and id(current) not in seen:
         seen.add(id(current))
         raw_path.append(current)
-        if getattr(current, "ControlTypeName", "") == "DesktopControl":
+        if _safe_control_attr(current, "ControlTypeName") == "DesktopControl":
             break
         try:
             current = current.GetParentControl()
@@ -752,8 +778,8 @@ def get_control_xpath(control, x=None, y=None):
     xpath = []
     depth_since_last = 0
     for current in raw_path:
-        control_type = getattr(current, "ControlTypeName", "")
-        class_name = getattr(current, "ClassName", "")
+        control_type = _safe_control_attr(current, "ControlTypeName")
+        class_name = _safe_control_attr(current, "ClassName")
         if control_type == "DesktopControl" or class_name == "#32769":
             continue
         depth_since_last += 1
@@ -771,7 +797,7 @@ def get_control_xpath(control, x=None, y=None):
             ("ClassName", "ClassName"),
             ("AutomationId", "AutomationId"),
         ):
-            value = getattr(current, attr, "")
+            value = _safe_control_attr(current, attr)
             if value:
                 info[key] = value
         found_index = _control_found_index(current, x=x, y=y)
@@ -780,6 +806,13 @@ def get_control_xpath(control, x=None, y=None):
         xpath.append(info)
         depth_since_last = 0
     return xpath
+
+
+def _safe_control_attr(control, attribute, default=""):
+    try:
+        return getattr(control, attribute, default)
+    except Exception:
+        return default
 
 
 def _control_found_index(control, x=None, y=None):
@@ -793,13 +826,17 @@ def _control_found_index(control, x=None, y=None):
     identity_attributes.extend(
         attr
         for attr in ("Name", "ClassName", "AutomationId")
-        if getattr(control, attr, "") not in (None, "")
+        if _safe_control_attr(control, attr) not in (None, "")
     )
+    target_identity = {
+        attr: _safe_control_attr(control, attr) for attr in identity_attributes
+    }
     for sibling in siblings:
-        if any(
-            getattr(sibling, attr, "") != getattr(control, attr, "")
+        sibling_identity = {
+            attr: _safe_control_attr(sibling, attr, default=None)
             for attr in identity_attributes
-        ):
+        }
+        if any(sibling_identity[attr] != value for attr, value in target_identity.items()):
             continue
         matched_index += 1
         try:
@@ -809,9 +846,12 @@ def _control_found_index(control, x=None, y=None):
             if sibling is control:
                 return matched_index
         if x is not None and y is not None:
-            rect = sibling.BoundingRectangle
-            if rect.left <= x <= rect.right and rect.top <= y <= rect.bottom:
-                return matched_index
+            try:
+                rect = sibling.BoundingRectangle
+                if rect.left <= x <= rect.right and rect.top <= y <= rect.bottom:
+                    return matched_index
+            except Exception:
+                continue
     return max(1, matched_index)
 
 

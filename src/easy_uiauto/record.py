@@ -5,19 +5,16 @@
 # @depict:  录制线程
 import threading
 import time
-import tkinter as tk
 from math import hypot
-from queue import Empty, Queue
 
 from pynput import keyboard, mouse
 from pynput.mouse import Button
 
-from .draw import ScreenLineBox
+from .highlight import HighlightProcess
 from .utils import (
     INPUT_VK_KEY,
     MODIFIER_VK,
     VK_KEY_NAME,
-    find_control_by_xpath,
     format_action_data_by_xpath,
     get_control_info,
     get_focused_control_info,
@@ -25,12 +22,13 @@ from .utils import (
 )
 
 RUN_TIME = time.strftime("%Y%m%d%H%M%S", time.localtime())
+SHORTCUT_MODIFIER_VK = {91, 92, 162, 163, 164, 165}
 
 
 # ========== 录制线程 ==========
 class RecordThread(threading.Thread):
     """
-    录制动作线程 —— 已将绘制窗口替换为 ScreenLineBox (独立 UI 线程)
+    录制动作线程；高亮窗口运行在独立解释器进程中。
     """
 
     def __init__(self, action_callback=None, close_callback=None):
@@ -47,6 +45,9 @@ class RecordThread(threading.Thread):
         self._state_lock = threading.RLock()
         self._stopped = False
         self._stop_complete = threading.Event()
+        self.started = threading.Event()
+        self.run_error = None
+        self.cleanup_errors = []
         self._mouse_press = None
         self._last_left_click = None
         self._handled_combo_keys = set()
@@ -59,11 +60,12 @@ class RecordThread(threading.Thread):
         self.last_input_time = 0.0
         self.input_merge_interval = 3  # 秒
 
-        # —— 新的 UI 线程 & 指令队列 ——
-        self.ui_cmd_queue: Queue = Queue()
-        self.ui_thread = None
+        # Tk 必须在创建它的主线程中销毁，因此高亮运行在独立子进程中。
         self.ui_ready = threading.Event()
         self.ui_error = None
+        self._ui_highlight = HighlightProcess(
+            name="easy-uiauto-record-highlight",
+        )
 
         # 监听器
         self.mouse_listener = mouse.Listener(
@@ -80,75 +82,50 @@ class RecordThread(threading.Thread):
             self.start_ui_thread()
             self.mouse_listener.start()
             self.keyboard_listener.start()
+            self.started.set()
             push_message(f"\033[1;32m{'录制开始'.center(52, '-')}\033[0m")
             while self.running:
                 time.sleep(0.05)
         except Exception as exc:
+            self.run_error = exc
+            self.started.set()
             push_message(f"录制启动或运行错误: {exc}")
         finally:
             if not self._stopped:
                 self.stop()
             self._stop_complete.wait(timeout=10)
 
-    # —— UI 线程：创建 Tk root 与 ScreenLineBox，并按队列处理命令 ——
+    # 保留原方法名以兼容调用方；实现已改为独立 UI 进程。
     def start_ui_thread(self):
-        def ui_thread_func():
-            root = None
-            try:
-                root = tk.Tk()
-                root.withdraw()
+        try:
+            self._ui_highlight.start(timeout=5)
+        except Exception as exc:
+            self.ui_error = str(exc)
+            self.ui_ready.set()
+            raise
+        self.ui_ready.set()
 
-            # 初始不指定控件，track 模式；100ms 刷新
-            # 注意：使用默认样式：红色、线宽2、alpha=1.0
-                box = ScreenLineBox(root=root, control=None, mode="track",
-                                    interval_ms=50, topmost=True)
+    @property
+    def ui_process(self):
+        return self._ui_highlight.process
 
-            # 处理命令队列
-                def pump():
-                    try:
-                        while True:
-                            cmd = self.ui_cmd_queue.get_nowait()
-                            try:
-                                name = cmd.get("cmd")
-                                if name == "set_xpath":
-                                    control = find_control_by_xpath(
-                                        cmd.get("xpath"), use_cache=False
-                                    )
-                                    box.set_control(control)
-                                elif name == "set_style":
-                                    box.set_style(color=cmd.get("color"),
-                                                  line_width=cmd.get("line_width"),
-                                                  alpha=cmd.get("alpha"))
-                                elif name == "close":
-                                    box.destroy()
-                                    root.destroy()
-                                    return
-                            except Exception as exc:
-                                push_message(f"高亮窗口命令错误: {exc}")
-                    except Empty:
-                        pass
-                    root.after(16, pump)
+    def _send_ui_command(self, command):
+        if command.get("cmd") == "set_style":
+            command = {
+                "cmd": "style",
+                "style": {
+                    key: command.get(key)
+                    for key in ("color", "line_width", "alpha")
+                    if command.get(key) is not None
+                },
+            }
+        self._ui_highlight.send(command)
 
-                pump()
-                self.ui_ready.set()
-                root.mainloop()
-            except Exception as exc:
-                self.ui_error = exc
-                push_message(f"高亮窗口线程错误: {exc}")
-                self.ui_ready.set()
-            finally:
-                if root is not None:
-                    try:
-                        root.destroy()
-                    except Exception:
-                        pass
-
-        self.ui_thread = threading.Thread(target=ui_thread_func, daemon=True)
-        self.ui_thread.start()
-        if not self.ui_ready.wait(timeout=5.0):
-            raise TimeoutError("高亮窗口线程启动超时")
-        if self.ui_error is not None:
-            raise RuntimeError("高亮窗口线程启动失败") from self.ui_error
+    def _stop_ui_process(self):
+        status = self._ui_highlight.stop(timeout=2)
+        self.ui_error = status.get("error")
+        if status.get("forced_termination"):
+            self.cleanup_errors.append("高亮窗口进程未在超时内退出，已强制终止")
 
     # ESC 退出时
     def on_esc_exit(self, box_track, root):
@@ -175,19 +152,25 @@ class RecordThread(threading.Thread):
             return
         try:
             self.mouse_listener.stop()
-        except Exception:
-            pass
+        except Exception as exc:
+            self.cleanup_errors.append(f"鼠标监听器停止失败: {exc}")
         try:
             self.keyboard_listener.stop()
-        except Exception:
-            pass
+        except Exception as exc:
+            self.cleanup_errors.append(f"键盘监听器停止失败: {exc}")
         for listener in (self.mouse_listener, self.keyboard_listener):
             if getattr(listener, "ident", None) == threading.get_ident():
                 continue
             try:
                 listener.join(timeout=2)
-            except (RuntimeError, TypeError):
-                pass
+            except Exception as exc:
+                push_message(f"监听器停止等待错误: {exc}")
+                self.cleanup_errors.append(str(exc))
+            try:
+                if listener.is_alive():
+                    self.cleanup_errors.append("监听器未在超时内退出")
+            except Exception as exc:
+                self.cleanup_errors.append(str(exc))
         push_message(f"\033[1;32m{'开始推送动作信息'.center(49, '-')}\033[0m")
 
         try:
@@ -206,9 +189,10 @@ class RecordThread(threading.Thread):
                     push_message(f"关闭回调错误: {exc}")
         finally:
             try:
-                self.ui_cmd_queue.put({"cmd": "close"})
-                if self.ui_thread and self.ui_thread is not threading.current_thread():
-                    self.ui_thread.join(timeout=2)
+                try:
+                    self._stop_ui_process()
+                except Exception as exc:
+                    self.cleanup_errors.append(f"高亮窗口进程停止失败: {exc}")
             finally:
                 self._stop_complete.set()
 
@@ -237,13 +221,13 @@ class RecordThread(threading.Thread):
             return
 
         try:
-            self.ui_cmd_queue.put({"cmd": "set_xpath", "xpath": xpath})
+            self._send_ui_command({"cmd": "set_xpath", "xpath": xpath})
             target = xpath[-1]
             push_message(
                 f"锁定控件: {target.get('Name', '')} ({target.get('ControlType', '')})"
             )
-        except Exception:
-            pass
+        except Exception as exc:
+            push_message(f"高亮窗口命令错误: {exc}")
 
     def on_click(self, x, y, button, pressed):
         try:
@@ -437,8 +421,10 @@ class RecordThread(threading.Thread):
                 if key_name not in self.pressed_keys:
                     self.pressed_keys.add(key_name)
                     self.pressed_key_sequence.append(key_name)
-                modifier_pressed = any(
-                    vk in MODIFIER_VK for vk in self._pressed_vk_numbers()
+                pressed_vk = self._pressed_vk_numbers()
+                modifier_pressed = (
+                    "alt_gr" not in self.pressed_keys
+                    and any(vk in SHORTCUT_MODIFIER_VK for vk in pressed_vk)
                 )
                 is_modifier = vk_number in MODIFIER_VK
                 if (
