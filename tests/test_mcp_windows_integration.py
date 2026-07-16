@@ -200,7 +200,7 @@ def test_mcp_stdio_win32_actions_tree_cache_and_highlight_roundtrip():
     not RUN_WINDOWS_INTEGRATION,
     reason="set EASY_UIAUTO_RUN_WINDOWS_TESTS=1 to run desktop integration tests",
 )
-def test_mcp_stdio_qt_verified_actions_and_provider_false_success():
+def test_mcp_stdio_qt_verified_actions_and_provider_fallbacks():
     title = f"Easy UIAuto MCP Qt {uuid.uuid4().hex[:8]}"
     process = _launch_fixture("qt_fixture.py", title)
 
@@ -240,7 +240,7 @@ def test_mcp_stdio_qt_verified_actions_and_provider_false_success():
         combo_location = _location(title, control_type="ComboBoxControl")
         combo = await _tool(session, "find_control", {"location": combo_location})
         assert combo["ok"] is True
-        false_success = await _tool(
+        combo_selected = await _tool(
             session,
             "perform_action",
             {
@@ -249,13 +249,15 @@ def test_mcp_stdio_qt_verified_actions_and_provider_false_success():
                 "parameters": {"选择项": "Beta"},
             },
         )
-        assert false_success["ok"] is False
-        assert false_success["data"]["verified"] is False
+        assert combo_selected["ok"] is True, combo_selected
+        assert combo_selected["data"]["verified"] is True
+        assert combo_selected["data"]["mechanism"] == "qt_window_message"
+        assert combo_selected["data"]["after"]["patterns"]["value"]["value"] == "Beta"
 
         root_location = _location(title, "Root", "TreeItemControl")
         root = await _tool(session, "find_control", {"location": root_location})
         assert root["ok"] is True
-        false_expand = await _tool(
+        expanded = await _tool(
             session,
             "perform_action",
             {
@@ -264,8 +266,10 @@ def test_mcp_stdio_qt_verified_actions_and_provider_false_success():
                 "parameters": {"展开": True},
             },
         )
-        assert false_expand["ok"] is False
-        assert false_expand["data"]["verified"] is False
+        assert expanded["ok"] is True, expanded
+        assert expanded["data"]["verified"] is True
+        assert expanded["data"]["mechanism"] == "qt_window_message"
+        assert expanded["data"]["after"]["patterns"]["expand_collapse"]["state"] == 1
 
     try:
         anyio.run(_run_with_mcp, scenario)

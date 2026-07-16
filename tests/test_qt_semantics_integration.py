@@ -189,7 +189,48 @@ def test_qt_editable_combobox_inner_edit_supports_verified_value_input():
         _stop_fixture(process, window)
 
 
-def test_qt_combobox_provider_success_is_not_a_committed_selection():
+def test_qt_window_message_fallback_operates_background_window_without_activation():
+    target_title = f"Easy UIAuto Qt background target {uuid.uuid4().hex[:8]}"
+    foreground_title = f"Easy UIAuto Qt foreground guard {uuid.uuid4().hex[:8]}"
+    target_process = _launch_fixture(target_title)
+    foreground_process = _launch_fixture(foreground_title)
+    target_window = _wait_for_window(target_title)
+    foreground_window = _wait_for_window(foreground_title)
+    try:
+        foreground_edit = foreground_window.EditControl(Name="Input", searchDepth=12)
+        assert foreground_edit.Exists(2)
+        assert foreground_edit.SetFocus()
+        deadline = time.monotonic() + 3
+        while time.monotonic() < deadline:
+            foreground_edit.Refind(maxSearchSeconds=0, raiseException=False)
+            if foreground_edit.HasKeyboardFocus:
+                break
+            time.sleep(0.05)
+        assert foreground_edit.HasKeyboardFocus
+
+        combo = target_window.ComboBoxControl(searchDepth=12)
+        message = Controller.select_control(
+            *_named_select_action_args(target_title, combo, "Beta")
+        )
+        assert "成功" in message
+        _wait_for_status(target_window, "combo:Beta")
+        foreground_edit.Refind(maxSearchSeconds=0, raiseException=False)
+        assert foreground_edit.HasKeyboardFocus
+
+        root = target_window.TreeItemControl(Name="Root", searchDepth=12)
+        message = Controller.expand_collapse_control(
+            *_expand_action_args(target_title, root, True)
+        )
+        assert "成功" in message
+        _wait_for_status(target_window, "tree:expanded")
+        foreground_edit.Refind(maxSearchSeconds=0, raiseException=False)
+        assert foreground_edit.HasKeyboardFocus
+    finally:
+        _stop_fixture(foreground_process, foreground_window)
+        _stop_fixture(target_process, target_window)
+
+
+def test_qt_combobox_provider_false_success_falls_back_to_verified_window_message():
     title = f"Easy UIAuto Qt combo probe {uuid.uuid4().hex[:8]}"
     process = _launch_fixture(title)
     window = _wait_for_window(title)
@@ -227,12 +268,13 @@ def test_qt_combobox_provider_success_is_not_a_committed_selection():
         message = Controller.select_control(
             *_named_select_action_args(title, refreshed_combo, "Beta")
         )
-        assert "异常" in message
+        assert "成功" in message
+        _wait_for_status(window, "combo:Beta")
         assert (
             window.ComboBoxControl(searchDepth=12)
             .GetPattern(uiautomation.PatternId.ValuePattern)
             .Value
-            == "Alpha"
+            == "Beta"
         )
     finally:
         _stop_fixture(process, window)
@@ -276,7 +318,11 @@ def test_qt_tree_expand_provider_result_requires_postcondition_verification(
         message = Controller.expand_collapse_control(
             *_expand_action_args(title, refreshed_root, not initially_expanded)
         )
-        assert "异常" in message
+        assert "成功" in message
+        _wait_for_status(
+            window,
+            "tree:collapsed" if initially_expanded else "tree:expanded",
+        )
         final_root = window.TreeItemControl(Name="Root", searchDepth=12)
         assert (
             int(
@@ -284,7 +330,7 @@ def test_qt_tree_expand_provider_result_requires_postcondition_verification(
                     uiautomation.PatternId.ExpandCollapsePattern
                 ).ExpandCollapseState
             )
-            == initial_state
+            == target_state
         )
     finally:
         _stop_fixture(process, window)

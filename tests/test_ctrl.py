@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from conftest import FakeControl
+from conftest import FakeControl, FakeRect
 from easy_uiauto import ctrl
 
 
@@ -446,6 +446,114 @@ def test_select_named_item_rejects_provider_false_success():
     assert not ctrl._select_named_item(ComboControl(), "Beta")
     assert selection.IsSelected
     assert value.Value == "Alpha"
+
+
+def test_select_named_item_qt_uses_verified_window_message_fallback(monkeypatch):
+    selection = FakeSelectionPattern()
+    value = FakeValuePattern(value="Alpha")
+    expand = FakeExpandPattern()
+
+    class Item:
+        ProcessId = 42
+        IsOffscreen = False
+        BoundingRectangle = FakeRect(10, 10, 100, 30)
+
+        def Exists(self, _timeout):
+            return True
+
+        def GetPattern(self, _pattern_id):
+            return selection
+
+    item = Item()
+
+    class ComboControl:
+        FrameworkId = "Qt"
+        ProcessId = 42
+
+        def GetPattern(self, pattern_id):
+            if pattern_id == ctrl.uiautomation.PatternId.ExpandCollapsePattern:
+                return expand
+            if pattern_id == ctrl.uiautomation.PatternId.ValuePattern:
+                return value
+            return None
+
+        def ListItemControl(self, **_kwargs):
+            return item
+
+        def GetTopLevelControl(self):
+            return self
+
+    def message_click(control, **_kwargs):
+        if control is item:
+            value.Value = "Beta"
+        return True
+
+    monkeypatch.setattr(ctrl, "_message_click_control", message_click)
+
+    assert ctrl._select_named_item(ComboControl(), "Beta")
+    assert value.Value == "Beta"
+
+
+def test_expand_collapse_qt_uses_window_message_when_provider_does_not_commit(
+    monkeypatch, prepared_control
+):
+    class FalseSuccessPattern:
+        ExpandCollapseState = 0
+
+        def Expand(self):
+            return True
+
+        def Collapse(self):
+            return True
+
+    pattern = FalseSuccessPattern()
+    prepared_control.FrameworkId = "Qt"
+    prepared_control.GetPattern = lambda _pattern_id: pattern
+    monkeypatch.setattr(
+        ctrl,
+        "_wait_for_expand_state",
+        lambda _control, target, **_kwargs: pattern.ExpandCollapseState == target,
+    )
+
+    def message_click(_control, **_kwargs):
+        pattern.ExpandCollapseState = 1
+        return True
+
+    monkeypatch.setattr(ctrl, "_message_click_control", message_click)
+
+    message = ctrl.Controller.expand_collapse_control(
+        *action_args({"展开": True})
+    )
+
+    assert "成功" in message
+    assert pattern.ExpandCollapseState == 1
+
+
+def test_show_thread_uses_isolated_highlight_process(monkeypatch):
+    events = []
+
+    class Worker:
+        def __init__(self, rect, **_kwargs):
+            events.append(("init", rect))
+
+        def start(self, timeout):
+            events.append(("start", timeout))
+
+        def stop(self, timeout):
+            events.append(("stop", timeout))
+
+    monkeypatch.setattr(ctrl, "HighlightProcess", Worker)
+    monkeypatch.setattr(ctrl.time, "sleep", lambda duration: events.append(("sleep", duration)))
+    rect = {"left": 1, "top": 2, "right": 3, "bottom": 4, "width": 2, "height": 2}
+
+    ctrl._show_thread(rect, 250)
+
+    assert events == [
+        ("init", rect),
+        ("start", 5),
+        ("sleep", 0.25),
+        ("stop", 2),
+    ]
 
 
 def test_set_text_fallback_replaces_existing_text(monkeypatch, prepared_control):

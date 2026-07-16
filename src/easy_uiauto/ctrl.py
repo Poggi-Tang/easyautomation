@@ -4,16 +4,18 @@
 # @Date:      2025/9/23-9:55
 # @depict:    控制
 import ast
+import ctypes
 import threading
 import time
-import tkinter
 from collections.abc import Callable
+from ctypes import wintypes
 
 import pyautogui
 import pyperclip
 import uiautomation
 
-from .draw import ScreenLineBox, get_visible_rect_map_by_control
+from .draw import get_visible_rect_map_by_control
+from .highlight import HighlightProcess
 from .utils import (
     auto_scroll,
     correct_ctrl_position,
@@ -26,19 +28,18 @@ from .utils import (
 
 
 def _show_thread(rect_map, show_time):
-    """在独立线程中创建 Tk 窗口并显示一次性 overlay（不会阻塞调用线程）。"""
+    """在独立解释器进程中显示一次性 overlay，不在工作线程创建 Tk。"""
+    worker = HighlightProcess(rect_map, name="easy-uiauto-action-highlight")
     try:
-        root = tkinter.Tk()
-        root.withdraw()
-        box = ScreenLineBox(root, None, mode="once", show_time=show_time)
-        box.set_rect(rect_map)
-        root.after(show_time + 25, root.destroy)
-        root.mainloop()
+        worker.start(timeout=5)
+        time.sleep(max(0, show_time) / 1000)
     except Exception as e:
         try:
             push_message(f"show_ctrl_area 异常: {e}")
         except Exception:
             pass
+    finally:
+        worker.stop(timeout=2)
 
 
 def show_ctrl_area(control_obj, show_time=300):
@@ -130,6 +131,7 @@ class _MESSAGE:
     OTHER = 3
 
 _message_state = threading.local()
+_action_mechanism_state = threading.local()
 
 
 def get_message_type():
@@ -150,6 +152,14 @@ def update_message_type(current_message_type):
         current_message_type (int): 要设置的消息类型值
     """
     _message_state.value = current_message_type
+
+
+def get_action_mechanism():
+    return getattr(_action_mechanism_state, "value", None)
+
+
+def _set_action_mechanism(value):
+    _action_mechanism_state.value = value
 
 
 def _parse_parameters(parameters):
@@ -273,6 +283,177 @@ def _coerce_optional_bool(value, parameter_name):
     raise ValueError(f"{parameter_name} 必须是布尔值")
 
 
+def _safe_control_attr(control, name, default=""):
+    try:
+        return getattr(control, name, default)
+    except Exception:
+        return default
+
+
+def _is_qt_control(control):
+    framework = str(_safe_control_attr(control, "FrameworkId", "")).lower()
+    class_name = str(_safe_control_attr(control, "ClassName", ""))
+    automation_id = str(_safe_control_attr(control, "AutomationId", ""))
+    return (
+        framework == "qt"
+        or automation_id.startswith("QApplication.")
+        or (not framework and class_name.startswith("Q"))
+    )
+
+
+def _message_click_control(control, *, double=False):
+    """Deliver a click to the owning window without moving the physical cursor."""
+    try:
+        top_level = control.GetTopLevelControl()
+        hwnd = int(_safe_control_attr(top_level, "NativeWindowHandle", 0) or 0)
+        rect = control.BoundingRectangle
+        if not hwnd or rect.right <= rect.left or rect.bottom <= rect.top:
+            return False
+        point = wintypes.POINT(
+            int((rect.left + rect.right) // 2),
+            int((rect.top + rect.bottom) // 2),
+        )
+        user32 = ctypes.windll.user32
+        user32.ScreenToClient.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.POINT)]
+        user32.ScreenToClient.restype = wintypes.BOOL
+        user32.SendMessageTimeoutW.argtypes = [
+            wintypes.HWND,
+            wintypes.UINT,
+            wintypes.WPARAM,
+            wintypes.LPARAM,
+            wintypes.UINT,
+            wintypes.UINT,
+            ctypes.POINTER(ctypes.c_size_t),
+        ]
+        user32.SendMessageTimeoutW.restype = ctypes.c_size_t
+        if not user32.ScreenToClient(hwnd, ctypes.byref(point)):
+            return False
+        lparam = (int(point.y) & 0xFFFF) << 16 | (int(point.x) & 0xFFFF)
+
+        def send(message, wparam=0):
+            result = ctypes.c_size_t()
+            return bool(
+                user32.SendMessageTimeoutW(
+                    hwnd,
+                    message,
+                    wparam,
+                    lparam,
+                    0x0002,  # SMTO_ABORTIFHUNG
+                    1000,
+                    ctypes.byref(result),
+                )
+            )
+
+        if not send(0x0200):  # WM_MOUSEMOVE
+            return False
+        for _ in range(2 if double else 1):
+            if not send(0x0201, 0x0001):  # WM_LBUTTONDOWN / MK_LBUTTON
+                return False
+            time.sleep(0.04)
+            if not send(0x0202):  # WM_LBUTTONUP
+                return False
+            time.sleep(0.06)
+        return True
+    except Exception:
+        return False
+
+
+def _named_item_candidates(control, item_name):
+    candidates = []
+    sources = [control]
+    try:
+        top_level = control.GetTopLevelControl()
+        if top_level is not control:
+            sources.append(top_level)
+    except Exception:
+        pass
+    for source in sources:
+        if hasattr(source, "ListItemControl"):
+            try:
+                candidates.append(source.ListItemControl(Name=item_name, searchDepth=10))
+            except Exception:
+                continue
+    return candidates
+
+
+def _wait_for_control_value(control, expected, timeout=0.75):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() <= deadline:
+        try:
+            control.Refind(maxSearchSeconds=0, raiseException=False)
+        except Exception:
+            pass
+        try:
+            pattern = _get_pattern(
+                control, "GetValuePattern", uiautomation.PatternId.ValuePattern
+            )
+            if pattern is not None and pattern.Value == expected:
+                return True
+        except Exception:
+            pass
+        time.sleep(0.02)
+    return False
+
+
+def _select_named_item_by_message(control, item_name, candidates):
+    if not _is_qt_control(control):
+        return False
+
+    def visible_items():
+        items = []
+        expected_process = int(_safe_control_attr(control, "ProcessId", 0) or 0)
+        for candidate in candidates + _named_item_candidates(control, item_name):
+            try:
+                if not candidate.Exists(0):
+                    continue
+                process_id = int(_safe_control_attr(candidate, "ProcessId", 0) or 0)
+                if expected_process and process_id and process_id != expected_process:
+                    continue
+                rect = candidate.BoundingRectangle
+                if rect.right > rect.left and rect.bottom > rect.top and not bool(
+                    _safe_control_attr(candidate, "IsOffscreen", False)
+                ):
+                    items.append(candidate)
+            except Exception:
+                continue
+        return items
+
+    items = visible_items()
+    if not items:
+        if not _message_click_control(control):
+            return False
+        deadline = time.monotonic() + 1.0
+        while time.monotonic() <= deadline and not items:
+            items = visible_items()
+            if not items:
+                time.sleep(0.03)
+    for candidate in items:
+        if _message_click_control(candidate) and _wait_for_control_value(control, item_name):
+            return True
+    return False
+
+
+def _wait_for_expand_state(control, target_state, timeout=0.35):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() <= deadline:
+        try:
+            control.Refind(maxSearchSeconds=0, raiseException=False)
+        except Exception:
+            pass
+        try:
+            pattern = _get_pattern(
+                control,
+                "GetExpandCollapsePattern",
+                uiautomation.PatternId.ExpandCollapsePattern,
+            )
+            if pattern is not None and int(pattern.ExpandCollapseState) == target_state:
+                return True
+        except Exception:
+            pass
+        time.sleep(0.02)
+    return False
+
+
 def _select_named_item(control, item_name):
     try:
         expand = _get_pattern(
@@ -285,15 +466,7 @@ def _select_named_item(control, item_name):
     except Exception:
         pass
 
-    candidates = []
-    if hasattr(control, "ListItemControl"):
-        candidates.append(control.ListItemControl(Name=item_name, searchDepth=10))
-    try:
-        top_level = control.GetTopLevelControl()
-        if top_level is not control and hasattr(top_level, "ListItemControl"):
-            candidates.append(top_level.ListItemControl(Name=item_name, searchDepth=10))
-    except Exception:
-        pass
+    candidates = _named_item_candidates(control, item_name)
     for candidate in candidates:
         try:
             if not candidate.Exists(1):
@@ -317,23 +490,29 @@ def _select_named_item(control, item_name):
                     value_pattern = None
                 if value_pattern is not None:
                     if value_pattern.Value == item_name:
+                        _set_action_mechanism("selection_pattern")
                         return True
                     continue
                 if is_selected:
+                    _set_action_mechanism("selection_pattern")
                     return True
         except Exception:
             continue
     if hasattr(control, "Select"):
-        if not control.Select(item_name):
-            return False
-        try:
-            value_pattern = _get_pattern(
-                control, "GetValuePattern", uiautomation.PatternId.ValuePattern
-            )
-        except Exception:
-            value_pattern = None
-        return value_pattern is None or value_pattern.Value == item_name
-    return False
+        if control.Select(item_name):
+            try:
+                value_pattern = _get_pattern(
+                    control, "GetValuePattern", uiautomation.PatternId.ValuePattern
+                )
+            except Exception:
+                value_pattern = None
+            if value_pattern is None or value_pattern.Value == item_name:
+                _set_action_mechanism("provider_select")
+                return True
+    selected = _select_named_item_by_message(control, item_name, candidates)
+    if selected:
+        _set_action_mechanism("qt_window_message")
+    return selected
 
 
 class Controller:
@@ -915,13 +1094,25 @@ class Controller:
                 current_state = None
             if current_state != target_state:
                 success = pattern.Expand() if should_expand else pattern.Collapse()
-                if not success:
-                    raise RuntimeError("展开/折叠控件失败")
-                try:
-                    if int(pattern.ExpandCollapseState) != target_state:
-                        raise RuntimeError("展开/折叠控件未达到目标状态")
-                except AttributeError:
-                    pass
+                reached_target = bool(success) and _wait_for_expand_state(
+                    control, target_state
+                )
+                if reached_target:
+                    _set_action_mechanism("expand_collapse_pattern")
+                if (
+                    not reached_target
+                    and _is_qt_control(control)
+                    and _message_click_control(control, double=True)
+                ):
+                    reached_target = _wait_for_expand_state(
+                        control, target_state, timeout=0.75
+                    )
+                    if reached_target:
+                        _set_action_mechanism("qt_window_message")
+                if not reached_target:
+                    raise RuntimeError("展开/折叠控件未达到目标状态")
+            else:
+                _set_action_mechanism("already_in_target_state")
             message = f"步骤：{ActionTitle} 执行动作 展开折叠 成功"
         except Exception as exc:
             message_type = _MESSAGE.ERROR
@@ -1464,6 +1655,7 @@ def run_action(record_info):
     :return
         str: 执行结果信息
     """
+    _set_action_mechanism(None)
     if not isinstance(record_info, dict) or not isinstance(record_info.get("LOCATION"), dict):
         update_message_type(_MESSAGE.ERROR)
         return "动作数据格式错误"

@@ -7,7 +7,12 @@ from typing import Any
 
 import uiautomation
 
-from easy_uiauto.ctrl import _coerce_optional_bool, get_message_type, run_action
+from easy_uiauto.ctrl import (
+    _coerce_optional_bool,
+    get_action_mechanism,
+    get_message_type,
+    run_action,
+)
 from easy_uiauto.draw import get_visible_rect_map_by_control
 from easy_uiauto.utils import (
     clear_control_cache,
@@ -673,6 +678,9 @@ class UIAutomationBackend:
         try:
             message = run_action({"ACTION": action, "LOCATION": normalized_location})
             message_type = get_message_type()
+            action_mechanism = get_action_mechanism() or self._mechanism(
+                action, target_before
+            )
         except Exception as exc:
             return ToolResult.error(
                 f"action execution failed: {exc}",
@@ -687,7 +695,7 @@ class UIAutomationBackend:
                 message,
                 {
                     "before": target_before,
-                    "mechanism": self._mechanism(action, target_before),
+                    "mechanism": action_mechanism,
                     "verified": False,
                 },
             )
@@ -736,7 +744,7 @@ class UIAutomationBackend:
             "after": target_after,
             "observed_before": observed_before,
             "observed_after": observed_after,
-            "mechanism": self._mechanism(action, target_before),
+            "mechanism": action_mechanism,
             "verified": verified,
             "verification_error": verification_error,
         }
