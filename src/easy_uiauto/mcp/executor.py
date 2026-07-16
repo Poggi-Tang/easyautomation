@@ -4,6 +4,7 @@ import queue
 import threading
 from collections.abc import Callable
 from concurrent.futures import Future
+from concurrent.futures import TimeoutError as FutureTimeoutError
 from dataclasses import dataclass
 from typing import Any
 
@@ -51,7 +52,7 @@ class UIAutomationExecutor:
             request = self._queue.get()
             if request is None:
                 break
-            if request.future.cancelled():
+            if not request.future.set_running_or_notify_cancel():
                 continue
             try:
                 method = getattr(self._backend, request.method)
@@ -67,7 +68,14 @@ class UIAutomationExecutor:
             raise RuntimeError("UIAutomation worker thread is not running")
         future: Future = Future()
         self._queue.put(_Request(method=method, args=args, kwargs=kwargs, future=future))
-        return future.result(timeout=timeout)
+        try:
+            return future.result(timeout=timeout)
+        except FutureTimeoutError:
+            if future.cancel():
+                raise
+            # The operation has already started and COM/UI input cannot be safely cancelled.
+            # Wait for the authoritative result instead of returning while a mutation continues.
+            return future.result()
 
     def close(self) -> None:
         if not self._thread.is_alive():
