@@ -89,9 +89,11 @@ clear, close, or import actions require `confirm_high_impact=true` per call, or
 child process is explicitly started with `EASY_UIAUTO_MCP_ALLOW_RECORDING=1`.
 
 Some Qt accessibility providers report success without committing non-editable combo-box
-selection or tree expansion. These cases are returned as failures when postcondition checks
-show unchanged state. Physical mouse/keyboard fallback still depends on Windows foreground
-input permissions and cannot be guaranteed in a session that blocks `SendInput`.
+selection or tree expansion. The controller detects the unchanged state and uses a bounded
+window-message fallback against the control's owning Qt window or popup, without moving the
+physical cursor; the action is reported successful only after UI Automation exposes the target
+state. Traditional physical mouse/keyboard fallback still depends on Windows foreground input
+permissions and cannot be guaranteed in a session that blocks `SendInput`.
 
 ## Quick Start
 

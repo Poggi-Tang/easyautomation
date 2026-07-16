@@ -82,8 +82,10 @@ provider 返回成功并不等于桌面状态已改变：只要 provider 暴露�
 `EASY_UIAUTO_MCP_ALLOW_RECORDING=1` 时才会启用。
 
 部分 Qt accessibility provider 会在非可编辑 ComboBox 选择或 Tree 展开时返回成功，
-但并未真正提交状态；后置条件发现状态未变化时，本项目会返回失败。物理鼠标/键盘回退仍
-依赖 Windows 前台输入权限，在阻止 `SendInput` 的会话中不能保证可用。
+但并未真正提交状态。本项目会先识别状态未变化，再向控件所属的 Qt 顶层窗口或弹出窗口
+发送有超时保护的窗口消息，不移动物理光标；只有 UI Automation 最终暴露目标状态时才
+报告成功。传统物理鼠标/键盘回退仍依赖 Windows 前台输入权限，在阻止 `SendInput` 的
+会话中不能保证可用。
 
 ## 快速示例
 

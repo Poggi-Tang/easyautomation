@@ -31,6 +31,7 @@ The format is based on Keep a Changelog and is maintained automatically by Seman
 - False double-click merging, stale indexed cache reuse, parent-window image lookup, and Win+D lookup side effects
 - Desktop/taskbar XPath depth, scoped combo-box selection, tri-state toggle verification, and text replacement fallback
 - Qt provider false-success detection, stable control references, structured MCP postconditions, and session cleanup
+- Verified Qt window-message fallback for non-editable combo-box selection and tree expansion/collapse
 
 ## [0.1.0] - 2026-03-16
 
