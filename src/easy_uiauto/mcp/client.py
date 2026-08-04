@@ -2,7 +2,7 @@
 
 Usage as context manager:
     with UIAutomationClient() as client:
-        client.activate_window("SimuLab")
+        client.activate_window("My Application")
         client.click(name="File", control_type="MenuItemControl")
 
 Usage as standalone:

@@ -451,7 +451,7 @@ if __name__ == "__main__":
     root = tk.Tk()
     root.withdraw()
 
-    ctrl2 = uiautomation.WindowControl(Name='SimuLab5.1')  # 按你的场景
+    ctrl2 = uiautomation.WindowControl(Name='My Application')  # Replace with your window title.
     box_track = ScreenLineBox(root, ctrl2, mode="track", interval_ms=100)
 
     root.mainloop()

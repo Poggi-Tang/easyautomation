@@ -631,7 +631,7 @@ def capture_control_record_at_position(
     Args:
         x: Screen X coordinate.
         y: Screen Y coordinate.
-        alias: Stable control alias to store, e.g. SimuLab.NewProjectDialog.FinishOk.
+        alias: Stable control alias to store, e.g. MyApplication.NewProjectDialog.FinishOk.
         app_name: Optional app/domain name. Defaults to the owning window name.
         notes: Human-readable purpose or caveats.
         tags: Comma-separated search tags.

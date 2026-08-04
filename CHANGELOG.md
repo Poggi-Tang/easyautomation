@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog and is maintained automatically by Semantic Release.
 
-## [0.1.13] - 2026-08-04
+## [0.1.14] - 2026-08-04
 
 ### Added
 
@@ -18,6 +18,7 @@ The format is based on Keep a Changelog and is maintained automatically by Seman
 
 - Moved MCP implementation to `easy_uiauto.mcp`; use `python -m easy_uiauto.mcp.server`.
 - Made control-vector persistence opt-in through `EASY_UIAUTO_CONTROL_VECTOR_DB_DIR` instead of using a machine-specific path.
+- Replaced product-specific examples with generic application and control names.
 
 ## [0.1.0] - 2026-03-16
 
