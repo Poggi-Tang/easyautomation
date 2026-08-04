@@ -43,6 +43,34 @@ cd easyautomation
 pip install -e .
 ```
 
+### MCP Server
+
+Install the optional MCP dependencies when using easy-uiauto from an MCP client:
+
+```bash
+pip install "easy-uiauto[mcp]"
+```
+
+The MCP server is part of the library and reuses the same automation APIs:
+
+```bash
+easy_uiauto --help
+easy_uiauto --version
+easy_uiauto
+```
+
+The long-running TCP service is also available:
+
+```bash
+easy_uiauto_service --help
+python -m easy_uiauto.mcp.service --port 9876
+```
+
+For MCP client configuration, start the server with `python -m easy_uiauto.mcp.server`.
+Control-vector persistence is optional. To enable it, set
+`EASY_UIAUTO_CONTROL_VECTOR_DB_DIR` to a directory containing
+`control_vector_store.py`; otherwise capture tools still return records but do not persist them.
+
 ## Quick Start
 
 ### Basic Control Operations

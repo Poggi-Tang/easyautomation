@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "easy-uiauto"
-version = "0.1.8"
+version = "0.1.9"
 description = "UI automation toolkit based on pyautogui and uiautomation"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -15,6 +15,7 @@ dependencies = [
     "pyperclip>=1.8.0",
     "build>=1.4.0",
 ]
+
 keywords = ["auto", "ui", "uiauto", "automation", "gui-testing"]
 authors = [
     {name = "Poggi-Tang", email = "2322806855@qq.com"}
@@ -33,6 +34,14 @@ classifiers = [
     "Topic :: Software Development :: Testing",
 ]
 
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+]
+mcp = [
+    "mcp[cli]>=1.0.0",
+]
+
 [project.urls]
 Homepage = "https://github.com/Poggi-Tang/easyautomation"
 Repository = "https://github.com/Poggi-Tang/easyautomation.git"
@@ -41,7 +50,8 @@ Changelog = "https://github.com/Poggi-Tang/easyautomation/blob/master/CHANGELOG.
 Documentation = "https://github.com/Poggi-Tang/easyautomation/blob/master/README.md"
 
 [project.scripts]
-easy-uiauto = "easyautomation:main"
+easy_uiauto = "easy_uiauto.mcp.server:main"
+easy_uiauto_service = "easy_uiauto.mcp.service:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
@@ -54,14 +64,14 @@ namespaces = false
 [tool.pytest.ini_options]
 minversion = "8.0"
 addopts = "-ra --strict-markers --strict-config"
-testpaths = ["test"]
+testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_functions = ["test_*"]
 
 [tool.ruff]
 line-length = 100
 target-version = "py310"
-src = ["src", "test"]
+src = ["src", "tests"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP"]

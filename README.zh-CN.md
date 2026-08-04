@@ -40,6 +40,33 @@ cd easyautomation
 pip install -e .
 ```
 
+### MCP 服务
+
+通过 MCP 客户端使用时，安装可选的 MCP 依赖：
+
+```bash
+pip install "easy-uiauto[mcp]"
+```
+
+MCP 服务已内置于库中，直接复用同一套自动化 API：
+
+```bash
+easy_uiauto --help
+easy_uiauto --version
+easy_uiauto
+```
+
+也提供常驻 TCP 服务：
+
+```bash
+easy_uiauto_service --help
+python -m easy_uiauto.mcp.service --port 9876
+```
+
+MCP 客户端配置可使用 `python -m easy_uiauto.mcp.server` 启动服务。
+控制向量持久化是可选能力：将 `EASY_UIAUTO_CONTROL_VECTOR_DB_DIR` 指向包含
+`control_vector_store.py` 的目录即可启用；未配置时，采集工具仍会返回记录，但不会持久化。
+
 ## 快速示例
 
 ### 基本控件操作
