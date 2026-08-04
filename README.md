@@ -59,6 +59,24 @@ easy_uiauto --version
 easy_uiauto
 ```
 
+Use the following commands to register, inspect, or remove the global MCP
+configuration for an installed client. They use the client's own CLI and never
+overwrite an existing entry with the same name.
+
+```bash
+easy_uiauto --install-codex
+easy_uiauto --show-codex-config
+easy_uiauto --uninstall-codex
+
+easy_uiauto --install-claude-code
+easy_uiauto --show-claude-code-config
+easy_uiauto --uninstall-claude-code
+```
+
+Codex registration uses its global `config.toml`. Claude Code registration uses
+the `user` scope, so it is available to every local project. Restart the client
+after installing or removing the server.
+
 The long-running TCP service is also available:
 
 ```bash

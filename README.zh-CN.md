@@ -56,6 +56,22 @@ easy_uiauto --version
 easy_uiauto
 ```
 
+可通过下面的命令安装、查看或卸载已安装客户端中的全局 MCP 配置。命令调用客户端
+自身的 CLI；若已存在同名配置，不会覆盖它。
+
+```bash
+easy_uiauto --install-codex
+easy_uiauto --show-codex-config
+easy_uiauto --uninstall-codex
+
+easy_uiauto --install-claude-code
+easy_uiauto --show-claude-code-config
+easy_uiauto --uninstall-claude-code
+```
+
+Codex 会写入全局 `config.toml`；Claude Code 会写入 `user` 作用域，因此对本机所有
+项目生效。安装或卸载后需要重启相应客户端。
+
 也提供常驻 TCP 服务：
 
 ```bash

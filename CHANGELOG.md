@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog and is maintained automatically by Semantic Release.
 
-## [0.1.11] - 2026-08-04
+## [0.1.13] - 2026-08-04
 
 ### Added
 
@@ -12,6 +12,7 @@ The format is based on Keep a Changelog and is maintained automatically by Seman
 - `easy_uiauto` and `easy_uiauto_service` command-line entry points with `--help` and `--version`.
 - Batch action execution through the MCP `run_actions` tool and TCP client/service.
 - MCP CLI regression tests and CI coverage for the `mcp` extra.
+- Opt-in commands to install, inspect, and uninstall the MCP server in Codex and Claude Code.
 
 ### Changed
 

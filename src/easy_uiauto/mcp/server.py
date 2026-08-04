@@ -30,6 +30,7 @@ from easy_uiauto.utils import (
 import uiautomation
 
 from .. import __version__
+from . import configuration
 
 # Disable pyautogui failsafe for automation (moving mouse to corner won't crash)
 pyautogui.FAILSAFE = False
@@ -1383,12 +1384,61 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         action="version",
         version=f"easy_uiauto {__version__}",
     )
+    actions = parser.add_mutually_exclusive_group()
+    actions.add_argument(
+        "--install-codex",
+        action="store_true",
+        help="Add easy_uiauto to the global Codex MCP configuration.",
+    )
+    actions.add_argument(
+        "--uninstall-codex",
+        action="store_true",
+        help="Remove easy_uiauto from the global Codex MCP configuration.",
+    )
+    actions.add_argument(
+        "--show-codex-config",
+        action="store_true",
+        help="Show the easy_uiauto MCP entry configured in Codex.",
+    )
+    actions.add_argument(
+        "--install-claude-code",
+        action="store_true",
+        help="Add easy_uiauto to the user-scoped Claude Code MCP configuration.",
+    )
+    actions.add_argument(
+        "--uninstall-claude-code",
+        action="store_true",
+        help="Remove easy_uiauto from the user-scoped Claude Code MCP configuration.",
+    )
+    actions.add_argument(
+        "--show-claude-code-config",
+        action="store_true",
+        help="Show the easy_uiauto MCP entry configured in Claude Code.",
+    )
     return parser
 
 
 def main(argv: Optional[list[str]] = None):
     """Run the MCP server."""
-    _build_arg_parser().parse_args(argv)
+    parser = _build_arg_parser()
+    args = parser.parse_args(argv)
+    actions = {
+        "install_codex": configuration.install_codex,
+        "uninstall_codex": configuration.uninstall_codex,
+        "show_codex_config": configuration.show_codex,
+        "install_claude_code": configuration.install_claude_code,
+        "uninstall_claude_code": configuration.uninstall_claude_code,
+        "show_claude_code_config": configuration.show_claude_code,
+    }
+    for option, action in actions.items():
+        if getattr(args, option):
+            try:
+                output = action()
+            except RuntimeError as error:
+                parser.error(str(error))
+            if output:
+                print(output)
+            return
     mcp.run()
 
 
