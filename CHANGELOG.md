@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog and is maintained automatically by Semantic Release.
 
+## [0.1.16] - 2026-08-10
+
+### Fixed
+
+- Send an explicit HTTP User-Agent for remote vision API requests so channels that reject the Python default client can accept them.
+
 ## [0.1.15] - 2026-08-10
 
 ### Added

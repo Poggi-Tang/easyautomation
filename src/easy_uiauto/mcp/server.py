@@ -291,14 +291,23 @@ def _find_control_by_vision(
     request = urlrequest.Request(
         url,
         data=json.dumps(payload).encode("utf-8"),
-        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "User-Agent": f"easy-uiauto/{__version__}",
+        },
         method="POST",
     )
     try:
         with urlrequest.urlopen(request, timeout=45) as response:
             body = json.loads(response.read().decode("utf-8"))
     except urlerror.HTTPError as error:
-        raise RuntimeError(f"Vision API request failed with HTTP {error.code}") from error
+        try:
+            detail = json.loads(error.read().decode("utf-8")).get("error", {}).get("message", "")
+        except Exception:
+            detail = ""
+        suffix = f": {detail}" if detail else ""
+        raise RuntimeError(f"Vision API request failed with HTTP {error.code}{suffix}") from error
     except urlerror.URLError as error:
         raise RuntimeError(f"Vision API request failed: {error.reason}") from error
 
