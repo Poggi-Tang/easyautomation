@@ -114,6 +114,33 @@ Control-vector persistence is optional. To enable it, set
 `EASY_UIAUTO_CONTROL_VECTOR_DB_DIR` to a directory containing
 `control_vector_store.py`; otherwise capture tools still return records but do not persist them.
 
+Control lookup uses the library's canonical `LOCATION` object rather than a
+flat selector. Obtain it from a recorded action or from
+`get_control_at_position`, then pass the returned `LOCATION` object directly to
+`find_control`:
+
+```json
+{
+  "WindowName": "My Application",
+  "Name": "Save",
+  "ClassName": "ButtonClass",
+  "ControlType": "ButtonControl",
+  "foundIndex": 1,
+  "AutomationId": "saveButton",
+  "Xpath": [
+    {"ControlType": "WindowControl", "Name": "My Application", "searchDepth": 1},
+    {"ControlType": "ButtonControl", "Name": "Save", "foundIndex": 1, "searchDepth": 2}
+  ],
+  "Img": "",
+  "PARAMETERS": {}
+}
+```
+
+`find_control` also accepts a complete recorded action containing `LOCATION`
+and the complete result from `get_control_at_position`. Legacy flat arguments
+remain supported for compatibility, but full XPath data is more reliable for
+duplicate or deeply nested controls.
+
 ## Quick Start
 
 ### Basic Control Operations

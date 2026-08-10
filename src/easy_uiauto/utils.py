@@ -937,12 +937,13 @@ def find_control(LOCATION,debug= False):
         xpath = eval(LOCATION['Xpath'])
     else:
         xpath = LOCATION.get('Xpath', [])
-    if 'WorkerW' == xpath[0].get('ClassName'):
+    if xpath and 'WorkerW' == xpath[0].get('ClassName'):
         uiautomation.SendKeys('{Win}d', 0, 0)
         push_message("桌面已激活")
     if WindowName and WindowName != CURRENT_APP_NAME:
         # 激活窗口
-        if WindowName == '任务栏' or xpath[0].get('Name') == '任务栏' or xpath[0].get('ClassName') == 'Shell_TrayWnd':
+        if WindowName == '任务栏' or (xpath and (
+                xpath[0].get('Name') == '任务栏' or xpath[0].get('ClassName') == 'Shell_TrayWnd')):
             push_message(f"Windos任务栏无需激活")
             return True
         if set_top_window(window_title=WindowName):
@@ -1200,7 +1201,7 @@ def disassemble_location(LOCATION):
     WindowName = LOCATION.get('WindowName', '')
     Name = LOCATION.get('Name', '')
     ClassName = LOCATION.get('ClassName', '')
-    ControlType = LOCATION.get('Type', '')
+    ControlType = LOCATION.get('ControlType', LOCATION.get('Type', ''))
     foundIndex = LOCATION.get('foundIndex', 0)
     AutomationId = LOCATION.get('AutomationId', '')
     Xpath = LOCATION.get('Xpath', '[]')

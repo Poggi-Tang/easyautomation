@@ -104,7 +104,7 @@ class UIAutomationClient:
 
     def smart_find(self, window_name: str, name: str = "", control_type: str = "",
                    class_name: str = "", max_depth: int = 6) -> dict | str:
-        """Find a control using control-tree walk (bypasses easy-uiauto find_control bug)."""
+        """Find a control using a direct control-tree walk."""
         return self._call("smart_find", window_name=window_name, name=name,
                          control_type=control_type, class_name=class_name, max_depth=max_depth)
 

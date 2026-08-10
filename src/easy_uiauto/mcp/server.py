@@ -33,6 +33,7 @@ import uiautomation
 
 from .. import __version__
 from . import configuration
+from .protocol import location_from_xpath, normalize_location
 
 # Disable pyautogui failsafe for automation (moving mouse to corner won't crash)
 pyautogui.FAILSAFE = False
@@ -480,12 +481,19 @@ def _rect_to_dict(rect) -> dict:
 
 
 def _normalize_xpath_step(step: dict) -> dict:
-    return {
+    normalized = {
         "control_type": step.get("control_type") or step.get("ControlType") or "",
         "name": step.get("name") or step.get("Name") or "",
         "class_name": step.get("class_name") or step.get("ClassName") or "",
         "automation_id": step.get("automation_id") or step.get("AutomationId") or "",
     }
+    found_index = step.get("found_index", step.get("foundIndex"))
+    search_depth = step.get("search_depth", step.get("searchDepth"))
+    if found_index not in (None, ""):
+        normalized["found_index"] = found_index
+    if search_depth not in (None, ""):
+        normalized["search_depth"] = search_depth
+    return normalized
 
 
 def _record_from_control(ctrl, xpath_list: list, alias: str = "", app_name: str = "",
@@ -528,6 +536,7 @@ def _record_from_control(ctrl, xpath_list: list, alias: str = "", app_name: str 
         "rect": rect,
         "patterns": [],
         "tags": [t.strip() for t in tags.split(",") if t.strip()],
+        "LOCATION": location_from_xpath(xpath_list),
     }
 
 
@@ -758,7 +767,8 @@ def get_control_tree(
 
 @mcp.tool()
 def find_control(
-    window_name: str,
+    location: Optional[dict] = None,
+    window_name: str = "",
     name: str = "",
     class_name: str = "",
     control_type: str = "",
@@ -766,13 +776,16 @@ def find_control(
     found_index: int = 0,
     xpath: str = "",
 ) -> str:
-    """Find a specific control in a window and return its properties.
+    """Find a control from a complete easy_uiauto LOCATION object.
 
-    Use get_control_tree first to discover what controls exist, then use this
-    to locate a specific one. At least one of: name, class_name, control_type,
-    automation_id, or xpath should be provided.
+    Prefer ``location`` from an easy_uiauto recorded action or from
+    ``get_control_at_position``. The complete XPath retains hierarchy,
+    duplicate indexes, and search depth. Legacy individual selector arguments
+    remain available for compatibility.
 
     Args:
+        location: Complete LOCATION object, a recorded action containing
+            LOCATION, or a coordinate result containing LOCATION.
         window_name: Parent window title.
         name: Control name (UIA Name property).
         class_name: Control class name.
@@ -782,17 +795,20 @@ def find_control(
         xpath: JSON string of XPath path list, e.g. '[{"ControlType":"WindowControl","Name":"Notepad"}]'.
     """
     try:
-        location = _build_location(
-            window_name=window_name,
-            name=name,
-            class_name=class_name,
-            control_type=control_type,
-            automation_id=automation_id,
-            found_index=found_index,
-            xpath=xpath,
-        )
+        if location is not None:
+            resolved_location = normalize_location(location)
+        else:
+            resolved_location = _build_location(
+                window_name=window_name,
+                name=name,
+                class_name=class_name,
+                control_type=control_type,
+                automation_id=automation_id,
+                found_index=found_index,
+                xpath=xpath,
+            )
 
-        ctrl = _find_control(location, debug=False)
+        ctrl = _find_control(resolved_location, debug=False)
         if not ctrl or ctrl is False:
             return f"Error: Control not found with the given parameters"
 
@@ -815,6 +831,7 @@ def find_control(
             "bounds": bounds,
             "IsEnabled": getattr(ctrl, 'IsEnabled', True),
             "IsVisible": getattr(ctrl, 'IsVisible', True),
+            "LOCATION": resolved_location,
         }
         return json.dumps(result, ensure_ascii=False, indent=2)
 
@@ -848,6 +865,7 @@ def get_control_at_position(x: int, y: int) -> str:
         except Exception:
             bounds = {}
 
+        location = location_from_xpath(xpath_list)
         result = {
             "Name": ctrl.Name or "",
             "ClassName": ctrl.ClassName or "",
@@ -855,6 +873,7 @@ def get_control_at_position(x: int, y: int) -> str:
             "AutomationId": ctrl.AutomationId or "",
             "bounds": bounds,
             "xpath": xpath_list,
+            "LOCATION": location,
         }
         return json.dumps(result, ensure_ascii=False, indent=2)
 

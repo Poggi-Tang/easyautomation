@@ -47,7 +47,13 @@ import uiautomation
 # ---------------------------------------------------------------------------
 # Local protocol helpers
 # ---------------------------------------------------------------------------
-from .protocol import build_location, pack_response, parse_params
+from .protocol import (
+    build_location,
+    location_from_xpath,
+    normalize_location,
+    pack_response,
+    parse_params,
+)
 from .. import __version__
 
 # ---------------------------------------------------------------------------
@@ -786,11 +792,14 @@ class UIAutomationService:
             params, "window_name", "name", "class_name", "control_type",
             "automation_id", "found_index", "xpath",
         )
-        location = build_location(
-            window_name=window_name, name=name, class_name=class_name,
-            control_type=control_type, automation_id=automation_id,
-            found_index=found_index, xpath=xpath,
-        )
+        if params.get("location") is not None:
+            location = normalize_location(params["location"])
+        else:
+            location = build_location(
+                window_name=window_name, name=name, class_name=class_name,
+                control_type=control_type, automation_id=automation_id,
+                found_index=found_index, xpath=xpath,
+            )
         ctrl = _find_control_utils(location, debug=False)
         if not ctrl or ctrl is False:
             return f"Error: Control not found"
@@ -812,6 +821,7 @@ class UIAutomationService:
             "bounds": bounds,
             "IsEnabled": getattr(ctrl, "IsEnabled", True),
             "IsVisible": getattr(ctrl, "IsVisible", True),
+            "LOCATION": location,
         }
 
     # ---- handler: get_control_at_position ---------------------------------
@@ -838,6 +848,7 @@ class UIAutomationService:
             "AutomationId": ctrl.AutomationId or "",
             "bounds": bounds,
             "xpath": xpath_list,
+            "LOCATION": location_from_xpath(xpath_list),
         }
 
     # ---- handler: drag_control --------------------------------------------

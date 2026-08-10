@@ -106,6 +106,31 @@ MCP 客户端配置可使用 `python -m easy_uiauto.mcp.server` 启动服务。
 控制向量持久化是可选能力：将 `EASY_UIAUTO_CONTROL_VECTOR_DB_DIR` 指向包含
 `control_vector_store.py` 的目录即可启用；未配置时，采集工具仍会返回记录，但不会持久化。
 
+控件查找使用库原生的完整 `LOCATION` 结构，而不是扁平选择器。该结构可从录制动作中
+取得，也可调用 `get_control_at_position` 通过坐标生成；随后将返回的 `LOCATION` 对象
+直接传给 `find_control`：
+
+```json
+{
+  "WindowName": "我的应用",
+  "Name": "保存",
+  "ClassName": "ButtonClass",
+  "ControlType": "ButtonControl",
+  "foundIndex": 1,
+  "AutomationId": "saveButton",
+  "Xpath": [
+    {"ControlType": "WindowControl", "Name": "我的应用", "searchDepth": 1},
+    {"ControlType": "ButtonControl", "Name": "保存", "foundIndex": 1, "searchDepth": 2}
+  ],
+  "Img": "",
+  "PARAMETERS": {}
+}
+```
+
+`find_control` 也可直接接收包含 `LOCATION` 的完整录制动作，或者
+`get_control_at_position` 的完整返回结果。旧的扁平参数仍兼容，但遇到重名或深层控件时，
+应使用包含完整 XPath 的结构。
+
 ## 快速示例
 
 ### 基本控件操作
