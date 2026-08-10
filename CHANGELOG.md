@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog and is maintained automatically by Semantic Release.
 
+## [0.1.19] - 2026-08-10
+
+### Changed
+
+- Added installation checks, MCP smoke tests, source test commands, and OCR/AI vision diagnostics to `easy_uiauto --help`.
+
 ## [0.1.18] - 2026-08-10
 
 ### Changed
