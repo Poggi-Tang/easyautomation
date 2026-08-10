@@ -10,6 +10,8 @@ import re
 import subprocess
 import sys
 import time
+from urllib import error as urlerror
+from urllib import request as urlrequest
 from datetime import datetime
 from typing import Optional
 
@@ -93,6 +95,244 @@ def _build_location(
         "PARAMETERS": json.loads(parameters) if parameters else {},
     }
     return location
+
+
+def _screen_region(
+    region_x: int,
+    region_y: int,
+    region_width: int,
+    region_height: int,
+) -> Optional[tuple[int, int, int, int]]:
+    """Return a valid PyAutoGUI region, or None for the entire screen."""
+    values = (region_x, region_y, region_width, region_height)
+    if region_width == 0 and region_height == 0:
+        return None
+    if region_width <= 0 or region_height <= 0:
+        raise ValueError("region_width and region_height must both be positive")
+    return values
+
+
+def _box_to_dict(box) -> dict:
+    left, top, width, height = int(box.left), int(box.top), int(box.width), int(box.height)
+    return {
+        "left": left,
+        "top": top,
+        "width": width,
+        "height": height,
+        "center_x": left + width // 2,
+        "center_y": top + height // 2,
+    }
+
+
+def _locate_image(
+    image_path: str,
+    confidence: float,
+    grayscale: bool,
+    region: Optional[tuple[int, int, int, int]],
+) -> Optional[dict]:
+    """Locate an image template on screen and return its bounds, if present."""
+    if not os.path.isfile(image_path):
+        raise ValueError(f"Image template does not exist: {image_path}")
+    if not 0 < confidence <= 1:
+        raise ValueError("confidence must be greater than 0 and no greater than 1")
+
+    try:
+        box = pyautogui.locateOnScreen(
+            image_path,
+            confidence=confidence,
+            grayscale=grayscale,
+            region=region,
+        )
+    except (TypeError, NotImplementedError) as error:
+        raise RuntimeError(
+            "Image matching with confidence requires the vision extra: "
+            'pip install "easy-uiauto[mcp,vision]"'
+        ) from error
+    except Exception as error:
+        image_not_found = getattr(pyautogui, "ImageNotFoundException", ())
+        if image_not_found and isinstance(error, image_not_found):
+            return None
+        raise RuntimeError(f"Image matching failed: {error}") from error
+
+    return _box_to_dict(box) if box else None
+
+
+def _require_pytesseract():
+    try:
+        import pytesseract
+    except ImportError as error:
+        raise RuntimeError(
+            "OCR requires the vision extra: pip install \"easy-uiauto[mcp,vision]\""
+        ) from error
+    return pytesseract
+
+
+def _find_text_on_screen(
+    text: str,
+    language: str,
+    match_mode: str,
+    min_confidence: float,
+    region: Optional[tuple[int, int, int, int]],
+) -> Optional[dict]:
+    """Locate a single OCR text box on screen."""
+    if not text.strip():
+        raise ValueError("text must not be empty")
+    if match_mode not in {"contains", "exact"}:
+        raise ValueError("match_mode must be 'contains' or 'exact'")
+    if not 0 <= min_confidence <= 100:
+        raise ValueError("min_confidence must be between 0 and 100")
+
+    pytesseract = _require_pytesseract()
+    try:
+        screenshot = pyautogui.screenshot(region=region)
+        data = pytesseract.image_to_data(
+            screenshot,
+            lang=language,
+            output_type=pytesseract.Output.DICT,
+        )
+    except Exception as error:
+        raise RuntimeError(
+            "OCR failed. Install Tesseract OCR and ensure its executable is on PATH: "
+            f"{error}"
+        ) from error
+
+    needle = text.casefold().strip()
+    offset_x, offset_y = (region[0], region[1]) if region else (0, 0)
+    for index, candidate in enumerate(data.get("text", [])):
+        candidate = (candidate or "").strip()
+        if not candidate:
+            continue
+        try:
+            confidence = float(data["conf"][index])
+        except (KeyError, TypeError, ValueError):
+            continue
+        haystack = candidate.casefold()
+        matched = haystack == needle if match_mode == "exact" else needle in haystack
+        if not matched or confidence < min_confidence:
+            continue
+        left = int(data["left"][index]) + offset_x
+        top = int(data["top"][index]) + offset_y
+        width = int(data["width"][index])
+        height = int(data["height"][index])
+        return {
+            "text": candidate,
+            "confidence": confidence,
+            "left": left,
+            "top": top,
+            "width": width,
+            "height": height,
+            "center_x": left + width // 2,
+            "center_y": top + height // 2,
+        }
+    return None
+
+
+def _vision_api_settings(model: str) -> tuple[str, str, str]:
+    """Read the OpenAI-compatible remote vision API configuration."""
+    url = os.environ.get("EASY_UIAUTO_VISION_API_URL", "").strip()
+    api_key = os.environ.get("EASY_UIAUTO_VISION_API_KEY", "").strip()
+    configured_model = model.strip() or os.environ.get("EASY_UIAUTO_VISION_MODEL", "").strip()
+    if not url or not api_key or not configured_model:
+        raise RuntimeError(
+            "Remote vision requires EASY_UIAUTO_VISION_API_URL, "
+            "EASY_UIAUTO_VISION_API_KEY, and EASY_UIAUTO_VISION_MODEL."
+        )
+    return url, api_key, configured_model
+
+
+def _vision_response_json(content: str) -> dict:
+    """Extract the single JSON object required from a vision model response."""
+    content = content.strip()
+    if content.startswith("```"):
+        content = re.sub(r"^```(?:json)?\s*|\s*```$", "", content, flags=re.IGNORECASE)
+    try:
+        result = json.loads(content)
+    except json.JSONDecodeError as error:
+        raise RuntimeError("Vision API did not return a JSON object") from error
+    if not isinstance(result, dict):
+        raise RuntimeError("Vision API response must be a JSON object")
+    return result
+
+
+def _find_control_by_vision(
+    description: str,
+    model: str,
+    region: Optional[tuple[int, int, int, int]],
+) -> dict:
+    """Use a remote OpenAI-compatible vision API to locate one described control."""
+    if not description.strip():
+        raise ValueError("description must not be empty")
+    url, api_key, configured_model = _vision_api_settings(model)
+    screenshot = pyautogui.screenshot(region=region)
+    width, height = screenshot.size
+    buf = io.BytesIO()
+    screenshot.save(buf, format="PNG")
+    image_url = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
+    prompt = (
+        "Locate exactly one UI target in this screenshot. Target: "
+        f"{description}\nThe image is {width}x{height} pixels. Return JSON only: "
+        '{"found":true,"left":0,"top":0,"width":0,"height":0,"confidence":0.0}. '
+        "Use image-pixel coordinates. If absent, return {\"found\":false}."
+    )
+    payload = {
+        "model": configured_model,
+        "temperature": 0,
+        "messages": [
+            {"role": "system", "content": "You locate UI elements precisely and return JSON only."},
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {"type": "image_url", "image_url": {"url": image_url}},
+                ],
+            },
+        ],
+    }
+    request = urlrequest.Request(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urlrequest.urlopen(request, timeout=45) as response:
+            body = json.loads(response.read().decode("utf-8"))
+    except urlerror.HTTPError as error:
+        raise RuntimeError(f"Vision API request failed with HTTP {error.code}") from error
+    except urlerror.URLError as error:
+        raise RuntimeError(f"Vision API request failed: {error.reason}") from error
+
+    try:
+        content = body["choices"][0]["message"]["content"]
+    except (KeyError, IndexError, TypeError) as error:
+        raise RuntimeError("Vision API response did not contain a chat completion") from error
+    if isinstance(content, list):
+        content = "".join(item.get("text", "") for item in content if isinstance(item, dict))
+    result = _vision_response_json(str(content))
+    if not result.get("found", False):
+        return {"found": False}
+
+    try:
+        left = int(result["left"])
+        top = int(result["top"])
+        box_width = int(result["width"])
+        box_height = int(result["height"])
+    except (KeyError, TypeError, ValueError) as error:
+        raise RuntimeError("Vision API match must include integer left, top, width, and height") from error
+    if left < 0 or top < 0 or box_width <= 0 or box_height <= 0 or left + box_width > width or top + box_height > height:
+        raise RuntimeError("Vision API returned bounds outside the screenshot")
+    offset_x, offset_y = (region[0], region[1]) if region else (0, 0)
+    return {
+        "found": True,
+        "left": left + offset_x,
+        "top": top + offset_y,
+        "width": box_width,
+        "height": box_height,
+        "center_x": left + offset_x + box_width // 2,
+        "center_y": top + offset_y + box_height // 2,
+        "confidence": result.get("confidence"),
+        "model": configured_model,
+    }
 
 
 def _mode_blocks_operation() -> Optional[str]:
@@ -1331,6 +1571,187 @@ def take_screenshot(
 
 
 # ---------------------------------------------------------------------------
+# Vision fallback: image templates and OCR text
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def find_control_by_image(
+    image_path: str,
+    confidence: float = 0.85,
+    grayscale: bool = False,
+    region_x: int = 0,
+    region_y: int = 0,
+    region_width: int = 0,
+    region_height: int = 0,
+) -> str:
+    """Find an on-screen control from an image template.
+
+    Requires ``pip install \"easy-uiauto[mcp,vision]\"``. Use this only when
+    UI Automation properties cannot identify the target. Returns matching bounds
+    and center coordinates, or ``found: false`` when no match is present.
+    """
+    try:
+        region = _screen_region(region_x, region_y, region_width, region_height)
+        match = _locate_image(image_path, confidence, grayscale, region)
+        return json.dumps({"found": match is not None, "match": match}, ensure_ascii=False)
+    except Exception as error:
+        return f"Error finding image: {error}"
+
+
+@mcp.tool()
+def click_by_image(
+    image_path: str,
+    confidence: float = 0.85,
+    grayscale: bool = False,
+    region_x: int = 0,
+    region_y: int = 0,
+    region_width: int = 0,
+    region_height: int = 0,
+    button: str = "left",
+    click_type: str = "single",
+) -> str:
+    """Find an image template on screen and click its center.
+
+    Requires ``pip install \"easy-uiauto[mcp,vision]\"``. Prefer UIA control
+    selection when available; image matching is a visual fallback.
+    """
+    try:
+        blocked = _mode_blocks_operation()
+        if blocked:
+            return blocked
+        region = _screen_region(region_x, region_y, region_width, region_height)
+        match = _locate_image(image_path, confidence, grayscale, region)
+        if match is None:
+            return "Error: Image template was not found on screen"
+        if click_type == "double":
+            pyautogui.doubleClick(match["center_x"], match["center_y"], button=button)
+        else:
+            pyautogui.click(match["center_x"], match["center_y"], button=button)
+        _auto_learn_point("Click image template", match["center_x"], match["center_y"])
+        return json.dumps({"ok": True, "match": match}, ensure_ascii=False)
+    except Exception as error:
+        return f"Error clicking image: {error}"
+
+
+@mcp.tool()
+def find_text_on_screen(
+    text: str,
+    language: str = "eng",
+    match_mode: str = "contains",
+    min_confidence: float = 60.0,
+    region_x: int = 0,
+    region_y: int = 0,
+    region_width: int = 0,
+    region_height: int = 0,
+) -> str:
+    """Locate visible text using OCR.
+
+    Requires ``pip install \"easy-uiauto[mcp,vision]\"`` and a local Tesseract
+    OCR installation. ``language`` is a Tesseract language code, such as ``eng``
+    or ``chi_sim``. Returns matching bounds and center coordinates.
+    """
+    try:
+        region = _screen_region(region_x, region_y, region_width, region_height)
+        match = _find_text_on_screen(text, language, match_mode, min_confidence, region)
+        return json.dumps({"found": match is not None, "match": match}, ensure_ascii=False)
+    except Exception as error:
+        return f"Error finding text with OCR: {error}"
+
+
+@mcp.tool()
+def click_text_on_screen(
+    text: str,
+    language: str = "eng",
+    match_mode: str = "contains",
+    min_confidence: float = 60.0,
+    region_x: int = 0,
+    region_y: int = 0,
+    region_width: int = 0,
+    region_height: int = 0,
+    button: str = "left",
+    click_type: str = "single",
+) -> str:
+    """Locate visible text through OCR and click its center.
+
+    Requires the same vision dependencies as :func:`find_text_on_screen`.
+    """
+    try:
+        blocked = _mode_blocks_operation()
+        if blocked:
+            return blocked
+        region = _screen_region(region_x, region_y, region_width, region_height)
+        match = _find_text_on_screen(text, language, match_mode, min_confidence, region)
+        if match is None:
+            return f"Error: OCR text was not found: {text}"
+        if click_type == "double":
+            pyautogui.doubleClick(match["center_x"], match["center_y"], button=button)
+        else:
+            pyautogui.click(match["center_x"], match["center_y"], button=button)
+        _auto_learn_point("Click OCR text", match["center_x"], match["center_y"])
+        return json.dumps({"ok": True, "match": match}, ensure_ascii=False)
+    except Exception as error:
+        return f"Error clicking OCR text: {error}"
+
+
+@mcp.tool()
+def find_control_by_vision(
+    description: str,
+    model: str = "",
+    region_x: int = 0,
+    region_y: int = 0,
+    region_width: int = 0,
+    region_height: int = 0,
+) -> str:
+    """Locate a control with a remote multimodal API.
+
+    The screenshot is sent only to the API configured through
+    ``EASY_UIAUTO_VISION_API_URL``, ``EASY_UIAUTO_VISION_API_KEY``, and
+    ``EASY_UIAUTO_VISION_MODEL``. The endpoint must support OpenAI-compatible
+    chat completions with image URLs. Use UIA, OCR, or template matching first
+    whenever a deterministic selector is available.
+    """
+    try:
+        region = _screen_region(region_x, region_y, region_width, region_height)
+        return json.dumps(_find_control_by_vision(description, model, region), ensure_ascii=False)
+    except Exception as error:
+        return f"Error finding control with vision API: {error}"
+
+
+@mcp.tool()
+def click_by_vision(
+    description: str,
+    model: str = "",
+    region_x: int = 0,
+    region_y: int = 0,
+    region_width: int = 0,
+    region_height: int = 0,
+    button: str = "left",
+    click_type: str = "single",
+) -> str:
+    """Locate a control with a remote multimodal API and click its center.
+
+    This is a final visual fallback. It sends a screenshot to the configured
+    remote API, so do not use it for sensitive screens unless that API is approved.
+    """
+    try:
+        blocked = _mode_blocks_operation()
+        if blocked:
+            return blocked
+        region = _screen_region(region_x, region_y, region_width, region_height)
+        match = _find_control_by_vision(description, model, region)
+        if not match["found"]:
+            return "Error: Vision API did not find the requested control"
+        if click_type == "double":
+            pyautogui.doubleClick(match["center_x"], match["center_y"], button=button)
+        else:
+            pyautogui.click(match["center_x"], match["center_y"], button=button)
+        _auto_learn_point("Click vision API match", match["center_x"], match["center_y"])
+        return json.dumps({"ok": True, "match": match}, ensure_ascii=False)
+    except Exception as error:
+        return f"Error clicking control with vision API: {error}"
+
+
+# ---------------------------------------------------------------------------
 # Scroll helper (raw mouse scroll without control targeting)
 # ---------------------------------------------------------------------------
 
@@ -1376,7 +1797,9 @@ def _build_arg_parser() -> argparse.ArgumentParser:
             "  mouse: click, click_at_position, move_mouse, drag_control, scroll, mouse_scroll\n"
             "  keyboard: type_text, set_text, press_key, hotkey\n"
             "  batch: run_action, run_actions\n"
-            "  screenshot: take_screenshot"
+            "  screenshot: take_screenshot\n"
+            "  vision: find_control_by_image, click_by_image, find_text_on_screen, click_text_on_screen,\n"
+            "          find_control_by_vision, click_by_vision"
         ),
     )
     parser.add_argument(

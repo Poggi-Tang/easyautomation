@@ -48,6 +48,29 @@ pip install -e .
 pip install "easy-uiauto[mcp]"
 ```
 
+需要本地 OCR 与图片模板匹配兜底时，安装视觉可选依赖：
+
+```bash
+pip install "easy-uiauto[mcp,vision]"
+```
+
+`vision` 包含 OpenCV 模板匹配和 Python Tesseract 适配器。OCR 还需要在系统中安装
+Tesseract 可执行文件及相应语言数据，例如 `eng` 或 `chi_sim`。对应 MCP 工具为
+`find_control_by_image`、`click_by_image`、`find_text_on_screen`、
+`click_text_on_screen`。
+
+远程多模态定位不会运行本地模型，也不依赖 AI SDK。设置一个 OpenAI 兼容视觉 API 的
+端点和凭证后，可使用 `find_control_by_vision` 或 `click_by_vision`：
+
+```bash
+EASY_UIAUTO_VISION_API_URL=https://your-api.example/v1/chat/completions
+EASY_UIAUTO_VISION_API_KEY=your-api-key
+EASY_UIAUTO_VISION_MODEL=your-vision-model
+```
+
+这两个工具仅在调用时向配置的端点上传当前截图。应优先采用 UIA、OCR 或图片模板匹配，
+多模态 API 只作为最后兜底。
+
 MCP 服务已内置于库中，直接复用同一套自动化 API：
 
 ```bash

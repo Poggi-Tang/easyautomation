@@ -51,6 +51,31 @@ Install the optional MCP dependencies when using easy-uiauto from an MCP client:
 pip install "easy-uiauto[mcp]"
 ```
 
+Install local OCR and image-template fallback support when needed:
+
+```bash
+pip install "easy-uiauto[mcp,vision]"
+```
+
+The `vision` extra provides OpenCV template matching and the Python Tesseract
+adapter. OCR also requires the system Tesseract executable and relevant language
+data (for example `eng` or `chi_sim`). The MCP tools are
+`find_control_by_image`, `click_by_image`, `find_text_on_screen`, and
+`click_text_on_screen`.
+
+Remote multimodal location does not run a local model or require an AI SDK. Set
+an OpenAI-compatible vision endpoint and credentials, then use
+`find_control_by_vision` or `click_by_vision`:
+
+```bash
+EASY_UIAUTO_VISION_API_URL=https://your-api.example/v1/chat/completions
+EASY_UIAUTO_VISION_API_KEY=your-api-key
+EASY_UIAUTO_VISION_MODEL=your-vision-model
+```
+
+Those tools upload the current screenshot to the configured endpoint only for
+that request. Use them as a final fallback after UIA, OCR, or image matching.
+
 The MCP server is part of the library and reuses the same automation APIs:
 
 ```bash

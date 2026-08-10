@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "easy-uiauto"
-version = "0.1.14"
+version = "0.1.15"
 description = "UI automation toolkit based on pyautogui and uiautomation"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -40,6 +40,10 @@ dev = [
 ]
 mcp = [
     "mcp[cli]>=1.0.0,<2.0.0",
+]
+vision = [
+    "opencv-python>=4.8",
+    "pytesseract>=0.3.10",
 ]
 
 [project.urls]
