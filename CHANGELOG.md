@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog and is maintained automatically by Semantic Release.
 
+## [0.1.18] - 2026-08-10
+
+### Changed
+
+- Expanded `easy_uiauto --help` with LOCATION, recording, replay, batch, mode, visual fallback, and MCP client configuration workflows.
+
 ## [0.1.17] - 2026-08-10
 
 ### Added

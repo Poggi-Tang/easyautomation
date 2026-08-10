@@ -18,7 +18,7 @@ def _run_module(module: str, option: str) -> str:
 
 def test_mcp_server_version() -> None:
     output = _run_module("easy_uiauto.mcp.server", "--version")
-    assert output.strip() == "easy_uiauto 0.1.17"
+    assert output.strip() == "easy_uiauto 0.1.18"
 
 
 def test_mcp_service_help() -> None:
@@ -33,3 +33,16 @@ def test_mcp_server_help_lists_client_configuration_actions() -> None:
     assert "--uninstall-codex" in output
     assert "--install-claude-code" in output
     assert "--uninstall-claude-code" in output
+
+
+def test_mcp_server_help_explains_core_workflows() -> None:
+    output = _run_module("easy_uiauto.mcp.server", "--help")
+
+    assert "Control location workflow (preferred):" in output
+    assert "find_control(location=LOCATION)" in output
+    assert "run_record(write_file=True)" in output
+    assert "from easy_uiauto.record import run_record" in output
+    assert "run_action(action_json='<recorded action JSON>')" in output
+    assert "UIA LOCATION -> OCR or image template -> remote AI vision" in output
+    assert "EASY_UIAUTO_VISION_API_URL" in output
+    assert "Restart the client" in output
