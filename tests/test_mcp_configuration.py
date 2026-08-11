@@ -7,6 +7,29 @@ import sys
 from easy_uiauto.mcp import configuration
 
 
+def test_reads_only_existing_easy_uiauto_mcp_environment(monkeypatch, tmp_path) -> None:
+    codex_home = tmp_path / ".codex"
+    codex_home.mkdir()
+    (codex_home / "config.toml").write_text(
+        """
+[mcp_servers.easy_uiauto]
+command = "python"
+
+[mcp_servers.easy_uiauto.env]
+EASY_UIAUTO_VISION_API_KEY = "existing-secret"
+
+[mcp_servers.unrelated.env]
+EASY_UIAUTO_VISION_API_KEY = "wrong-secret"
+""".strip(),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("CODEX_HOME", str(codex_home))
+
+    assert configuration._read_existing_codex_environment(
+        configuration.VISION_API_KEY
+    ) == "existing-secret"
+
+
 def test_install_codex_uses_current_python(monkeypatch) -> None:
     calls: list[tuple[str, list[str]]] = []
 
@@ -59,3 +82,82 @@ def test_install_claude_code_uses_user_scope(monkeypatch) -> None:
             ],
         )
     ]
+
+
+def test_quick_setup_codex_reuses_existing_key_and_replaces_entry(monkeypatch) -> None:
+    writes: list[tuple[str, str]] = []
+    actions: list[str] = []
+
+    monkeypatch.setattr(
+        configuration,
+        "_existing_vision_value",
+        lambda name: "secret" if name == configuration.VISION_API_KEY else "",
+    )
+    monkeypatch.setattr(
+        configuration,
+        "_write_user_environment",
+        lambda name, value: writes.append((name, value)),
+    )
+    monkeypatch.setattr(configuration, "uninstall_codex", lambda: actions.append("remove"))
+    monkeypatch.setattr(configuration, "install_codex", lambda: actions.append("add"))
+    monkeypatch.setattr(configuration, "show_codex", lambda: "configured entry")
+    monkeypatch.setattr(
+        configuration,
+        "_prompt_api_key",
+        lambda: (_ for _ in ()).throw(AssertionError("key prompt was not expected")),
+    )
+
+    output = configuration.quick_setup_codex(
+        "https://api.example/v1/chat/completions",
+        "vision-model",
+        "1.2.3",
+    )
+
+    assert writes == [
+        (configuration.VISION_API_URL, "https://api.example/v1/chat/completions"),
+        (configuration.VISION_API_KEY, "secret"),
+        (configuration.VISION_MODEL, "vision-model"),
+    ]
+    assert actions == ["remove", "add"]
+    assert "easy_uiauto 1.2.3" in output
+    assert "secret" not in output
+    assert "Fully restart Codex" in output
+
+
+def test_quick_setup_codex_prompts_once_for_missing_key(monkeypatch) -> None:
+    prompts: list[str] = []
+
+    monkeypatch.setattr(configuration, "_existing_vision_value", lambda _name: "")
+    monkeypatch.setattr(configuration, "_write_user_environment", lambda _name, _value: None)
+    monkeypatch.setattr(configuration, "uninstall_codex", lambda: "")
+    monkeypatch.setattr(configuration, "install_codex", lambda: "")
+    monkeypatch.setattr(configuration, "show_codex", lambda: "configured entry")
+    monkeypatch.setattr(
+        configuration,
+        "_prompt_api_key",
+        lambda: prompts.append("key") or "new-secret",
+    )
+
+    output = configuration.quick_setup_codex(
+        "https://api.example/v1/chat/completions",
+        "vision-model",
+        "1.2.3",
+    )
+
+    assert prompts == ["key"]
+    assert "new-secret" not in output
+
+
+def test_quick_setup_codex_rejects_invalid_url_before_writing(monkeypatch) -> None:
+    monkeypatch.setattr(
+        configuration,
+        "_write_user_environment",
+        lambda _name, _value: (_ for _ in ()).throw(AssertionError("write was not expected")),
+    )
+
+    try:
+        configuration.quick_setup_codex("not-a-url", "vision-model", "1.2.3")
+    except RuntimeError as error:
+        assert "must start with" in str(error)
+    else:
+        raise AssertionError("invalid URL was accepted")

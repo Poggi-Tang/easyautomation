@@ -79,8 +79,18 @@ easy_uiauto --version
 easy_uiauto
 ```
 
-可通过下面的命令安装、查看或卸载已安装客户端中的全局 MCP 配置。命令调用客户端
-自身的 CLI；若已存在同名配置，不会覆盖它。
+下面的标准命令通过客户端自身的 CLI 安装、查看或卸载全局 MCP 配置。标准安装命令
+遇到同名配置时不会覆盖。
+
+需要远程 AI 视觉的 Codex 最小部署可使用快速配置命令。API Key 未存在于 Windows
+用户环境变量时，命令通过终端隐藏输入；由非交互式 Agent 执行时则弹出密码框。
+随后保存三个视觉变量，仅替换 `easy_uiauto` MCP 条目，并跳过 OCR 安装和 UI 实测：
+
+```bash
+easy_uiauto --quick-setup-codex \
+  --vision-url https://your-api.example/v1/chat/completions \
+  --vision-model your-vision-model
+```
 
 ```bash
 easy_uiauto --install-codex

@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog and is maintained automatically by Semantic Release.
 
+## [0.1.20] - 2026-08-10
+
+### Added
+
+- Added `--quick-setup-codex` for a minimal remote-vision deployment with hidden API-key input, user-scoped environment persistence, idempotent MCP replacement, and no OCR or UI test overhead.
+
 ## [0.1.19] - 2026-08-10
 
 ### Changed

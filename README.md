@@ -84,9 +84,21 @@ easy_uiauto --version
 easy_uiauto
 ```
 
-Use the following commands to register, inspect, or remove the global MCP
-configuration for an installed client. They use the client's own CLI and never
-overwrite an existing entry with the same name.
+The standard commands below register, inspect, or remove the global MCP
+configuration through the client's own CLI. The standard install command does
+not overwrite an existing entry with the same name.
+
+For a minimal Codex deployment with remote AI vision, use the quick setup
+command. When the API key is not already present in the Windows user
+environment, it prompts once through hidden terminal input or a password dialog
+for non-interactive agents. It persists the three vision variables, replaces
+only the `easy_uiauto` Codex MCP entry, and skips OCR installation and UI tests:
+
+```bash
+easy_uiauto --quick-setup-codex \
+  --vision-url https://your-api.example/v1/chat/completions \
+  --vision-model your-vision-model
+```
 
 ```bash
 easy_uiauto --install-codex

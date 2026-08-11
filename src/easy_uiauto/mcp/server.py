@@ -1840,6 +1840,8 @@ def _build_arg_parser() -> argparse.ArgumentParser:
             "  EASY_UIAUTO_VISION_API_KEY, and EASY_UIAUTO_VISION_MODEL.\n"
             "  Remote vision uploads the selected screenshot to the configured API.\n\n"
             "Client configuration:\n"
+            "  Fast AI setup (prompts securely for a missing API key):\n"
+            "    easy_uiauto --quick-setup-codex --vision-url <URL> --vision-model <MODEL>\n"
             "  easy_uiauto --install-codex | --show-codex-config | --uninstall-codex\n"
             "  easy_uiauto --install-claude-code | --show-claude-code-config\n"
             "              | --uninstall-claude-code\n"
@@ -1878,6 +1880,11 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     )
     actions = parser.add_mutually_exclusive_group()
     actions.add_argument(
+        "--quick-setup-codex",
+        action="store_true",
+        help="Configure remote vision and replace the global Codex MCP entry.",
+    )
+    actions.add_argument(
         "--install-codex",
         action="store_true",
         help="Add easy_uiauto to the global Codex MCP configuration.",
@@ -1907,6 +1914,18 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Show the easy_uiauto MCP entry configured in Claude Code.",
     )
+    parser.add_argument(
+        "--vision-url",
+        default="",
+        metavar="URL",
+        help="Remote vision API URL used by --quick-setup-codex.",
+    )
+    parser.add_argument(
+        "--vision-model",
+        default="",
+        metavar="MODEL",
+        help="Remote vision model used by --quick-setup-codex.",
+    )
     return parser
 
 
@@ -1914,6 +1933,17 @@ def main(argv: Optional[list[str]] = None):
     """Run the MCP server."""
     parser = _build_arg_parser()
     args = parser.parse_args(argv)
+    if args.quick_setup_codex:
+        try:
+            output = configuration.quick_setup_codex(
+                api_url=args.vision_url,
+                model=args.vision_model,
+                version=__version__,
+            )
+        except (RuntimeError, ValueError) as error:
+            parser.error(str(error))
+        print(output)
+        return
     actions = {
         "install_codex": configuration.install_codex,
         "uninstall_codex": configuration.uninstall_codex,

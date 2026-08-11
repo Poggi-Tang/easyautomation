@@ -2,14 +2,144 @@
 
 from __future__ import annotations
 
+import getpass
 import os
 import shutil
 import subprocess
 import sys
+from pathlib import Path
 
+import tomllib
 
 SERVER_NAME = "easy_uiauto"
 SERVER_MODULE = "easy_uiauto.mcp.server"
+VISION_API_URL = "EASY_UIAUTO_VISION_API_URL"
+VISION_API_KEY = "EASY_UIAUTO_VISION_API_KEY"
+VISION_MODEL = "EASY_UIAUTO_VISION_MODEL"
+
+
+def _read_user_environment(name: str) -> str:
+    """Read a user-scoped environment variable without exposing it."""
+    if os.name != "nt":
+        return os.environ.get(name, "")
+    import winreg
+
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment") as key:
+            value, _value_type = winreg.QueryValueEx(key, name)
+            return str(value)
+    except FileNotFoundError:
+        return ""
+
+
+def _write_user_environment(name: str, value: str) -> None:
+    """Persist one user-scoped environment variable without using setx."""
+    if not value:
+        raise ValueError(f"{name} must not be empty")
+    if os.name != "nt":
+        raise RuntimeError("Quick Codex setup is supported only on Windows")
+    import winreg
+
+    with winreg.CreateKey(winreg.HKEY_CURRENT_USER, "Environment") as key:
+        winreg.SetValueEx(key, name, 0, winreg.REG_SZ, value)
+    os.environ[name] = value
+
+
+def _read_existing_codex_environment(name: str) -> str:
+    """Read only easy_uiauto's existing MCP environment, never Codex auth data."""
+    codex_home = Path(os.environ.get("CODEX_HOME", Path.home() / ".codex"))
+    config_path = codex_home / "config.toml"
+    try:
+        with config_path.open("rb") as config_file:
+            config = tomllib.load(config_file)
+    except (FileNotFoundError, OSError, tomllib.TOMLDecodeError):
+        return ""
+    server = config.get("mcp_servers", {}).get(SERVER_NAME, {})
+    value = server.get("env", {}).get(name, "")
+    return str(value) if value else ""
+
+
+def _existing_vision_value(name: str) -> str:
+    """Resolve a vision setting without consulting unrelated credentials."""
+    return (
+        _read_user_environment(name).strip()
+        or os.environ.get(name, "").strip()
+        or _read_existing_codex_environment(name).strip()
+    )
+
+
+def _prompt_api_key() -> str:
+    """Read the API key from a terminal or a hidden Windows dialog."""
+    if sys.stdin.isatty():
+        return getpass.getpass("Vision API key (input hidden): ").strip()
+    if os.name != "nt":
+        raise RuntimeError(
+            "No interactive terminal is available; set EASY_UIAUTO_VISION_API_KEY first"
+        )
+
+    import tkinter
+    from tkinter import simpledialog
+
+    root = tkinter.Tk()
+    root.withdraw()
+    root.attributes("-topmost", True)
+    try:
+        value = simpledialog.askstring(
+            "easy_uiauto quick setup",
+            "Vision API key:",
+            show="*",
+            parent=root,
+        )
+        return (value or "").strip()
+    finally:
+        root.destroy()
+
+
+def _prompt_required_text(label: str, option: str) -> str:
+    """Prompt for a non-secret value or explain how to provide it non-interactively."""
+    try:
+        return input(f"{label}: ").strip()
+    except EOFError as error:
+        raise RuntimeError(f"{label} is required; pass {option}") from error
+
+
+def quick_setup_codex(api_url: str, model: str, version: str) -> str:
+    """Configure remote vision and replace the global easy_uiauto Codex entry."""
+    api_url = api_url.strip() or _existing_vision_value(VISION_API_URL)
+    model = model.strip() or _existing_vision_value(VISION_MODEL)
+    if not api_url:
+        api_url = _prompt_required_text("Vision API URL", "--vision-url URL")
+    if not model:
+        model = _prompt_required_text("Vision model", "--vision-model MODEL")
+    if not api_url.startswith(("https://", "http://")):
+        raise RuntimeError("Vision API URL must start with https:// or http://")
+    if not model:
+        raise RuntimeError("Vision model must not be empty")
+
+    api_key = _existing_vision_value(VISION_API_KEY)
+    if not api_key:
+        api_key = _prompt_api_key()
+    if not api_key:
+        raise RuntimeError("Vision API key must not be empty")
+
+    _write_user_environment(VISION_API_URL, api_url)
+    _write_user_environment(VISION_API_KEY, api_key)
+    _write_user_environment(VISION_MODEL, model)
+
+    try:
+        uninstall_codex()
+    except RuntimeError:
+        pass
+    install_codex()
+    configured = show_codex()
+    return (
+        f"easy_uiauto {version}\n"
+        f"Vision API URL: {api_url}\n"
+        f"Vision model: {model}\n"
+        "Vision API key: configured in the Windows user environment (value hidden)\n"
+        f"{configured}\n"
+        "Quick setup complete. Fully restart Codex to load the MCP server and environment."
+    )
 
 
 def _client_executable(name: str) -> str:
