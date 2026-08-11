@@ -1842,6 +1842,8 @@ def _build_arg_parser() -> argparse.ArgumentParser:
             "Client configuration:\n"
             "  Fast AI setup (prompts securely for a missing API key):\n"
             "    easy_uiauto --quick-setup-codex --vision-url <URL> --vision-model <MODEL>\n"
+            "  Full setup and validation (Python vision deps, Tesseract, UIA, OCR, AI):\n"
+            "    easy_uiauto --full-setup-codex --vision-url <URL> --vision-model <MODEL>\n"
             "  easy_uiauto --install-codex | --show-codex-config | --uninstall-codex\n"
             "  easy_uiauto --install-claude-code | --show-claude-code-config\n"
             "              | --uninstall-claude-code\n"
@@ -1885,6 +1887,11 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         help="Configure remote vision and replace the global Codex MCP entry.",
     )
     actions.add_argument(
+        "--full-setup-codex",
+        action="store_true",
+        help="Install vision requirements, configure Codex, and run UIA/OCR/AI checks.",
+    )
+    actions.add_argument(
         "--install-codex",
         action="store_true",
         help="Add easy_uiauto to the global Codex MCP configuration.",
@@ -1918,13 +1925,13 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         "--vision-url",
         default="",
         metavar="URL",
-        help="Remote vision API URL used by --quick-setup-codex.",
+        help="Remote vision API URL used by the quick and full Codex setup actions.",
     )
     parser.add_argument(
         "--vision-model",
         default="",
         metavar="MODEL",
-        help="Remote vision model used by --quick-setup-codex.",
+        help="Remote vision model used by the quick and full Codex setup actions.",
     )
     return parser
 
@@ -1933,6 +1940,17 @@ def main(argv: Optional[list[str]] = None):
     """Run the MCP server."""
     parser = _build_arg_parser()
     args = parser.parse_args(argv)
+    if args.full_setup_codex:
+        try:
+            output = configuration.full_setup_codex(
+                api_url=args.vision_url,
+                model=args.vision_model,
+                version=__version__,
+            )
+        except (RuntimeError, ValueError) as error:
+            parser.error(str(error))
+        print(output)
+        return
     if args.quick_setup_codex:
         try:
             output = configuration.quick_setup_codex(

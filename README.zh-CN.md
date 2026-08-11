@@ -82,6 +82,20 @@ easy_uiauto
 下面的标准命令通过客户端自身的 CLI 安装、查看或卸载全局 MCP 配置。标准安装命令
 遇到同名配置时不会覆盖。
 
+完整部署 Codex 时，安装包后执行完整配置：
+
+```bash
+pip install --upgrade "easy-uiauto[mcp,vision]"
+easy_uiauto --full-setup-codex \
+  --vision-url https://your-api.example/v1/chat/completions \
+  --vision-model your-vision-model
+```
+
+完整配置会安全询问缺失的 API Key，补齐 Python 视觉依赖，缺少 Tesseract 时通过
+winget 安装，仅替换 `easy_uiauto` Codex MCP 条目，然后依次验证 UIA、本地 OCR 和
+远程 AI 视觉。OCR 与 AI 验收使用程序生成的测试图片，不会上传当前桌面。每项均输出
+耗时；任何一项失败都会使命令失败。
+
 需要远程 AI 视觉的 Codex 最小部署可使用快速配置命令。API Key 未存在于 Windows
 用户环境变量时，命令通过终端隐藏输入；由非交互式 Agent 执行时则弹出密码框。
 随后保存三个视觉变量，仅替换 `easy_uiauto` MCP 条目，并跳过 OCR 安装和 UI 实测：
@@ -91,6 +105,12 @@ easy_uiauto --quick-setup-codex \
   --vision-url https://your-api.example/v1/chat/completions \
   --vision-model your-vision-model
 ```
+
+可以直接对 Codex 说：
+
+> 从 PyPI 安装最新版 `easy-uiauto[mcp,vision]`，然后执行
+> `easy_uiauto --full-setup-codex --vision-url URL --vision-model MODEL`；不要检查无关项目，
+> 不要搜索网页，报告每项验收结果和耗时，最后提示我重启 Codex。
 
 ```bash
 easy_uiauto --install-codex

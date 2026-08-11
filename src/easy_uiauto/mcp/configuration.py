@@ -103,8 +103,8 @@ def _prompt_required_text(label: str, option: str) -> str:
         raise RuntimeError(f"{label} is required; pass {option}") from error
 
 
-def quick_setup_codex(api_url: str, model: str, version: str) -> str:
-    """Configure remote vision and replace the global easy_uiauto Codex entry."""
+def _configure_remote_vision(api_url: str, model: str) -> tuple[str, str, str]:
+    """Resolve and persist remote vision settings without exposing the API key."""
     api_url = api_url.strip() or _existing_vision_value(VISION_API_URL)
     model = model.strip() or _existing_vision_value(VISION_MODEL)
     if not api_url:
@@ -125,13 +125,24 @@ def quick_setup_codex(api_url: str, model: str, version: str) -> str:
     _write_user_environment(VISION_API_URL, api_url)
     _write_user_environment(VISION_API_KEY, api_key)
     _write_user_environment(VISION_MODEL, model)
+    return api_url, api_key, model
 
+
+def _replace_codex() -> str:
+    """Replace only the global easy_uiauto Codex MCP entry."""
     try:
         uninstall_codex()
     except RuntimeError:
         pass
     install_codex()
-    configured = show_codex()
+    return show_codex()
+
+
+def quick_setup_codex(api_url: str, model: str, version: str) -> str:
+    """Configure remote vision and replace the global easy_uiauto Codex entry."""
+    api_url, _api_key, model = _configure_remote_vision(api_url, model)
+    configured = _replace_codex()
+
     return (
         f"easy_uiauto {version}\n"
         f"Vision API URL: {api_url}\n"
@@ -139,6 +150,42 @@ def quick_setup_codex(api_url: str, model: str, version: str) -> str:
         "Vision API key: configured in the Windows user environment (value hidden)\n"
         f"{configured}\n"
         "Quick setup complete. Fully restart Codex to load the MCP server and environment."
+    )
+
+
+def full_setup_codex(api_url: str, model: str, version: str) -> str:
+    """Install required components, configure Codex, and verify every backend."""
+    from . import diagnostics
+
+    api_url, api_key, model = _configure_remote_vision(api_url, model)
+    steps = [diagnostics.ensure_python_vision_dependencies(version)]
+    tesseract_result, tesseract_path = diagnostics.ensure_tesseract()
+    steps.append(tesseract_result)
+
+    configured = _replace_codex()
+    if all(step["ok"] for step in steps):
+        steps.extend(
+            diagnostics.run_full_diagnostics(
+                api_url=api_url,
+                api_key=api_key,
+                model=model,
+                version=version,
+                tesseract_path=tesseract_path,
+            )
+        )
+    report = diagnostics.format_report(steps)
+    if not all(step["ok"] for step in steps):
+        raise RuntimeError(f"Full setup validation failed:\n{report}")
+
+    return (
+        f"easy_uiauto {version}\n"
+        f"Vision API URL: {api_url}\n"
+        f"Vision model: {model}\n"
+        "Vision API key: configured in the Windows user environment (value hidden)\n"
+        f"{report}\n"
+        f"{configured}\n"
+        "Full setup and validation complete. Fully restart Codex to load the MCP server "
+        "and environment."
     )
 
 

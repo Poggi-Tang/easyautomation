@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog and is maintained automatically by Semantic Release.
 
+## [0.1.21] - 2026-08-11
+
+### Added
+
+- Added `--full-setup-codex` to install missing vision requirements and Tesseract, configure the global Codex MCP entry, and time deterministic UIA, OCR, and remote AI vision validation.
+- Added synthetic-image OCR and multimodal diagnostics so deployment validation does not expose the current desktop.
+
 ## [0.1.20] - 2026-08-10
 
 ### Added

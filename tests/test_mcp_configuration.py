@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sys
 
-from easy_uiauto.mcp import configuration
+from easy_uiauto.mcp import configuration, diagnostics
 
 
 def test_reads_only_existing_easy_uiauto_mcp_environment(monkeypatch, tmp_path) -> None:
@@ -161,3 +161,93 @@ def test_quick_setup_codex_rejects_invalid_url_before_writing(monkeypatch) -> No
         assert "must start with" in str(error)
     else:
         raise AssertionError("invalid URL was accepted")
+
+
+def test_full_setup_codex_runs_all_validation_steps(monkeypatch) -> None:
+    monkeypatch.setattr(
+        configuration,
+        "_configure_remote_vision",
+        lambda _url, _model: ("https://api.example/v1", "secret", "vision-model"),
+    )
+    monkeypatch.setattr(configuration, "_replace_codex", lambda: "configured entry")
+    monkeypatch.setattr(
+        diagnostics,
+        "ensure_python_vision_dependencies",
+        lambda _version: {
+            "name": "Python vision dependencies",
+            "ok": True,
+            "timing_ms": 1.0,
+            "detail": "ready",
+        },
+    )
+    monkeypatch.setattr(
+        diagnostics,
+        "ensure_tesseract",
+        lambda: (
+            {"name": "Tesseract", "ok": True, "timing_ms": 2.0, "detail": "ready"},
+            "tesseract.exe",
+        ),
+    )
+    monkeypatch.setattr(
+        diagnostics,
+        "run_full_diagnostics",
+        lambda **_kwargs: [
+            {"name": "UIA", "ok": True, "timing_ms": 3.0, "detail": "ready"},
+            {"name": "OCR", "ok": True, "timing_ms": 4.0, "detail": "ready"},
+            {
+                "name": "Remote AI vision",
+                "ok": True,
+                "timing_ms": 5.0,
+                "detail": "ready",
+            },
+        ],
+    )
+
+    output = configuration.full_setup_codex("", "", "1.2.3")
+
+    assert "[PASS] UIA" in output
+    assert "[PASS] OCR" in output
+    assert "[PASS] Remote AI vision" in output
+    assert "secret" not in output
+    assert "Fully restart Codex" in output
+
+
+def test_full_setup_codex_fails_when_a_validation_fails(monkeypatch) -> None:
+    monkeypatch.setattr(
+        configuration,
+        "_configure_remote_vision",
+        lambda _url, _model: ("https://api.example/v1", "secret", "vision-model"),
+    )
+    monkeypatch.setattr(configuration, "_replace_codex", lambda: "configured entry")
+    monkeypatch.setattr(
+        diagnostics,
+        "ensure_python_vision_dependencies",
+        lambda _version: {
+            "name": "Python vision dependencies",
+            "ok": True,
+            "timing_ms": 1.0,
+            "detail": "ready",
+        },
+    )
+    monkeypatch.setattr(
+        diagnostics,
+        "ensure_tesseract",
+        lambda: (
+            {"name": "Tesseract", "ok": True, "timing_ms": 2.0, "detail": "ready"},
+            "tesseract.exe",
+        ),
+    )
+    monkeypatch.setattr(
+        diagnostics,
+        "run_full_diagnostics",
+        lambda **_kwargs: [
+            {"name": "OCR", "ok": False, "timing_ms": 3.0, "detail": "failed"}
+        ],
+    )
+
+    try:
+        configuration.full_setup_codex("", "", "1.2.3")
+    except RuntimeError as error:
+        assert "[FAIL] OCR" in str(error)
+    else:
+        raise AssertionError("failed validation was accepted")

@@ -18,7 +18,7 @@ def _run_module(module: str, option: str) -> str:
 
 def test_mcp_server_version() -> None:
     output = _run_module("easy_uiauto.mcp.server", "--version")
-    assert output.strip() == "easy_uiauto 0.1.20"
+    assert output.strip() == "easy_uiauto 0.1.21"
 
 
 def test_mcp_service_help() -> None:
@@ -31,6 +31,7 @@ def test_mcp_server_help_lists_client_configuration_actions() -> None:
     output = _run_module("easy_uiauto.mcp.server", "--help")
     assert "--install-codex" in output
     assert "--quick-setup-codex" in output
+    assert "--full-setup-codex" in output
     assert "--vision-url" in output
     assert "--vision-model" in output
     assert "--uninstall-codex" in output

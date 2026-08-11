@@ -88,6 +88,22 @@ The standard commands below register, inspect, or remove the global MCP
 configuration through the client's own CLI. The standard install command does
 not overwrite an existing entry with the same name.
 
+For a complete Codex deployment, install the package and run full setup:
+
+```bash
+pip install --upgrade "easy-uiauto[mcp,vision]"
+easy_uiauto --full-setup-codex \
+  --vision-url https://your-api.example/v1/chat/completions \
+  --vision-model your-vision-model
+```
+
+Full setup securely prompts for a missing API key, installs missing Python
+vision dependencies, installs Tesseract through winget when necessary, replaces
+only the `easy_uiauto` Codex MCP entry, and validates UIA, local OCR, and remote
+AI vision. The OCR and AI checks use generated test images; they do not upload
+the current desktop. Each result includes its elapsed time, and any failed check
+makes the command fail.
+
 For a minimal Codex deployment with remote AI vision, use the quick setup
 command. When the API key is not already present in the Windows user
 environment, it prompts once through hidden terminal input or a password dialog
@@ -99,6 +115,13 @@ easy_uiauto --quick-setup-codex \
   --vision-url https://your-api.example/v1/chat/completions \
   --vision-model your-vision-model
 ```
+
+One-sentence instruction for a Codex agent:
+
+> Install the latest `easy-uiauto[mcp,vision]` from PyPI, then run
+> `easy_uiauto --full-setup-codex --vision-url URL --vision-model MODEL`; do not
+> inspect unrelated projects or search the web, report every validation result
+> and elapsed time, then ask me to restart Codex.
 
 ```bash
 easy_uiauto --install-codex
