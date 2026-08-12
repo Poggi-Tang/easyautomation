@@ -1109,6 +1109,35 @@ def run_ui_command(
 
 
 @mcp.tool()
+def run_ui_commands(
+    app_id: str,
+    steps: list[dict | str],
+    confirm: bool = False,
+) -> str:
+    """Run a verified same-page UI command sequence with one shared preflight.
+
+    Args:
+        app_id: Application identifier returned by scan_window_knowledge.
+        steps: Ordered command strings or objects with ``command`` and optional
+            ``text``. The window is found and captured once, each unique control
+            is verified before any action, and knowledge is written once per
+            used control after execution.
+        confirm: Explicit approval for all external or destructive commands.
+
+    Split navigation or page-changing workflows into separate batches. If any
+    preflight check fails, no action is executed. Execution stops on the first
+    action error and reports the completed prefix.
+    """
+    try:
+        blocked = _mode_blocks_operation()
+        if blocked:
+            return blocked
+        return ui_cli.execute_many_json(knowledge.app_dir(app_id), steps, confirm)
+    except Exception as error:
+        return f"Error running UI command batch: {error}"
+
+
+@mcp.tool()
 def teach_ui_control(
     app_id: str,
     control_id: str,
@@ -2043,7 +2072,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
             "  batch: run_action, run_actions\n"
             "  screenshot: take_screenshot\n"
             "  knowledge: scan_window_knowledge, list_ui_knowledge_apps, search_ui_knowledge,\n"
-            "             list_ui_commands, run_ui_command, teach_ui_control,\n"
+            "             list_ui_commands, run_ui_command, run_ui_commands, teach_ui_control,\n"
             "             rebuild_ui_knowledge_index\n"
             "  vision: find_control_by_image, click_by_image, find_text_on_screen, click_text_on_screen,\n"
             "          find_control_by_vision, click_by_vision\n\n"

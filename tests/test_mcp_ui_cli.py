@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from types import SimpleNamespace
 
 from easy_uiauto.mcp import knowledge, ui_cli
@@ -110,6 +111,13 @@ def test_dangerous_command_requires_explicit_confirmation(monkeypatch, tmp_path)
     else:
         raise AssertionError("dangerous command executed without confirmation")
 
+    try:
+        ui_cli.execute_many(directory, ["main.toolbar.save.click"])
+    except RuntimeError as error:
+        assert "explicit confirmation" in str(error)
+    else:
+        raise AssertionError("dangerous batch executed without confirmation")
+
     clicks: list[bool] = []
     control = SimpleNamespace(Click=lambda: clicks.append(True))
     monkeypatch.setattr(
@@ -120,3 +128,153 @@ def test_dangerous_command_requires_explicit_confirmation(monkeypatch, tmp_path)
     result = ui_cli.execute(directory, "main.toolbar.save.click", confirm=True)
     assert result["ok"] is True
     assert clicks == [True]
+
+
+def test_execute_many_shares_preflight_and_writes_once(monkeypatch, tmp_path) -> None:
+    directory = knowledge.initialize_app("example", "Example", tmp_path)
+    save = _record()
+    open_record = deepcopy(save)
+    open_record.update(
+        {
+            "id": "open",
+            "semantic_name": "Open",
+            "intent": "open-document",
+            "command": "main.toolbar.open-document",
+            "image": "images/controls/open.png",
+        }
+    )
+    knowledge.save_control(directory, save)
+    knowledge.save_control(directory, open_record)
+    knowledge.rebuild_index(directory)
+
+    calls = {"window": 0, "screenshot": 0, "resolved": [], "saved": [], "rebuilt": 0}
+    clicks = []
+    controls = {
+        "save": SimpleNamespace(Click=lambda **_kwargs: clicks.append("save")),
+        "open": SimpleNamespace(Click=lambda **_kwargs: clicks.append("open")),
+    }
+
+    def find_window(_name):
+        calls["window"] += 1
+        return object()
+
+    def screenshot(_rectangle):
+        calls["screenshot"] += 1
+        return object()
+
+    def resolve(_directory, record, _window, _window_rect, _screen):
+        calls["resolved"].append(record["id"])
+        return controls[record["id"]], 0.95, {}, "location"
+
+    monkeypatch.setattr(ui_cli, "_find_window", find_window)
+    monkeypatch.setattr(ui_cli, "_rect", lambda _control: {"left": 0})
+    monkeypatch.setattr(ui_cli, "_screenshot_window", screenshot)
+    monkeypatch.setattr(ui_cli, "_resolve_verified_control_in_context", resolve)
+    monkeypatch.setattr(
+        knowledge,
+        "save_control",
+        lambda _directory, record: calls["saved"].append(record["id"]),
+    )
+    monkeypatch.setattr(
+        knowledge,
+        "rebuild_index",
+        lambda _directory: calls.__setitem__("rebuilt", calls["rebuilt"] + 1),
+    )
+
+    result = ui_cli.execute_many(
+        directory,
+        [
+            "main.toolbar.save.click",
+            "main.toolbar.save.click",
+            "main.toolbar.open-document.click",
+        ],
+    )
+
+    assert result["ok"] is True
+    assert result["completed_steps"] == 3
+    assert result["unique_controls_verified"] == 2
+    assert result["knowledge_writes"] == 2
+    assert calls == {
+        "window": 1,
+        "screenshot": 1,
+        "resolved": ["save", "open"],
+        "saved": ["save", "open"],
+        "rebuilt": 1,
+    }
+    assert clicks == ["save", "save", "open"]
+
+
+def test_execute_many_preflight_failure_runs_no_actions(monkeypatch, tmp_path) -> None:
+    directory = knowledge.initialize_app("example", "Example", tmp_path)
+    save = _record()
+    open_record = deepcopy(save)
+    open_record.update(
+        {
+            "id": "open",
+            "intent": "open-document",
+            "command": "main.toolbar.open-document",
+            "image": "images/controls/open.png",
+        }
+    )
+    knowledge.save_control(directory, save)
+    knowledge.save_control(directory, open_record)
+    knowledge.rebuild_index(directory)
+    clicks = []
+    control = SimpleNamespace(Click=lambda **_kwargs: clicks.append(True))
+
+    monkeypatch.setattr(ui_cli, "_find_window", lambda _name: object())
+    monkeypatch.setattr(ui_cli, "_rect", lambda _control: {"left": 0})
+    monkeypatch.setattr(ui_cli, "_screenshot_window", lambda _rectangle: object())
+
+    def resolve(_directory, record, _window, _window_rect, _screen):
+        if record["id"] == "open":
+            raise RuntimeError("wrong image")
+        return control, 0.95, {}, "location"
+
+    monkeypatch.setattr(ui_cli, "_resolve_verified_control_in_context", resolve)
+
+    try:
+        ui_cli.execute_many(
+            directory,
+            ["main.toolbar.save.click", "main.toolbar.open-document.click"],
+        )
+    except RuntimeError as error:
+        assert "before any action" in str(error)
+    else:
+        raise AssertionError("invalid batch was executed")
+
+    assert clicks == []
+    assert (directory / "quarantine" / "open.md").is_file()
+
+
+def test_execute_many_rejects_commands_from_different_pages(monkeypatch, tmp_path) -> None:
+    directory = knowledge.initialize_app("example", "Example", tmp_path)
+    save = _record()
+    next_page = deepcopy(save)
+    next_page.update(
+        {
+            "id": "next",
+            "page_id": "settings",
+            "intent": "next-page",
+            "command": "settings.toolbar.next-page",
+            "image": "images/controls/next.png",
+        }
+    )
+    knowledge.save_control(directory, save)
+    knowledge.save_control(directory, next_page)
+    knowledge.rebuild_index(directory)
+    monkeypatch.setattr(
+        ui_cli,
+        "_find_window",
+        lambda _name: (_ for _ in ()).throw(AssertionError("window must not be touched")),
+    )
+
+    try:
+        ui_cli.execute_many(
+            directory,
+            ["main.toolbar.save.click", "settings.toolbar.next-page.click"],
+        )
+    except ValueError as error:
+        assert "one page" in str(error)
+    else:
+        raise AssertionError("cross-page batch was accepted")

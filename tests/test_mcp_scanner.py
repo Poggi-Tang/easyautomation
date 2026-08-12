@@ -90,6 +90,30 @@ def test_template_verification_requires_correct_unique_location() -> None:
     assert result["score"] > 0.99
 
 
+def test_resolve_location_reuses_supplied_window(monkeypatch) -> None:
+    button = FakeControl("Save", "ButtonControl", (40, 30, 160, 90), automation_id="save")
+    window = FakeControl("Example", "WindowControl", (0, 0, 400, 300), [button])
+    location = {
+        "WindowName": "Example",
+        "Xpath": [
+            {"ControlType": "WindowControl", "Name": "Example", "searchDepth": 1},
+            {
+                "ControlType": "ButtonControl",
+                "Name": "Save",
+                "AutomationId": "save",
+                "searchDepth": 2,
+            },
+        ],
+    }
+    monkeypatch.setattr(
+        scanner,
+        "_find_window",
+        lambda _name: (_ for _ in ()).throw(AssertionError("window lookup was repeated")),
+    )
+
+    assert scanner.resolve_location(location, window=window) is button
+
+
 def test_scan_writes_images_markdown_and_verified_command(monkeypatch, tmp_path) -> None:
     button = FakeControl("Save", "ButtonControl", (40, 30, 160, 90), automation_id="save")
     label = FakeControl("Heading", "TextControl", (20, 120, 180, 150))

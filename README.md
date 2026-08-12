@@ -154,6 +154,7 @@ easy_uiauto_ui apps
 easy_uiauto_ui commands <app-id>
 easy_uiauto_ui search <app-id> "search terms"
 easy_uiauto_ui run <app-id> <page.region.control.action> --text "optional text"
+easy_uiauto_ui batch <app-id> '["main.keypad.6.click", "main.keypad.plus.click"]'
 easy_uiauto_ui teach <app-id> <control-id> "Meaning" intent "Description"
 ```
 
@@ -183,6 +184,13 @@ resulting application behavior. Use `easy_uiauto_ui teach` or the `teach_ui_cont
 tool to correct uncertain meanings; manual semantics survive rescans but cannot bypass a
 failed locator. External or destructive commands require `--confirm` or `confirm=true`.
 
+For consecutive operations on one stable page, use `easy_uiauto_ui batch` or the
+`run_ui_commands` MCP tool. A batch loads the command catalog once, finds and captures
+the window once, verifies every unique control before performing any action, executes
+the ordered sequence, and rebuilds the knowledge index once. Steps may be command
+strings or objects such as `{"command":"main.form.message.set-text","text":"hello"}`.
+Split a workflow after any command that navigates to another page.
+
 Knowledge created before contextual control semantics were introduced remains readable,
 but its old commands are intentionally not executable. Rescan each page once to add the
 required semantic evidence, confidence, risk, and verification fields.
@@ -194,6 +202,7 @@ The same workflow is available through MCP tools:
 - `search_ui_knowledge`
 - `list_ui_commands`
 - `run_ui_command`
+- `run_ui_commands`
 - `teach_ui_control`
 - `rebuild_ui_knowledge_index`
 

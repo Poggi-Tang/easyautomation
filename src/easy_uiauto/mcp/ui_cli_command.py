@@ -65,6 +65,20 @@ def _build_parser() -> argparse.ArgumentParser:
     run.add_argument("--text", default="")
     run.add_argument("--confirm", action="store_true")
 
+    batch = commands.add_parser(
+        "batch",
+        help="Run a preflighted same-page sequence in one process.",
+    )
+    batch.add_argument("app_id")
+    batch.add_argument(
+        "steps_json",
+        help=(
+            "JSON array of command strings or {command,text} objects; "
+            "use @path to read JSON from a file"
+        ),
+    )
+    batch.add_argument("--confirm", action="store_true")
+
     teach = commands.add_parser("teach", help="Teach or correct a control's real function.")
     teach.add_argument("app_id")
     teach.add_argument("control_id")
@@ -124,6 +138,17 @@ def main(argv: list[str] | None = None) -> None:
                 knowledge.app_dir(args.app_id),
                 args.command,
                 args.text,
+                args.confirm,
+            )
+        elif args.subcommand == "batch":
+            value = args.steps_json
+            if value.startswith("@"):
+                with open(value[1:], encoding="utf-8") as stream:
+                    value = stream.read()
+            steps = json.loads(value)
+            result = ui_cli.execute_many(
+                knowledge.app_dir(args.app_id),
+                steps,
                 args.confirm,
             )
         elif args.subcommand == "teach":

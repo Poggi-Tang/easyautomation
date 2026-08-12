@@ -193,14 +193,15 @@ def _descendant_matches(parent, step: dict, max_depth: int) -> list:
     return matches
 
 
-def resolve_location(location: dict):
+def resolve_location(location: dict, window=None):
     """Resolve a canonical LOCATION through UIA without logging or window side effects."""
     normalized = normalize_location(location)
     xpath = normalized.get("Xpath", [])
     window_name = normalized.get("WindowName", "")
     if not window_name and xpath:
         window_name = xpath[0].get("Name", "")
-    window = _find_window(window_name)
+    if window is None:
+        window = _find_window(window_name)
     current = window
     previous_search_depth = 1
     steps = xpath[1:] if xpath and _matches_step(window, xpath[0]) else xpath

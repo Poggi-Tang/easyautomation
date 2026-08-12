@@ -4,6 +4,25 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog and is maintained automatically by Semantic Release.
 
+## [0.4.0] - 2026-08-12
+
+### Added
+
+- Added `run_ui_commands` and `easy_uiauto_ui batch` for ordered, structured
+  same-page semantic UI command sequences.
+- Added per-batch timing, completed-step, unique-control, and knowledge-write
+  diagnostics.
+
+### Changed
+
+- Batch execution now loads knowledge once, shares one window screenshot across
+  all unique-control checks, completes every preflight before the first action,
+  and rebuilds the knowledge index once.
+- Batch clicks skip UIAutomation cursor animation and default per-click waits;
+  single-command execution keeps its existing interaction behavior.
+- The bundled operation Skill now groups stable same-page workflows and splits
+  batches at page navigation boundaries.
+
 ## [0.3.0] - 2026-08-12
 
 ### Added
