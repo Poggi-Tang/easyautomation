@@ -24,6 +24,8 @@ Prefer verified application knowledge over rediscovering the interface.
 7. For `set-text`, pass the user text through the `text` field. Never place it inside the command name.
 8. After navigation changes the page, query commands again before the next operation.
 9. If execution quarantines a control, stop using that command. Ask the user to expose the correct page and invoke the learning workflow to rescan it.
+10. Use `list_ui_interactions` when an effect record exists and verify its success condition
+    against the observed post-operation state. Do not infer success only because a click ran.
 
 ## Safety Rules
 
@@ -35,7 +37,9 @@ Prefer verified application knowledge over rediscovering the interface.
 
 ## Fallback Order
 
-1. Verified semantic UI command.
-2. Fresh UIA inspection and a learning rescan.
-3. OCR or image matching for one-off recovery.
-4. Remote AI vision only when deterministic methods cannot identify the target.
+1. Verified stored LOCATION.
+2. A unique stored multi-state control image.
+3. Unique local OCR text.
+4. Remote AI vision only when deterministic methods fail and the user permits
+   `allow_vision_fallback=true`.
+5. Fresh visual-first learning scan when all stored evidence is stale or ambiguous.

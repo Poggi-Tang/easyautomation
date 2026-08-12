@@ -8,7 +8,7 @@ import sys
 
 from easy_uiauto import __version__
 
-from . import configuration, knowledge, scanner, ui_cli
+from . import configuration, interaction_learning, knowledge, scanner, ui_cli
 
 
 def _vision_settings(args) -> tuple[str, str, str]:
@@ -44,6 +44,11 @@ def _build_parser() -> argparse.ArgumentParser:
     scan.add_argument("--max-depth", type=int, default=12)
     scan.add_argument("--max-controls", type=int, default=3000)
     scan.add_argument("--verify-limit", type=int, default=500)
+    scan.add_argument(
+        "--strategy",
+        choices=("visual-first", "full-uia"),
+        default="visual-first",
+    )
     scan.add_argument("--vision-url", default="")
     scan.add_argument("--vision-model", default="")
 
@@ -64,6 +69,7 @@ def _build_parser() -> argparse.ArgumentParser:
     run.add_argument("command")
     run.add_argument("--text", default="")
     run.add_argument("--confirm", action="store_true")
+    run.add_argument("--allow-vision-fallback", action="store_true")
 
     batch = commands.add_parser(
         "batch",
@@ -78,6 +84,40 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     batch.add_argument("--confirm", action="store_true")
+    batch.add_argument("--allow-vision-fallback", action="store_true")
+
+    effect = commands.add_parser(
+        "learn-effect",
+        help="Execute one command and learn its before/after response.",
+    )
+    effect.add_argument("app_id")
+    effect.add_argument("command")
+    effect.add_argument("--text", default="")
+    effect.add_argument("--confirm", action="store_true")
+    effect.add_argument("--recover", action="store_true")
+    effect.add_argument("--maximum-wait", type=float, default=3.0)
+    effect.add_argument("--vision-url", default="")
+    effect.add_argument("--vision-model", default="")
+
+    explore = commands.add_parser(
+        "explore",
+        help="Learn direct responses of known reversible commands.",
+    )
+    explore.add_argument("app_id")
+    explore.add_argument("--policy", choices=("safe", "supervised"), default="safe")
+    explore.add_argument("--max-actions", type=int, default=10)
+    explore.add_argument("--max-depth", type=int, default=3)
+    explore.add_argument("--confirm", action="store_true")
+    explore.add_argument("--vision-url", default="")
+    explore.add_argument("--vision-model", default="")
+
+    interactions = commands.add_parser(
+        "interactions",
+        help="List learned operation effects.",
+    )
+    interactions.add_argument("app_id")
+    interactions.add_argument("--command", default="")
+    interactions.add_argument("--limit", type=int, default=50)
 
     teach = commands.add_parser("teach", help="Teach or correct a control's real function.")
     teach.add_argument("app_id")
@@ -114,6 +154,7 @@ def main(argv: list[str] | None = None) -> None:
                 max_depth=args.max_depth,
                 max_controls=args.max_controls,
                 verify_limit=args.verify_limit,
+                strategy=args.strategy,
                 progress=lambda message: print(f"[scan] {message}", flush=True),
             )
         elif args.subcommand == "apps":
@@ -139,6 +180,7 @@ def main(argv: list[str] | None = None) -> None:
                 args.command,
                 args.text,
                 args.confirm,
+                args.allow_vision_fallback,
             )
         elif args.subcommand == "batch":
             value = args.steps_json
@@ -146,10 +188,44 @@ def main(argv: list[str] | None = None) -> None:
                 with open(value[1:], encoding="utf-8") as stream:
                     value = stream.read()
             steps = json.loads(value)
-            result = ui_cli.execute_many(
+            batch_args = (knowledge.app_dir(args.app_id), steps, args.confirm)
+            result = (
+                ui_cli.execute_many(*batch_args, allow_vision_fallback=True)
+                if args.allow_vision_fallback
+                else ui_cli.execute_many(*batch_args)
+            )
+        elif args.subcommand == "learn-effect":
+            api_url, api_key, model = _vision_settings(args)
+            result = interaction_learning.learn_command_effect(
                 knowledge.app_dir(args.app_id),
-                steps,
-                args.confirm,
+                args.command,
+                api_url,
+                api_key,
+                model,
+                __version__,
+                text=args.text,
+                confirm=args.confirm,
+                recover=args.recover,
+                maximum_wait_seconds=args.maximum_wait,
+            )
+        elif args.subcommand == "explore":
+            api_url, api_key, model = _vision_settings(args)
+            result = interaction_learning.explore_application(
+                knowledge.app_dir(args.app_id),
+                api_url,
+                api_key,
+                model,
+                __version__,
+                policy=args.policy,
+                max_actions=args.max_actions,
+                confirm=args.confirm,
+                max_depth=args.max_depth,
+            )
+        elif args.subcommand == "interactions":
+            result = knowledge.list_interactions(
+                knowledge.app_dir(args.app_id),
+                args.command,
+                args.limit,
             )
         elif args.subcommand == "teach":
             selected_actions = [

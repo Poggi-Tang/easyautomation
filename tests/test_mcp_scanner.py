@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageGrab
 
 from easy_uiauto.mcp import knowledge, scanner
 
@@ -17,6 +17,7 @@ class FakeControl:
         rect: tuple[int, int, int, int],
         children: list[FakeControl] | None = None,
         automation_id: str = "",
+        parent: FakeControl | None = None,
     ) -> None:
         self.Name = name
         self.ControlTypeName = control_type
@@ -34,9 +35,15 @@ class FakeControl:
             left=rect[0], top=rect[1], right=rect[2], bottom=rect[3]
         )
         self._children = children or []
+        self._parent = parent
+        for child in self._children:
+            child._parent = self
 
     def GetChildren(self):
         return self._children
+
+    def GetParentControl(self):
+        return self._parent
 
 
 def _test_screen() -> Image.Image:
@@ -45,6 +52,47 @@ def _test_screen() -> Image.Image:
     draw.rectangle((40, 30, 160, 90), fill="blue")
     draw.line((45, 35, 155, 85), fill="white", width=4)
     return image
+
+
+def test_window_screenshot_uses_virtual_desktop_coordinates(monkeypatch) -> None:
+    calls = []
+    expected = Image.new("RGB", (300, 200), "white")
+    monkeypatch.setattr(
+        ImageGrab,
+        "grab",
+        lambda **kwargs: calls.append(kwargs) or expected,
+    )
+
+    image = scanner._screenshot_window(
+        {
+            "left": 2500,
+            "top": -100,
+            "right": 2800,
+            "bottom": 100,
+            "width": 300,
+            "height": 200,
+        }
+    )
+
+    assert image is expected
+    assert calls == [{"bbox": (2500, -100, 2800, 100), "all_screens": True}]
+
+
+def test_completion_reader_accepts_json_and_sse() -> None:
+    json_response = SimpleNamespace(
+        read=lambda: b'{"choices":[{"message":{"content":"{\\"ok\\":true}"}}]}'
+    )
+    sse_response = SimpleNamespace(
+        read=lambda: (
+            b'data: {"choices":[{"delta":{"content":"{\\"ok\\":"}}]}\n\n'
+            b'data: {"choices":[],"usage":{"total_tokens":12}}\n\n'
+            b'data: {"choices":[{"delta":{"content":"true}"}}]}\n\n'
+            b"data: [DONE]\n\n"
+        )
+    )
+
+    assert scanner._read_completion_content(json_response) == '{"ok":true}'
+    assert scanner._read_completion_content(sse_response) == '{"ok":true}'
 
 
 def _semantic_result(
@@ -114,6 +162,67 @@ def test_resolve_location_reuses_supplied_window(monkeypatch) -> None:
     assert scanner.resolve_location(location, window=window) is button
 
 
+def test_visual_target_selects_actionable_ancestor() -> None:
+    label = FakeControl("Save", "TextControl", (50, 40, 110, 70))
+    button = FakeControl(
+        "Save",
+        "ButtonControl",
+        (40, 30, 160, 90),
+        [label],
+        automation_id="save",
+    )
+    window = FakeControl("Example", "WindowControl", (0, 0, 400, 300), [button])
+    target = {
+        "role": "action",
+        "actions": ["click"],
+        "relative_rect": {
+            "left": 40,
+            "top": 30,
+            "right": 160,
+            "bottom": 90,
+            "width": 120,
+            "height": 60,
+        },
+    }
+
+    selected = scanner.control_from_visual_target(
+        window,
+        scanner._rect(window),
+        target,
+        point_lookup=lambda _x, _y: label,
+    )
+
+    assert selected is button
+
+
+def test_segment_validation_keeps_only_valid_key_targets() -> None:
+    result = scanner._validate_segments(
+        {
+            "controls": [
+                {
+                    "semantic_name": "Save",
+                    "intent": "save-document",
+                    "role": "action",
+                    "actions": ["click"],
+                    "risk": "state-changing",
+                    "confidence": 0.95,
+                    "left": 10,
+                    "top": 20,
+                    "width": 80,
+                    "height": 30,
+                },
+                {"semantic_name": "invalid", "left": 1, "top": 1, "width": 0, "height": 0},
+            ]
+        },
+        400,
+        300,
+    )
+
+    assert len(result["controls"]) == 1
+    assert result["controls"][0]["intent"] == "save-document"
+    assert result["controls"][0]["relative_rect"]["width"] == 80
+
+
 def test_scan_writes_images_markdown_and_verified_command(monkeypatch, tmp_path) -> None:
     button = FakeControl("Save", "ButtonControl", (40, 30, 160, 90), automation_id="save")
     label = FakeControl("Heading", "TextControl", (20, 120, 180, 150))
@@ -170,6 +279,7 @@ def test_scan_writes_images_markdown_and_verified_command(monkeypatch, tmp_path)
         "secret",
         "vision-model",
         "1.0.0",
+        strategy="full-uia",
         root=tmp_path,
     )
 
@@ -188,6 +298,107 @@ def test_scan_writes_images_markdown_and_verified_command(monkeypatch, tmp_path)
     assert button_record["function_verification"]["status"] == "inferred"
     assert list((directory / "images" / "controls").glob("*.png"))
     assert (directory / "operations" / "UI-CLI.md").is_file()
+
+
+def test_visual_first_scan_skips_full_tree_and_second_ai_request(monkeypatch, tmp_path) -> None:
+    button = FakeControl("Save", "ButtonControl", (40, 30, 160, 90), automation_id="save")
+    window = FakeControl("Example", "WindowControl", (0, 0, 400, 300), [button])
+    target = {
+        "id": 1,
+        "region_id": "content",
+        "semantic_name": "Save document",
+        "intent": "save-document",
+        "description": "Save the current document.",
+        "role": "action",
+        "actions": ["click"],
+        "aliases": ["save"],
+        "risk": "state-changing",
+        "requires_confirmation": False,
+        "confidence": 0.97,
+        "evidence": ["Save label"],
+        "ambiguity": "",
+        "source": "ai-vision-target",
+        "relative_rect": {
+            "left": 40,
+            "top": 30,
+            "right": 160,
+            "bottom": 90,
+            "width": 120,
+            "height": 60,
+        },
+    }
+    monkeypatch.setattr(scanner, "_activate_window", lambda _window: None)
+    monkeypatch.setattr(scanner, "_find_window", lambda _title: window)
+    monkeypatch.setattr(scanner, "_process_name", lambda _pid: "example-app")
+    monkeypatch.setattr(scanner, "_screenshot_window", lambda _rect: _test_screen())
+    monkeypatch.setattr(
+        scanner,
+        "segment_interface",
+        lambda *_args: {
+            "page": {"id": "main", "name": "Main", "description": ""},
+            "regions": scanner._validate_segments({}, 400, 300)["regions"],
+            "controls": [target],
+        },
+    )
+    monkeypatch.setattr(
+        scanner,
+        "controls_from_visual_targets",
+        lambda *_args: ([(button, 1)], {1: target}, []),
+    )
+    monkeypatch.setattr(
+        scanner,
+        "_walk_controls",
+        lambda *_args: (_ for _ in ()).throw(AssertionError("full tree was traversed")),
+    )
+    monkeypatch.setattr(
+        scanner,
+        "analyze_control_semantics",
+        lambda *_args: (_ for _ in ()).throw(AssertionError("second AI request was made")),
+    )
+    monkeypatch.setattr(
+        scanner,
+        "get_control_xpath",
+        lambda control: [
+            {"ControlType": "WindowControl", "Name": "Example"},
+            {"ControlType": control.ControlTypeName, "Name": control.Name},
+        ],
+    )
+    monkeypatch.setattr(
+        scanner,
+        "_verify_location",
+        lambda _location, rect: (True, rect, "bounds IoU=1.000"),
+    )
+    directory = knowledge.initialize_app("example-app", "Example", tmp_path)
+    knowledge.save_control(
+        directory,
+        {
+            "id": "previous-key-control",
+            "app_id": "example-app",
+            "app_name": "Example",
+            "page_id": "main",
+            "region_id": "content",
+            "semantic_name": "Previously learned control",
+            "status": "verified",
+            "actions": [],
+        },
+    )
+    knowledge.rebuild_index(directory)
+
+    result = scanner.scan_window(
+        "Example",
+        "https://api.example/v1",
+        "secret",
+        "vision-model",
+        "0.5.0",
+        root=tmp_path,
+    )
+
+    assert result["strategy"] == "visual-first"
+    assert result["visual_targets"] == 1
+    assert result["uia_controls_seen"] == 1
+    assert result["semantic_controls_analyzed"] == 1
+    assert result["controls_retained_unobserved"] == 1
+    assert knowledge.find_control_record(directory, "previous-key-control") is not None
 
 
 def test_failed_actionable_control_is_quarantined(monkeypatch, tmp_path) -> None:
@@ -234,6 +445,7 @@ def test_failed_actionable_control_is_quarantined(monkeypatch, tmp_path) -> None
         "secret",
         "vision-model",
         "1.0.0",
+        strategy="full-uia",
         root=tmp_path,
     )
 
@@ -276,6 +488,7 @@ def test_low_confidence_semantics_are_quarantined(monkeypatch, tmp_path) -> None
         "secret",
         "vision-model",
         "1.0.0",
+        strategy="full-uia",
         root=tmp_path,
     )
 

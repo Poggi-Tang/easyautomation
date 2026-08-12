@@ -10,33 +10,28 @@ import re
 import subprocess
 import sys
 import time
-from urllib import error as urlerror
-from urllib import request as urlrequest
 from datetime import datetime
 from typing import Optional
+from urllib import error as urlerror
+from urllib import request as urlrequest
 
 import pyautogui
+import uiautomation
 from mcp.server.fastmcp import FastMCP
 from mcp.server.fastmcp import Image as MCPImage
 
 # easy-uiauto imports
 from easy_uiauto.ctrl import Controller, run_action as _run_action_easy
 from easy_uiauto.utils import (
+    auto_scroll,
     find_control as _find_control,
     get_control_info,
     get_control_xpath,
     set_top_window,
-    auto_scroll,
-    push_message,
 )
-import uiautomation
 
 from .. import __version__
-from . import configuration
-from . import knowledge
-from . import scanner
-from . import ui_cli
-from . import skill_installation
+from . import configuration, interaction_learning, knowledge, scanner, skill_installation, ui_cli
 from .protocol import location_from_xpath, normalize_location
 
 # Disable pyautogui failsafe for automation (moving mouse to corner won't crash)
@@ -1009,19 +1004,20 @@ def scan_window_knowledge(
     max_depth: int = 12,
     max_controls: int = 3000,
     verify_limit: int = 500,
+    strategy: str = "visual-first",
 ) -> str:
     """Scan one application window into an Obsidian-compatible UI knowledge vault.
 
-    The scan stores the page screenshot, AI-defined functional regions, every
-    visible UIA control, per-control PNG crops, and context-grounded control
-    meanings. Commands require high-confidence semantics plus LOCATION/image
-    verification. Low-confidence or stale controls are quarantined.
+    The default visual-first strategy asks AI for only important controls and
+    regions, resolves their pixel targets through UIA, selects a stable ancestor,
+    and verifies LOCATION plus control images. Use full-uia only for diagnostics.
 
     Args:
         window_name: Exact or partial title of the visible application window.
         max_depth: Maximum UIA tree depth, from 1 to 30.
         max_controls: Hard cap for controls visited; the result reports truncation.
         verify_limit: Maximum actionable controls to verify during this scan.
+        strategy: ``visual-first`` (default) or diagnostic ``full-uia``.
     """
     try:
         api_url, api_key, model = _vision_api_settings("")
@@ -1034,6 +1030,7 @@ def scan_window_knowledge(
             max_depth=max_depth,
             max_controls=max_controls,
             verify_limit=verify_limit,
+            strategy=strategy,
         )
         return json.dumps(result, ensure_ascii=False, indent=2)
     except Exception as error:
@@ -1091,6 +1088,7 @@ def run_ui_command(
     command: str,
     text: str = "",
     confirm: bool = False,
+    allow_vision_fallback: bool = False,
 ) -> str:
     """Run one verified application-specific UI command.
 
@@ -1103,7 +1101,13 @@ def run_ui_command(
         blocked = _mode_blocks_operation()
         if blocked:
             return blocked
-        return ui_cli.execute_json(knowledge.app_dir(app_id), command, text, confirm)
+        return ui_cli.execute_json(
+            knowledge.app_dir(app_id),
+            command,
+            text,
+            confirm,
+            allow_vision_fallback,
+        )
     except Exception as error:
         return f"Error running UI command: {error}"
 
@@ -1113,6 +1117,7 @@ def run_ui_commands(
     app_id: str,
     steps: list[dict | str],
     confirm: bool = False,
+    allow_vision_fallback: bool = False,
 ) -> str:
     """Run a verified same-page UI command sequence with one shared preflight.
 
@@ -1132,9 +1137,99 @@ def run_ui_commands(
         blocked = _mode_blocks_operation()
         if blocked:
             return blocked
-        return ui_cli.execute_many_json(knowledge.app_dir(app_id), steps, confirm)
+        return ui_cli.execute_many_json(
+            knowledge.app_dir(app_id),
+            steps,
+            confirm,
+            allow_vision_fallback,
+        )
     except Exception as error:
         return f"Error running UI command batch: {error}"
+
+
+@mcp.tool()
+def learn_ui_command_effect(
+    app_id: str,
+    command: str,
+    text: str = "",
+    confirm: bool = False,
+    recover: bool = False,
+    maximum_wait_seconds: float = 3.0,
+) -> str:
+    """Learn one command's before/after visual, window, and local UIA effects.
+
+    Full target/desktop screenshots and top-level window inventories stay in the
+    local vault. Only target-window before/after images are sent to the configured
+    vision API. Difference boxes scope post-operation UIA inspection. Set
+    ``recover=true`` only for reversible exploration; recovery currently uses Escape.
+    """
+    try:
+        blocked = _mode_blocks_operation()
+        if blocked:
+            return blocked
+        api_url, api_key, model = _vision_api_settings("")
+        result = interaction_learning.learn_command_effect(
+            knowledge.app_dir(app_id),
+            command,
+            api_url,
+            api_key,
+            model,
+            __version__,
+            text=text,
+            confirm=confirm,
+            recover=recover,
+            maximum_wait_seconds=maximum_wait_seconds,
+        )
+        return json.dumps(result, ensure_ascii=False, indent=2)
+    except Exception as error:
+        return f"Error learning UI command effect: {error}"
+
+
+@mcp.tool()
+def explore_ui_workflows(
+    app_id: str,
+    policy: str = "safe",
+    max_actions: int = 10,
+    confirm: bool = False,
+    max_depth: int = 3,
+) -> str:
+    """Interact with known reversible controls and learn their direct responses.
+
+    ``safe`` executes only commands classified safe. ``supervised`` may also
+    execute reversible state-changing commands, but external/destructive and
+    confirmation-required commands are returned as pending and never executed.
+    New pages and dialogs are scanned recursively up to ``max_depth`` before
+    recovery. Scrolling and dragging are intentionally excluded.
+    """
+    try:
+        blocked = _mode_blocks_operation()
+        if blocked:
+            return blocked
+        api_url, api_key, model = _vision_api_settings("")
+        result = interaction_learning.explore_application(
+            knowledge.app_dir(app_id),
+            api_url,
+            api_key,
+            model,
+            __version__,
+            policy=policy,
+            max_actions=max_actions,
+            confirm=confirm,
+            max_depth=max_depth,
+        )
+        return json.dumps(result, ensure_ascii=False, indent=2)
+    except Exception as error:
+        return f"Error exploring UI workflows: {error}"
+
+
+@mcp.tool()
+def list_ui_interactions(app_id: str, command: str = "", limit: int = 50) -> str:
+    """List learned before/after operation-effect records."""
+    try:
+        records = knowledge.list_interactions(knowledge.app_dir(app_id), command, limit)
+        return json.dumps(records, ensure_ascii=False, indent=2)
+    except Exception as error:
+        return f"Error listing UI interactions: {error}"
 
 
 @mcp.tool()
@@ -2034,7 +2129,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
             "  learn:   capture and store controls without mutating the UI\n"
             "  mixed:   execute operations and learn successful controls\n\n"
             "Visual fallback order:\n"
-            "  UIA LOCATION -> OCR or image template -> remote AI vision\n"
+            "  UIA LOCATION -> multi-state image templates -> OCR -> opt-in remote AI vision\n"
             "  OCR requires Tesseract and easy-uiauto[mcp,vision].\n"
             "  Remote AI vision requires EASY_UIAUTO_VISION_API_URL,\n"
             "  EASY_UIAUTO_VISION_API_KEY, and EASY_UIAUTO_VISION_MODEL.\n"
@@ -2062,6 +2157,16 @@ def _build_arg_parser() -> argparse.ArgumentParser:
             "  OCR smoke test: find_text_on_screen(text=..., language='eng')\n"
             "  AI vision test: find_control_by_vision(description=...)\n"
             "  AI vision sends the selected screenshot to the configured remote API.\n\n"
+            "Application knowledge CLI:\n"
+            "  easy_uiauto_ui scan <window> [--strategy visual-first|full-uia]\n"
+            "  easy_uiauto_ui apps | commands <app-id> | search <app-id> [query]\n"
+            "  easy_uiauto_ui run <app-id> <command> [--text TEXT] [--confirm]\n"
+            "  easy_uiauto_ui batch <app-id> '<steps-json>' [--confirm]\n"
+            "  easy_uiauto_ui learn-effect <app-id> <command> [--recover]\n"
+            "  easy_uiauto_ui explore <app-id> [--policy safe|supervised] [--max-depth N]\n"
+            "  easy_uiauto_ui interactions <app-id>\n"
+            "  Runtime remote vision is disabled unless --allow-vision-fallback is set.\n"
+            "  Automated learning intentionally excludes scrolling and dragging.\n\n"
             "MCP tools include:\n"
             "  modes: get_mode, set_mode\n"
             "  windows: list_windows, activate_window\n"
@@ -2072,7 +2177,9 @@ def _build_arg_parser() -> argparse.ArgumentParser:
             "  batch: run_action, run_actions\n"
             "  screenshot: take_screenshot\n"
             "  knowledge: scan_window_knowledge, list_ui_knowledge_apps, search_ui_knowledge,\n"
-            "             list_ui_commands, run_ui_command, run_ui_commands, teach_ui_control,\n"
+            "             list_ui_commands, run_ui_command, run_ui_commands,\n"
+            "             learn_ui_command_effect, explore_ui_workflows, list_ui_interactions,\n"
+            "             teach_ui_control,\n"
             "             rebuild_ui_knowledge_index\n"
             "  vision: find_control_by_image, click_by_image, find_text_on_screen, click_text_on_screen,\n"
             "          find_control_by_vision, click_by_vision\n\n"

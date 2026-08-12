@@ -5,6 +5,8 @@ from __future__ import annotations
 from copy import deepcopy
 from types import SimpleNamespace
 
+from PIL import Image
+
 from easy_uiauto.mcp import knowledge, ui_cli
 
 
@@ -73,6 +75,58 @@ def test_execute_uses_verified_image_fallback(monkeypatch, tmp_path) -> None:
 
     assert result["resolved_by"] == "image"
     assert clicks == [(70, 60)]
+
+
+def test_perform_action_supports_right_click_and_hover(monkeypatch) -> None:
+    calls = []
+    rectangle = {"left": 20, "top": 40, "width": 100, "height": 40}
+    monkeypatch.setattr(
+        ui_cli.pyautogui,
+        "rightClick",
+        lambda x, y: calls.append(("right-click", x, y)),
+    )
+    monkeypatch.setattr(
+        ui_cli.pyautogui,
+        "moveTo",
+        lambda x, y, duration: calls.append(("hover", x, y, duration)),
+    )
+
+    ui_cli._perform_action("right-click", "", None, rectangle)
+    ui_cli._perform_action("hover", "", None, rectangle, fast=True)
+
+    assert calls == [("right-click", 70, 60), ("hover", 70, 60, 0)]
+
+
+def test_resolution_uses_ocr_after_location_and_templates_fail(monkeypatch, tmp_path) -> None:
+    directory = knowledge.initialize_app("example", "Example", tmp_path)
+    record = _record()
+    image_path = directory / record["image"]
+    image_path.parent.mkdir(parents=True, exist_ok=True)
+    Image.new("RGB", (20, 10), "white").save(image_path)
+    rectangle = {"left": 20, "top": 40, "right": 120, "bottom": 80, "width": 100, "height": 40}
+    monkeypatch.setattr(ui_cli, "resolve_location", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        ui_cli,
+        "locate_template",
+        lambda *_args: {"found": False, "score": 0.2, "detail": "not unique"},
+    )
+    monkeypatch.setattr(
+        ui_cli,
+        "_locate_record_text",
+        lambda *_args: {"confidence": 0.91, "rect": rectangle},
+    )
+
+    result = ui_cli._resolve_verified_control_in_context(
+        directory,
+        record,
+        object(),
+        {"left": 0, "top": 0, "right": 200, "bottom": 100, "width": 200, "height": 100},
+        Image.new("RGB", (200, 100), "white"),
+    )
+
+    assert result[0] is None
+    assert result[1] == 0.91
+    assert result[3] == "ocr"
 
 
 def test_failed_runtime_verification_quarantines_control(monkeypatch, tmp_path) -> None:

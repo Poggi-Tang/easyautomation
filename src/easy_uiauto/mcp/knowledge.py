@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 
 KNOWLEDGE_DIR = "EASY_UIAUTO_KNOWLEDGE_DIR"
-INDEX_VERSION = 1
+INDEX_VERSION = 2
 SEARCHABLE_STATUSES = {"verified", "observed", "suspect"}
 EXECUTABLE_STATUSES = {"verified"}
 
@@ -55,6 +55,8 @@ def initialize_app(app_id: str, app_name: str, root: Path | None = None) -> Path
         "operations",
         "images/pages",
         "images/controls",
+        "images/interactions",
+        "interactions",
         "quarantine",
         ".easy_uiauto",
     ):
@@ -260,12 +262,41 @@ def save_region(directory: Path, record: dict) -> Path:
     return path
 
 
+def save_interaction(directory: Path, record: dict) -> Path:
+    """Persist one before/after operation effect as Markdown source of truth."""
+    record = {**record, "kind": "interaction", "updated_at": utc_now()}
+    title = record.get("semantic_name") or record.get("command") or record["id"]
+    effects = record.get("effects", [])
+    effect_lines = "\n".join(
+        f"- `{item.get('type', 'change')}`: {item.get('description', '')}"
+        for item in effects
+        if isinstance(item, dict)
+    ) or "- No confirmed effect"
+    body = (
+        f"# {title}\n\n"
+        f"Command: `{record.get('command', '')}`  \n"
+        f"Status: **{record.get('status', 'unknown')}**  \n"
+        f"Before state: `{record.get('before_state_id', '')}`  \n"
+        f"After state: `{record.get('after_state_id', '')}`\n\n"
+        "## Effects\n\n"
+        f"{effect_lines}\n\n"
+        "## Success Condition\n\n"
+        f"{record.get('success_condition', 'Not established')}\n\n"
+        "## Recovery\n\n"
+        f"{record.get('recovery', {}).get('detail', 'Not attempted')}\n"
+    )
+    path = directory / "interactions" / f"{slugify(record['id'])}.md"
+    write_markdown(path, record, body)
+    return path
+
+
 def iter_records(directory: Path, kind: str | None = None) -> list[tuple[Path, dict]]:
     patterns = {
         "control": ["controls/*.md", "quarantine/*.md"],
         "page": ["pages/*.md"],
         "region": ["regions/*.md"],
         "application": ["app.md"],
+        "interaction": ["interactions/*.md"],
     }
     selected = patterns.get(kind, [pattern for values in patterns.values() for pattern in values])
     records = []
@@ -302,6 +333,7 @@ def rebuild_index(directory: Path) -> dict:
     pages = [record for _path, record in iter_records(directory, "page")]
     regions = [record for _path, record in iter_records(directory, "region")]
     controls = [record for _path, record in iter_records(directory, "control")]
+    interactions = [record for _path, record in iter_records(directory, "interaction")]
     index = {
         "schema_version": INDEX_VERSION,
         "generated_at": utc_now(),
@@ -309,6 +341,7 @@ def rebuild_index(directory: Path) -> dict:
         "pages": pages,
         "regions": regions,
         "controls": controls,
+        "interactions": interactions,
     }
     index_path = directory / ".easy_uiauto" / "index.json"
     index_path.parent.mkdir(parents=True, exist_ok=True)
@@ -320,10 +353,20 @@ def load_index(directory: Path, rebuild: bool = False) -> dict:
     path = directory / ".easy_uiauto" / "index.json"
     if not rebuild and path.is_file():
         try:
-            return json.loads(path.read_text(encoding="utf-8"))
+            index = json.loads(path.read_text(encoding="utf-8"))
+            if index.get("schema_version") == INDEX_VERSION:
+                return index
         except (OSError, json.JSONDecodeError):
             pass
     return rebuild_index(directory)
+
+
+def list_interactions(directory: Path, command: str = "", limit: int = 50) -> list[dict]:
+    records = load_index(directory).get("interactions", [])
+    if command:
+        records = [item for item in records if item.get("command") == command]
+    records.sort(key=lambda item: item.get("updated_at", ""), reverse=True)
+    return records[: max(1, min(int(limit), 500))]
 
 
 def list_apps(root: Path | None = None) -> list[dict]:
@@ -353,6 +396,7 @@ def list_apps(root: Path | None = None) -> list[dict]:
                     control.get("semantic_status") == "uncertain"
                     for control in index.get("controls", [])
                 ),
+                "interactions": len(index.get("interactions", [])),
             }
         )
     return result

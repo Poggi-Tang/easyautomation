@@ -24,21 +24,28 @@ from . import knowledge
 from .protocol import location_from_xpath, normalize_location
 
 ACTIONABLE_TYPES = {
-    "ButtonControl": ["click"],
-    "CheckBoxControl": ["click"],
-    "ComboBoxControl": ["click"],
-    "EditControl": ["click", "set-text"],
-    "HyperlinkControl": ["click"],
-    "ListItemControl": ["click", "double-click"],
-    "MenuItemControl": ["click"],
-    "RadioButtonControl": ["click"],
-    "TabItemControl": ["click"],
-    "TreeItemControl": ["click", "double-click"],
+    "ButtonControl": ["click", "hover"],
+    "CheckBoxControl": ["click", "hover"],
+    "ComboBoxControl": ["click", "hover"],
+    "EditControl": ["click", "set-text", "right-click", "hover"],
+    "HyperlinkControl": ["click", "right-click", "hover"],
+    "ListItemControl": ["click", "double-click", "right-click", "hover"],
+    "MenuItemControl": ["click", "hover"],
+    "RadioButtonControl": ["click", "hover"],
+    "TabItemControl": ["click", "right-click", "hover"],
+    "TreeItemControl": ["click", "double-click", "right-click", "hover"],
 }
 
 SEMANTIC_CONFIDENCE_THRESHOLD = 0.72
 SEMANTIC_BATCH_SIZE = 60
 SEMANTIC_RISKS = {"safe", "state-changing", "external", "destructive", "unknown"}
+SCAN_STRATEGIES = {"visual-first", "full-uia"}
+GENERIC_CONTAINER_TYPES = {
+    "CustomControl",
+    "GroupControl",
+    "PaneControl",
+    "WindowControl",
+}
 
 
 def _rect(control) -> dict:
@@ -224,14 +231,25 @@ def resolve_location(location: dict, window=None):
 
 
 def _screenshot_window(window_rect: dict):
-    return pyautogui.screenshot(
-        region=(
-            window_rect["left"],
-            window_rect["top"],
-            window_rect["width"],
-            window_rect["height"],
-        )
+    from PIL import ImageGrab
+
+    bounds = (
+        window_rect["left"],
+        window_rect["top"],
+        window_rect["right"],
+        window_rect["bottom"],
     )
+    try:
+        return ImageGrab.grab(bbox=bounds, all_screens=True)
+    except Exception:
+        return pyautogui.screenshot(
+            region=(
+                window_rect["left"],
+                window_rect["top"],
+                window_rect["width"],
+                window_rect["height"],
+            )
+        )
 
 
 def _image_sha256(image) -> str:
@@ -417,6 +435,34 @@ def _crop_control(screenshot, control_rect: dict, window_rect: dict):
     return screenshot.crop(box)
 
 
+def _save_control_images(
+    directory: Path,
+    control_id: str,
+    crop,
+    previous: dict,
+) -> tuple[Path, list[str], str]:
+    """Preserve visual-state templates instead of replacing the only reference."""
+    image_path = directory / "images" / "controls" / f"{control_id}.png"
+    variant_dir = directory / "images" / "controls" / control_id
+    variant_dir.mkdir(parents=True, exist_ok=True)
+    variants = list(previous.get("image_variants", []))
+    old_relative = previous.get("image", "")
+    old_hash = previous.get("image_sha256", "")
+    old_path = directory / old_relative if old_relative else None
+    if old_path and old_hash and old_path.is_file():
+        old_variant = variant_dir / f"{old_hash}.png"
+        if not old_variant.is_file():
+            knowledge.replace_image(old_path, old_variant)
+        variants.append(str(old_variant.relative_to(directory)).replace("\\", "/"))
+    image_hash = _image_sha256(crop)
+    crop.save(image_path)
+    new_variant = variant_dir / f"{image_hash}.png"
+    if not new_variant.is_file():
+        crop.save(new_variant)
+    variants.append(str(new_variant.relative_to(directory)).replace("\\", "/"))
+    return image_path, list(dict.fromkeys(variants))[-8:], image_hash
+
+
 def _parse_json_object(content: str) -> dict:
     content = content.strip()
     if content.startswith("```"):
@@ -427,6 +473,61 @@ def _parse_json_object(content: str) -> dict:
     return result
 
 
+def _read_completion_content(response) -> str:
+    """Read either an OpenAI JSON response or an SSE streaming completion."""
+    content_type = ""
+    try:
+        content_type = response.headers.get_content_type()
+    except (AttributeError, TypeError):
+        pass
+    if content_type == "text/event-stream":
+        return _read_sse_content(response)
+    raw = response.read().decode("utf-8")
+    if not raw.lstrip().startswith("data:"):
+        body = json.loads(raw)
+        content = body["choices"][0]["message"]["content"]
+        if isinstance(content, list):
+            return "".join(
+                item.get("text", "") for item in content if isinstance(item, dict)
+            )
+        return str(content)
+    return _parse_sse_lines(raw.splitlines())
+
+
+def _read_sse_content(response) -> str:
+    return _parse_sse_lines(
+        raw_line.decode("utf-8", errors="replace") for raw_line in response
+    )
+
+
+def _parse_sse_lines(lines) -> str:
+    pieces = []
+    for line in lines:
+        line = line.strip()
+        if not line.startswith("data:"):
+            continue
+        data = line[5:].strip()
+        if not data or data == "[DONE]":
+            continue
+        chunk = json.loads(data)
+        choices = chunk.get("choices", [])
+        if not choices:
+            continue
+        choice = choices[0]
+        content = choice.get("delta", {}).get("content")
+        if content is None:
+            content = choice.get("message", {}).get("content")
+        if isinstance(content, str):
+            pieces.append(content)
+        elif isinstance(content, list):
+            pieces.extend(
+                item.get("text", "") for item in content if isinstance(item, dict)
+            )
+    if not pieces:
+        raise RuntimeError("AI streaming response did not contain completion content")
+    return "".join(pieces)
+
+
 def segment_interface(
     screenshot,
     api_url: str,
@@ -434,24 +535,38 @@ def segment_interface(
     model: str,
     version: str,
 ) -> dict:
-    """Ask the configured multimodal endpoint for page and region semantics."""
+    """Ask the multimodal endpoint for page, regions, and key visual controls."""
     buffer = io.BytesIO()
     screenshot.save(buffer, format="PNG")
     image_url = "data:image/png;base64," + base64.b64encode(buffer.getvalue()).decode("ascii")
     width, height = screenshot.size
     prompt = (
         f"Analyze this {width}x{height} desktop application screenshot. "
-        "Identify the current page and divide it into non-overlapping functional regions. "
-        "Use concise generic semantic IDs in kebab-case. Return JSON only with this shape: "
+        "Identify the current page, divide it into functional regions, and identify only controls "
+        "that a user would need to operate or read to complete tasks. Exclude decorative, "
+        "duplicate, layout-only, and inaccessible background elements. Use concise generic IDs in "
+        "kebab-case. Return JSON only with this shape: "
         '{"page":{"id":"main","name":"Main","description":""},'
         '"regions":[{"id":"navigation","name":"Navigation","role":"navigation",'
-        '"description":"","left":0,"top":0,"width":100,"height":100}]}. '
+        '"description":"","left":0,"top":0,"width":100,"height":100}],'
+        '"controls":[{"id":1,"region":"navigation","semantic_name":"Open menu",'
+        '"intent":"open-navigation-menu","description":"Open the application navigation",'
+        '"role":"action","actions":["click"],"aliases":["menu"],"risk":"safe",'
+        '"requires_confirmation":false,"confidence":0.97,"evidence":["menu icon"],'
+        '"ambiguity":"","left":10,"top":10,"width":40,"height":40}]}. '
         "Coordinates must use screenshot pixels. Include all major functional areas, "
-        "not each control."
+        "not each control. Control rectangles must tightly cover the visible target. Include key "
+        "read-only status and result fields because they are needed to verify operation effects. "
+        "Actions may be click, double-click, right-click, hover, or set-text; never propose "
+        "scroll or drag. "
+        "Risk must be safe, state-changing, external, destructive, or unknown. Sending, "
+        "publishing, purchasing, deleting, uploading, logging out, and closing unsaved work must "
+        "require confirmation."
     )
     payload = {
         "model": model,
         "temperature": 0,
+        "stream": True,
         "messages": [
             {
                 "role": "system",
@@ -478,17 +593,12 @@ def segment_interface(
     )
     try:
         with urlrequest.urlopen(request, timeout=60) as response:
-            body = json.loads(response.read().decode("utf-8"))
+            content = _read_completion_content(response)
     except urlerror.HTTPError as error:
         raise RuntimeError(f"AI segmentation failed with HTTP {error.code}") from error
-    except urlerror.URLError as error:
-        raise RuntimeError(f"AI segmentation failed: {error.reason}") from error
-    try:
-        content = body["choices"][0]["message"]["content"]
-    except (KeyError, IndexError, TypeError) as error:
-        raise RuntimeError("AI segmentation response did not contain a completion") from error
-    if isinstance(content, list):
-        content = "".join(item.get("text", "") for item in content if isinstance(item, dict))
+    except (urlerror.URLError, TimeoutError) as error:
+        reason = getattr(error, "reason", str(error))
+        raise RuntimeError(f"AI segmentation failed: {reason}") from error
     result = _parse_json_object(str(content))
     return _validate_segments(result, width, height)
 
@@ -584,6 +694,7 @@ def _request_control_semantics(
     payload = {
         "model": model,
         "temperature": 0,
+        "stream": True,
         "messages": [
             {
                 "role": "system",
@@ -614,17 +725,12 @@ def _request_control_semantics(
     )
     try:
         with urlrequest.urlopen(request, timeout=90) as response:
-            body = json.loads(response.read().decode("utf-8"))
+            content = _read_completion_content(response)
     except urlerror.HTTPError as error:
         raise RuntimeError(f"AI control semantics failed with HTTP {error.code}") from error
-    except urlerror.URLError as error:
-        raise RuntimeError(f"AI control semantics failed: {error.reason}") from error
-    try:
-        content = body["choices"][0]["message"]["content"]
-    except (KeyError, IndexError, TypeError) as error:
-        raise RuntimeError("AI control semantics response did not contain a completion") from error
-    if isinstance(content, list):
-        content = "".join(item.get("text", "") for item in content if isinstance(item, dict))
+    except (urlerror.URLError, TimeoutError) as error:
+        reason = getattr(error, "reason", str(error))
+        raise RuntimeError(f"AI control semantics failed: {reason}") from error
     result = _parse_json_object(str(content))
     expected = {item["id"]: item for item in candidates}
     semantics = {}
@@ -767,7 +873,72 @@ def _validate_segments(result: dict, width: int, height: int) -> dict:
                 },
             }
         )
-    return {"page": page, "regions": regions}
+    controls = []
+    for index, raw in enumerate(result.get("controls", []), start=1):
+        if not isinstance(raw, dict):
+            continue
+        try:
+            left = max(0, min(width, int(raw.get("left", 0))))
+            top = max(0, min(height, int(raw.get("top", 0))))
+            right = max(left, min(width, left + int(raw.get("width", 0))))
+            bottom = max(top, min(height, top + int(raw.get("height", 0))))
+            confidence = max(0.0, min(1.0, float(raw.get("confidence", 0))))
+        except (TypeError, ValueError):
+            continue
+        if right - left < 2 or bottom - top < 2:
+            continue
+        risk = str(raw.get("risk") or "unknown").strip().lower()
+        if risk not in SEMANTIC_RISKS:
+            risk = "unknown"
+        actions = raw.get("actions", [])
+        aliases = raw.get("aliases", [])
+        evidence = raw.get("evidence", [])
+        controls.append(
+            {
+                "id": index,
+                "region_id": knowledge.slugify(raw.get("region") or "unassigned"),
+                "semantic_name": str(raw.get("semantic_name") or "").strip()[:120],
+                "intent": knowledge.slugify(raw.get("intent") or "", ""),
+                "description": str(raw.get("description") or "").strip()[:500],
+                "role": knowledge.slugify(raw.get("role") or "control"),
+                "actions": [
+                    str(value).strip()
+                    for value in actions[:8]
+                    if str(value).strip()
+                ]
+                if isinstance(actions, list)
+                else [],
+                "aliases": [
+                    str(value).strip()
+                    for value in aliases[:12]
+                    if str(value).strip()
+                ]
+                if isinstance(aliases, list)
+                else [],
+                "risk": risk,
+                "requires_confirmation": bool(raw.get("requires_confirmation"))
+                or risk in {"external", "destructive"},
+                "confidence": round(confidence, 4),
+                "evidence": [
+                    str(value).strip()
+                    for value in evidence[:12]
+                    if str(value).strip()
+                ]
+                if isinstance(evidence, list)
+                else [],
+                "ambiguity": str(raw.get("ambiguity") or "").strip()[:500],
+                "source": "ai-vision-target",
+                "relative_rect": {
+                    "left": left,
+                    "top": top,
+                    "right": right,
+                    "bottom": bottom,
+                    "width": right - left,
+                    "height": bottom - top,
+                },
+            }
+        )
+    return {"page": page, "regions": regions, "controls": controls}
 
 
 def _region_for_control(control_rect: dict, window_rect: dict, regions: list[dict]) -> str:
@@ -842,6 +1013,168 @@ def _verify_location(location: dict, expected_rect: dict) -> tuple[bool, dict, s
     return iou >= 0.8, actual_rect, f"bounds IoU={iou:.3f}"
 
 
+def _visual_sample_points(target: dict, window_rect: dict) -> list[tuple[int, int]]:
+    rectangle = target["relative_rect"]
+    left = window_rect["left"] + rectangle["left"]
+    top = window_rect["top"] + rectangle["top"]
+    right = window_rect["left"] + rectangle["right"]
+    bottom = window_rect["top"] + rectangle["bottom"]
+    center_x = (left + right) // 2
+    center_y = (top + bottom) // 2
+    inset_x = max(1, (right - left) // 4)
+    inset_y = max(1, (bottom - top) // 4)
+    return list(
+        dict.fromkeys(
+            [
+                (center_x, center_y),
+                (left + inset_x, center_y),
+                (right - inset_x, center_y),
+                (center_x, top + inset_y),
+                (center_x, bottom - inset_y),
+            ]
+        )
+    )
+
+
+def _control_key(control) -> tuple:
+    rectangle = _rect(control)
+    return (
+        getattr(control, "NativeWindowHandle", 0) or 0,
+        getattr(control, "ControlTypeName", "") or "",
+        getattr(control, "AutomationId", "") or "",
+        getattr(control, "Name", "") or "",
+        rectangle["left"],
+        rectangle["top"],
+        rectangle["right"],
+        rectangle["bottom"],
+    )
+
+
+def _candidate_score(control, target: dict, absolute_target: dict, window) -> tuple:
+    control_type = getattr(control, "ControlTypeName", "") or "Control"
+    actions = _control_actions(control_type, bool(getattr(control, "IsEnabled", True)))
+    rectangle = _rect(control)
+    target_actions = set(target.get("actions", []))
+    score = 0.0
+    if target_actions and target_actions.intersection(actions):
+        score += 8
+    elif actions:
+        score += 4
+    if getattr(control, "AutomationId", ""):
+        score += 4
+    if getattr(control, "Name", ""):
+        score += 2
+    if control_type not in GENERIC_CONTAINER_TYPES:
+        score += 2
+    elif not actions:
+        score -= 4
+    if target.get("role") in {"status", "result", "label", "value"} and control_type in {
+        "TextControl",
+        "EditControl",
+        "DocumentControl",
+    }:
+        score += 5
+    center_x = (absolute_target["left"] + absolute_target["right"]) // 2
+    center_y = (absolute_target["top"] + absolute_target["bottom"]) // 2
+    if rectangle["left"] <= center_x <= rectangle["right"]:
+        score += 1
+    if rectangle["top"] <= center_y <= rectangle["bottom"]:
+        score += 1
+    overlap = _rect_iou(rectangle, absolute_target)
+    score += overlap * 4
+    if control is window or control_type == "DesktopControl":
+        score -= 20
+    area = max(1, rectangle["width"] * rectangle["height"])
+    return score, -area
+
+
+def control_from_visual_target(
+    window,
+    window_rect: dict,
+    target: dict,
+    point_lookup: Callable[[int, int], object] | None = None,
+):
+    """Choose the smallest stable UIA control represented by a visual target."""
+    point_lookup = point_lookup or uiautomation.ControlFromPoint
+    relative = target["relative_rect"]
+    absolute_target = {
+        "left": window_rect["left"] + relative["left"],
+        "top": window_rect["top"] + relative["top"],
+        "right": window_rect["left"] + relative["right"],
+        "bottom": window_rect["top"] + relative["bottom"],
+        "width": relative["width"],
+        "height": relative["height"],
+    }
+    candidates = {}
+    for x, y in _visual_sample_points(target, window_rect):
+        try:
+            current = point_lookup(x, y)
+        except Exception:
+            continue
+        for _depth in range(16):
+            if not current:
+                break
+            try:
+                candidates.setdefault(_control_key(current), current)
+                if current is window or getattr(current, "ControlTypeName", "") == "DesktopControl":
+                    break
+                current = current.GetParentControl()
+            except Exception:
+                break
+    if not candidates:
+        return None
+    ranked = sorted(
+        candidates.values(),
+        key=lambda control: _candidate_score(control, target, absolute_target, window),
+        reverse=True,
+    )
+    selected = ranked[0]
+    if _candidate_score(selected, target, absolute_target, window)[0] < 0:
+        return None
+    return selected
+
+
+def controls_from_visual_targets(
+    window,
+    window_rect: dict,
+    targets: list[dict],
+    max_controls: int,
+) -> tuple[list[tuple[object, int]], dict[int, dict], list[dict]]:
+    """Resolve visual targets to unique UIA controls without walking the full tree."""
+    controls = []
+    semantics = {}
+    failures = []
+    seen = set()
+    for target in targets[: max(1, max_controls)]:
+        control = control_from_visual_target(window, window_rect, target)
+        if control is None:
+            failures.append(
+                {
+                    "visual_target": target.get("semantic_name") or target.get("id"),
+                    "error": "no UIA control at visual target",
+                }
+            )
+            continue
+        try:
+            xpath = get_control_xpath(control)
+            key = json.dumps(xpath, ensure_ascii=False, sort_keys=True)
+        except Exception as error:
+            failures.append(
+                {
+                    "visual_target": target.get("semantic_name") or target.get("id"),
+                    "error": f"XPath failed: {error}",
+                }
+            )
+            continue
+        if key in seen:
+            continue
+        seen.add(key)
+        index = len(controls) + 1
+        controls.append((control, max(0, len(xpath) - 1)))
+        semantics[index] = target
+    return controls, semantics, failures
+
+
 def scan_window(
     window_name: str,
     api_url: str,
@@ -851,12 +1184,16 @@ def scan_window(
     max_depth: int = 12,
     max_controls: int = 3000,
     verify_limit: int = 500,
+    strategy: str = "visual-first",
     root: Path | None = None,
     progress: Callable[[str], None] | None = None,
 ) -> dict:
     """Scan one visible application window and persist its UI command knowledge."""
     started = time.perf_counter()
     progress = progress or (lambda _message: None)
+    strategy = strategy.strip().lower()
+    if strategy not in SCAN_STRATEGIES:
+        raise ValueError(f"strategy must be one of: {', '.join(sorted(SCAN_STRATEGIES))}")
     window = _find_window(window_name)
     actual_name = (getattr(window, "Name", "") or window_name).strip()
     _activate_window(window)
@@ -917,65 +1254,89 @@ def scan_window(
             },
         )
 
-    progress("Traversing UI Automation controls")
-    controls = _walk_controls(window, max(1, min(max_depth, 30)), max(1, max_controls))
     semantic_candidates = []
-    for index, (control, _depth) in enumerate(controls, start=1):
-        control_rect = _clip_rect(_rect(control), window_rect)
-        if not _valid_rect(control_rect, window_rect):
-            continue
-        control_type = (getattr(control, "ControlTypeName", "") or "Control")
-        supported_actions = _control_actions(
-            control_type,
-            bool(getattr(control, "IsEnabled", True)),
+    visual_failures = []
+    visual_targets = segmentation.get("controls", [])
+    effective_strategy = strategy
+    if strategy == "visual-first":
+        if visual_targets:
+            progress(f"Resolving {len(visual_targets)} visual targets through local UIA")
+            controls, semantics, visual_failures = controls_from_visual_targets(
+                window,
+                window_rect,
+                visual_targets,
+                max_controls,
+            )
+        else:
+            controls, semantics = [], {}
+            effective_strategy = "visual-first-empty"
+            visual_failures.append(
+                {
+                    "error": (
+                        "vision returned no key controls; no full-tree or second-AI fallback "
+                        "was run"
+                    )
+                }
+            )
+    else:
+        progress("Traversing UI Automation controls")
+        controls = _walk_controls(window, max(1, min(max_depth, 30)), max(1, max_controls))
+        for index, (control, _depth) in enumerate(controls, start=1):
+            control_rect = _clip_rect(_rect(control), window_rect)
+            if not _valid_rect(control_rect, window_rect):
+                continue
+            control_type = (getattr(control, "ControlTypeName", "") or "Control")
+            supported_actions = _control_actions(
+                control_type,
+                bool(getattr(control, "IsEnabled", True)),
+            )
+            uia_name = (getattr(control, "Name", "") or "").strip()
+            automation_id = (getattr(control, "AutomationId", "") or "").strip()
+            if not supported_actions and not uia_name and not automation_id:
+                continue
+            semantic_candidates.append(
+                {
+                    "id": index,
+                    "uia_name": uia_name,
+                    "automation_id": automation_id,
+                    "control_type": control_type,
+                    "localized_control_type": str(
+                        getattr(control, "LocalizedControlType", "") or ""
+                    ).strip(),
+                    "class_name": (getattr(control, "ClassName", "") or "").strip(),
+                    "help_text": str(getattr(control, "HelpText", "") or "").strip(),
+                    "is_keyboard_focusable": bool(
+                        getattr(control, "IsKeyboardFocusable", False)
+                    ),
+                    "region_id": _region_for_control(
+                        control_rect,
+                        window_rect,
+                        segmentation["regions"],
+                    ),
+                    "supported_actions": supported_actions,
+                    "relative_rect": _relative_rect(control_rect, window_rect),
+                }
+            )
+        progress(
+            f"Understanding {len(semantic_candidates)} contextual controls with remote AI"
         )
-        uia_name = (getattr(control, "Name", "") or "").strip()
-        automation_id = (getattr(control, "AutomationId", "") or "").strip()
-        if not supported_actions and not uia_name and not automation_id:
-            continue
-        semantic_candidates.append(
-            {
-                "id": index,
-                "uia_name": uia_name,
-                "automation_id": automation_id,
-                "control_type": control_type,
-                "localized_control_type": str(
-                    getattr(control, "LocalizedControlType", "") or ""
-                ).strip(),
-                "class_name": (getattr(control, "ClassName", "") or "").strip(),
-                "help_text": str(getattr(control, "HelpText", "") or "").strip(),
-                "is_keyboard_focusable": bool(
-                    getattr(control, "IsKeyboardFocusable", False)
-                ),
-                "region_id": _region_for_control(
-                    control_rect,
-                    window_rect,
-                    segmentation["regions"],
-                ),
-                "supported_actions": supported_actions,
-                "relative_rect": _relative_rect(control_rect, window_rect),
-            }
+        semantics = analyze_control_semantics(
+            screenshot,
+            semantic_candidates,
+            page,
+            segmentation["regions"],
+            api_url,
+            api_key,
+            model,
+            version,
         )
-    progress(
-        f"Understanding {len(semantic_candidates)} contextual controls with remote AI"
-    )
-    semantics = analyze_control_semantics(
-        screenshot,
-        semantic_candidates,
-        page,
-        segmentation["regions"],
-        api_url,
-        api_key,
-        model,
-        version,
-    )
     verification_screenshot = _screenshot_window(window_rect)
     counts = {"observed": 0, "verified": 0, "suspect": 0, "quarantined": 0}
     key_controls = 0
     in_bounds = 0
     saved_current = 0
     verified_actions = 0
-    failures = []
+    failures = list(visual_failures)
     command_counts: dict[str, int] = {}
     observed_ids = set()
     previous_by_id = {record.get("id"): record for record in previous_page_records}
@@ -1057,9 +1418,13 @@ def scan_window(
                 command_counts[base_command] = command_counts.get(base_command, 0) + 1
                 if command_counts[base_command] > 1:
                     command = f"{base_command}-{command_counts[base_command]}"
-            image_path = directory / "images" / "controls" / f"{control_id}.png"
             crop = _crop_control(screenshot, control_rect, window_rect)
-            crop.save(image_path)
+            image_path, image_variants, image_sha256 = _save_control_images(
+                directory,
+                control_id,
+                crop,
+                previous,
+            )
 
             location_ok = False
             verification_attempted = False
@@ -1167,7 +1532,8 @@ def scan_window(
                 "is_key": is_key,
                 "status": status,
                 "image": str(image_path.relative_to(directory)).replace("\\", "/"),
-                "image_sha256": _image_sha256(crop),
+                "image_variants": image_variants,
+                "image_sha256": image_sha256,
                 "image_similarity": similarity,
                 "template_score": template_result["score"],
                 "visual_fallback_ready": template_result["ok"],
@@ -1195,6 +1561,7 @@ def scan_window(
                 ),
                 "notes": "Generated by scan_window_knowledge.",
                 "scan_id": scan_id,
+                "scan_strategy": effective_strategy,
             }
             knowledge.save_control(directory, record)
             counts[status] += 1
@@ -1210,8 +1577,12 @@ def scan_window(
             "the window likely moved or changed during scanning"
         )
 
+    retained_unobserved = 0
     for previous in previous_page_records:
         if previous.get("id") in observed_ids:
+            continue
+        if effective_strategy == "visual-first":
+            retained_unobserved += 1
             continue
         previous["status"] = "quarantined"
         previous["notes"] = (
@@ -1237,16 +1608,23 @@ def scan_window(
         "vault": str(directory),
         "page_image": str(page_image_named),
         "regions": len(segmentation["regions"]),
+        "strategy": effective_strategy,
+        "visual_targets": len(visual_targets),
         "uia_controls_seen": len(controls),
         "controls_in_bounds": in_bounds,
         "controls_saved_this_scan": saved_current,
+        "controls_retained_unobserved": retained_unobserved,
         "knowledge_controls_total": len(index["controls"]),
         "key_controls": key_controls,
         "commands": len(knowledge.available_commands(directory)),
         "command_catalog": str(catalog_path),
         "status_counts": counts,
         "semantic_counts": semantic_counts,
-        "semantic_controls_analyzed": len(semantic_candidates),
+        "semantic_controls_analyzed": (
+            len(visual_targets)
+            if effective_strategy == "visual-first"
+            else len(semantic_candidates)
+        ),
         "failures": failures[:50],
         "truncated": len(controls) >= max_controls,
         "elapsed_seconds": elapsed,

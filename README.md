@@ -155,26 +155,47 @@ easy_uiauto_ui commands <app-id>
 easy_uiauto_ui search <app-id> "search terms"
 easy_uiauto_ui run <app-id> <page.region.control.action> --text "optional text"
 easy_uiauto_ui batch <app-id> '["main.keypad.6.click", "main.keypad.plus.click"]'
+easy_uiauto_ui learn-effect <app-id> <command> --recover
+easy_uiauto_ui explore <app-id> --policy safe --max-actions 10 --max-depth 3
+easy_uiauto_ui interactions <app-id>
 easy_uiauto_ui teach <app-id> <control-id> "Meaning" intent "Description"
 ```
 
 The default vault is `~/easy_uiauto_vault`. Set `EASY_UIAUTO_KNOWLEDGE_DIR`
 to use another Obsidian vault. Each application stores Markdown/YAML records,
-page screenshots, individual control PNG crops, a quarantine directory, and a
-generated `operations/UI-CLI.md` catalog. `.easy_uiauto/index.json` is only a
-disposable search cache and can be rebuilt with `easy_uiauto_ui reindex`.
+page screenshots, per-control visual-state PNGs, interaction before/after images,
+a quarantine directory, and a generated `operations/UI-CLI.md` catalog.
+`.easy_uiauto/index.json` is only a disposable search cache and can be rebuilt with
+`easy_uiauto_ui reindex`.
 
-Scanning combines the complete visible UIA tree with remote multimodal page/region
-segmentation and batched contextual understanding of controls. The model receives
-the original page screenshot, a numbered-control overlay, UIA metadata, region context,
-and supported actions. It records each control's user-facing meaning, stable intent,
-description, aliases, evidence, risk, recommended actions, ambiguity, and confidence.
-All visible controls are saved; actionable controls become UI CLI commands only when
-their semantics are high-confidence and they pass LOCATION plus control-image validation.
-When LOCATION is not
-available, one unique high-confidence image match can validate and execute the
-control. Ambiguous, stale, or missing controls are quarantined and excluded from
-execution until a successful rescan repairs them.
+The default `visual-first` scan makes one multimodal request to identify the current
+page, functional regions, and only task-relevant controls. Pixel targets are mapped
+back to local UIA controls and scored for stable names, automation IDs, supported
+actions, and tight bounds. This avoids a complete UIA-tree walk and a second remote
+semantic pass. Use `--strategy full-uia` only for diagnostic coverage when visual
+targeting is unsuitable. Both strategies store user-facing meaning, stable intent,
+description, aliases, evidence, risk, actions, ambiguity, and confidence. Commands are
+published only after high-confidence semantics and LOCATION/image validation. The visual
+request uses SSE streaming when supported and window capture uses virtual-desktop
+coordinates, including secondary monitors. If vision returns no controls, visual-first
+reports an empty scan instead of silently invoking a second remote request.
+
+`learn-effect` captures the target window and local full-desktop state before and after
+one verified command. It waits for delayed changes to stabilize, reduces pixel changes
+to local regions, checks only UIA controls in those regions, inventories new or transient
+top-level windows, captures action-control properties, and asks vision to generalize a
+success condition. Full desktop images stay local; only target-window images and crops
+of newly opened related windows are sent to the configured endpoint. `explore` repeats
+this for known reversible commands, deduplicates page/command states, presses Escape to
+recover, and stops after interference or failed recovery. `safe` permits only safe
+commands; `supervised` also permits reversible state-changing commands. External,
+destructive, or confirmation-required commands are never explored automatically.
+Scrolling and dragging are intentionally not part of exploration.
+
+At runtime, resolution follows `LOCATION`, stored multi-state image templates, local
+OCR, and finally opt-in remote vision. Use `--allow-vision-fallback` or
+`allow_vision_fallback=true` for the last step. Ambiguous, stale, or missing controls
+are quarantined and excluded from execution until a successful rescan repairs them.
 
 Locator/image verification, semantic verification, and functional execution are tracked
 separately. Scanning does not click every control: doing so could send, publish, purchase,
@@ -203,6 +224,9 @@ The same workflow is available through MCP tools:
 - `list_ui_commands`
 - `run_ui_command`
 - `run_ui_commands`
+- `learn_ui_command_effect`
+- `explore_ui_workflows`
+- `list_ui_interactions`
 - `teach_ui_control`
 - `rebuild_ui_knowledge_index`
 

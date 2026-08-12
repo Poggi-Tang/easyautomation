@@ -4,6 +4,37 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog and is maintained automatically by Semantic Release.
 
+## [0.5.0] - 2026-08-12
+
+### Added
+
+- Added visual-first learning that asks one multimodal call for page regions and key
+  controls, then maps visual targets to stable local UIA controls without a full tree walk.
+- Added `learn_ui_command_effect`, `explore_ui_workflows`, and matching
+  `easy_uiauto_ui learn-effect`, `explore`, and `interactions` commands.
+- Added bounded recursive exploration of newly opened pages and dialogs with
+  page/command deduplication and inner-to-outer state recovery.
+- Added local before/after target and desktop snapshots, localized pixel differences,
+  delayed stability checks, changed-control inspection, top-level popup/transient-window
+  detection, action-property changes, success conditions, state IDs, and Escape recovery.
+- Added multi-state control templates and runtime fallback through LOCATION, image,
+  OCR, and opt-in remote AI vision.
+- Added right-click and hover commands and effect learning. Scrolling and dragging remain
+  intentionally excluded from automated exploration.
+- Added virtual-desktop window capture for applications on secondary monitors and streaming
+  completion parsing compatible with OpenAI SSE responses and empty usage frames.
+
+### Changed
+
+- Store interaction knowledge as Obsidian-compatible Markdown and PNG source files while
+  keeping the JSON index disposable.
+- Send only target-window before/after images and related popup crops for effect analysis;
+  complete desktop snapshots stay local.
+- Stop safe exploration on user interference or failed state recovery and never
+  automatically execute external, destructive, or confirmation-required commands.
+- Keep visual-first scanning to one remote request. An empty visual target list no longer
+  triggers a full UIA traversal and second semantic-model request.
+
 ## [0.4.0] - 2026-08-12
 
 ### Added
