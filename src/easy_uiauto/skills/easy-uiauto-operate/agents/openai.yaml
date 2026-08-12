@@ -1,0 +1,4 @@
+interface:
+  display_name: "easy_uiauto Operate"
+  short_description: "Operate desktop apps through verified semantic UI commands"
+  default_prompt: "Use $easy-uiauto-operate to find and run a verified UI command for the current application."

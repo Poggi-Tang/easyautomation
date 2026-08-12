@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog and is maintained automatically by Semantic Release.
 
+## [0.2.0] - 2026-08-12
+
+### Added
+
+- Added an Obsidian-compatible application UI knowledge vault using Markdown/YAML and PNG files as the source of truth, with a disposable JSON search index.
+- Added full-window UIA scanning, remote AI page/region segmentation, per-control image capture, stable page/region identities, and scan completeness reporting.
+- Added LOCATION and unique image validation, automatic quarantine of stale or ambiguous controls, and rescan-based repair.
+- Added generated application-specific UI CLI commands through `easy_uiauto_ui` and equivalent MCP tools.
+- Added bundled `easy-uiauto-learning` and `easy-uiauto-operate` Codex skills with installation and update commands.
+
 ## [0.1.21] - 2026-08-11
 
 ### Added

@@ -1,0 +1,4 @@
+interface:
+  display_name: "easy_uiauto Learning"
+  short_description: "Scan desktop apps into maintainable UI command knowledge"
+  default_prompt: "Use $easy-uiauto-learning to scan the current application and build its verified UI command knowledge."

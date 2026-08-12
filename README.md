@@ -144,6 +144,44 @@ easy_uiauto_service --help
 python -m easy_uiauto.mcp.service --port 9876
 ```
 
+### Application UI Knowledge and CLI
+
+Scan any visible Windows application into an Obsidian-compatible knowledge vault:
+
+```bash
+easy_uiauto_ui scan "Window title"
+easy_uiauto_ui apps
+easy_uiauto_ui commands <app-id>
+easy_uiauto_ui search <app-id> "search terms"
+easy_uiauto_ui run <app-id> <page.region.control.action> --text "optional text"
+```
+
+The default vault is `~/easy_uiauto_vault`. Set `EASY_UIAUTO_KNOWLEDGE_DIR`
+to use another Obsidian vault. Each application stores Markdown/YAML records,
+page screenshots, individual control PNG crops, a quarantine directory, and a
+generated `operations/UI-CLI.md` catalog. `.easy_uiauto/index.json` is only a
+disposable search cache and can be rebuilt with `easy_uiauto_ui reindex`.
+
+Scanning combines the complete visible UIA tree with remote AI page/region
+segmentation. All visible controls are saved; actionable controls become UI CLI
+commands only after LOCATION and control-image validation. When LOCATION is not
+available, one unique high-confidence image match can validate and execute the
+control. Ambiguous, stale, or missing controls are quarantined and excluded from
+execution until a successful rescan repairs them.
+
+The same workflow is available through MCP tools:
+
+- `scan_window_knowledge`
+- `list_ui_knowledge_apps`
+- `search_ui_knowledge`
+- `list_ui_commands`
+- `run_ui_command`
+- `rebuild_ui_knowledge_index`
+
+`--full-setup-codex` also installs or updates the bundled
+`easy-uiauto-learning` and `easy-uiauto-operate` Codex skills. Use
+`--install-codex-skills` to update only those skills.
+
 For MCP client configuration, start the server with `python -m easy_uiauto.mcp.server`.
 Control-vector persistence is optional. To enable it, set
 `EASY_UIAUTO_CONTROL_VECTOR_DB_DIR` to a directory containing

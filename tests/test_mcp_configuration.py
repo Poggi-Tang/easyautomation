@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sys
 
-from easy_uiauto.mcp import configuration, diagnostics
+from easy_uiauto.mcp import configuration, diagnostics, skill_installation
 
 
 def test_reads_only_existing_easy_uiauto_mcp_environment(monkeypatch, tmp_path) -> None:
@@ -171,6 +171,11 @@ def test_full_setup_codex_runs_all_validation_steps(monkeypatch) -> None:
     )
     monkeypatch.setattr(configuration, "_replace_codex", lambda: "configured entry")
     monkeypatch.setattr(
+        skill_installation,
+        "install_codex_skills",
+        lambda: "Installed Codex skills: test",
+    )
+    monkeypatch.setattr(
         diagnostics,
         "ensure_python_vision_dependencies",
         lambda _version: {
@@ -219,6 +224,11 @@ def test_full_setup_codex_fails_when_a_validation_fails(monkeypatch) -> None:
         lambda _url, _model: ("https://api.example/v1", "secret", "vision-model"),
     )
     monkeypatch.setattr(configuration, "_replace_codex", lambda: "configured entry")
+    monkeypatch.setattr(
+        skill_installation,
+        "install_codex_skills",
+        lambda: "Installed Codex skills: test",
+    )
     monkeypatch.setattr(
         diagnostics,
         "ensure_python_vision_dependencies",

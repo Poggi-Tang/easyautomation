@@ -163,6 +163,9 @@ def full_setup_codex(api_url: str, model: str, version: str) -> str:
     steps.append(tesseract_result)
 
     configured = _replace_codex()
+    from .skill_installation import install_codex_skills
+
+    skills = install_codex_skills()
     if all(step["ok"] for step in steps):
         steps.extend(
             diagnostics.run_full_diagnostics(
@@ -184,6 +187,7 @@ def full_setup_codex(api_url: str, model: str, version: str) -> str:
         "Vision API key: configured in the Windows user environment (value hidden)\n"
         f"{report}\n"
         f"{configured}\n"
+        f"{skills}\n"
         "Full setup and validation complete. Fully restart Codex to load the MCP server "
         "and environment."
     )

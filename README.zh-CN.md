@@ -132,6 +132,37 @@ easy_uiauto_service --help
 python -m easy_uiauto.mcp.service --port 9876
 ```
 
+### 软件 UI 知识库与 CLI
+
+可以将任意可见 Windows 软件扫描成 Obsidian 兼容知识库：
+
+```bash
+easy_uiauto_ui scan "窗口标题"
+easy_uiauto_ui apps
+easy_uiauto_ui commands <app-id>
+easy_uiauto_ui search <app-id> "检索词"
+easy_uiauto_ui run <app-id> <页面.区域.控件.动作> --text "可选文本"
+```
+
+默认知识库目录为 `~/easy_uiauto_vault`，也可通过
+`EASY_UIAUTO_KNOWLEDGE_DIR` 指向其他 Obsidian Vault。每个软件包含
+Markdown/YAML 记录、页面截图、独立控件 PNG、隔离目录以及自动生成的
+`operations/UI-CLI.md`。`.easy_uiauto/index.json` 只是可删除、可重建的
+检索缓存，可使用 `easy_uiauto_ui reindex` 从 Markdown 重建。
+
+扫描会结合完整可见 UIA 树与远程 AI 页面/区域划分。所有可见控件都会保存；可操作
+控件只有通过 LOCATION 和控件图片校验后才生成 UI CLI 命令。LOCATION 不可用时，
+唯一且高置信的控件图匹配也可用于验证和执行。匹配歧义、失效或缺失的控件会进入
+`quarantine`，成功重扫修复前不会参与执行。
+
+对应 MCP 工具为：`scan_window_knowledge`、`list_ui_knowledge_apps`、
+`search_ui_knowledge`、`list_ui_commands`、`run_ui_command`、
+`rebuild_ui_knowledge_index`。
+
+`--full-setup-codex` 会同时安装或更新 `easy-uiauto-learning` 和
+`easy-uiauto-operate` 两个 Codex Skill。也可使用 `--install-codex-skills`
+只更新这两个 Skill。
+
 MCP 客户端配置可使用 `python -m easy_uiauto.mcp.server` 启动服务。
 控制向量持久化是可选能力：将 `EASY_UIAUTO_CONTROL_VECTOR_DB_DIR` 指向包含
 `control_vector_store.py` 的目录即可启用；未配置时，采集工具仍会返回记录，但不会持久化。

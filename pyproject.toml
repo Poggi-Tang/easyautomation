@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "easy-uiauto"
-version = "0.1.21"
+version = "0.2.0"
 description = "UI automation toolkit based on pyautogui and uiautomation"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -56,10 +56,14 @@ Documentation = "https://github.com/Poggi-Tang/easyautomation/blob/master/README
 [project.scripts]
 easy_uiauto = "easy_uiauto.mcp.server:main"
 easy_uiauto_service = "easy_uiauto.mcp.service:main"
+easy_uiauto_ui = "easy_uiauto.mcp.ui_cli_command:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
 include-package-data = true
+
+[tool.setuptools.package-data]
+easy_uiauto = ["skills/*/SKILL.md", "skills/*/agents/openai.yaml"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

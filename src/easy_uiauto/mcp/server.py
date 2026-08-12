@@ -33,6 +33,10 @@ import uiautomation
 
 from .. import __version__
 from . import configuration
+from . import knowledge
+from . import scanner
+from . import ui_cli
+from . import skill_installation
 from .protocol import location_from_xpath, normalize_location
 
 # Disable pyautogui failsafe for automation (moving mouse to corner won't crash)
@@ -996,6 +1000,131 @@ def upsert_control_record(record_json: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Application knowledge and semantic UI CLI
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def scan_window_knowledge(
+    window_name: str,
+    max_depth: int = 12,
+    max_controls: int = 3000,
+    verify_limit: int = 500,
+) -> str:
+    """Scan one application window into an Obsidian-compatible UI knowledge vault.
+
+    The scan stores the page screenshot, AI-defined functional regions, every
+    visible UIA control, per-control PNG crops, and verified semantic commands.
+    Markdown, YAML frontmatter, and PNG files are the source of truth. Controls
+    that fail LOCATION or image verification are quarantined and cannot execute.
+
+    Args:
+        window_name: Exact or partial title of the visible application window.
+        max_depth: Maximum UIA tree depth, from 1 to 30.
+        max_controls: Hard cap for controls visited; the result reports truncation.
+        verify_limit: Maximum actionable controls to verify during this scan.
+    """
+    try:
+        api_url, api_key, model = _vision_api_settings("")
+        result = scanner.scan_window(
+            window_name=window_name,
+            api_url=api_url,
+            api_key=api_key,
+            model=model,
+            version=__version__,
+            max_depth=max_depth,
+            max_controls=max_controls,
+            verify_limit=verify_limit,
+        )
+        return json.dumps(result, ensure_ascii=False, indent=2)
+    except Exception as error:
+        return f"Error scanning application knowledge: {error}"
+
+
+@mcp.tool()
+def list_ui_knowledge_apps() -> str:
+    """List scanned applications and verified/quarantined control counts."""
+    try:
+        return json.dumps(knowledge.list_apps(), ensure_ascii=False, indent=2)
+    except Exception as error:
+        return f"Error listing UI knowledge applications: {error}"
+
+
+@mcp.tool()
+def search_ui_knowledge(
+    app_id: str,
+    query: str = "",
+    include_quarantine: bool = False,
+    limit: int = 50,
+) -> str:
+    """Search an application's Markdown control knowledge.
+
+    Args:
+        app_id: Application identifier returned by scan_window_knowledge.
+        query: Terms matching names, IDs, pages, regions, types, tags, or actions.
+        include_quarantine: Include failed records for inspection and repair.
+        limit: Maximum records returned.
+    """
+    try:
+        directory = knowledge.app_dir(app_id)
+        statuses = None
+        if include_quarantine:
+            statuses = {"verified", "observed", "suspect", "quarantined"}
+        controls = knowledge.search_controls(directory, query, statuses, limit)
+        return json.dumps(controls, ensure_ascii=False, indent=2)
+    except Exception as error:
+        return f"Error searching UI knowledge: {error}"
+
+
+@mcp.tool()
+def list_ui_commands(app_id: str, page_id: str = "") -> str:
+    """List the verified semantic UI CLI commands for an application or page."""
+    try:
+        commands = knowledge.available_commands(knowledge.app_dir(app_id), page_id)
+        return json.dumps(commands, ensure_ascii=False, indent=2)
+    except Exception as error:
+        return f"Error listing UI commands: {error}"
+
+
+@mcp.tool()
+def run_ui_command(app_id: str, command: str, text: str = "") -> str:
+    """Run one verified application-specific UI command.
+
+    Before execution, the saved LOCATION and control PNG are checked against
+    the current UI. A stale or mismatched record is quarantined instead of being
+    clicked. Use ``text`` for commands ending in ``.set-text``.
+    """
+    try:
+        blocked = _mode_blocks_operation()
+        if blocked:
+            return blocked
+        return ui_cli.execute_json(knowledge.app_dir(app_id), command, text)
+    except Exception as error:
+        return f"Error running UI command: {error}"
+
+
+@mcp.tool()
+def rebuild_ui_knowledge_index(app_id: str) -> str:
+    """Rebuild the disposable JSON index and UI CLI catalog from Markdown."""
+    try:
+        directory = knowledge.app_dir(app_id)
+        index = knowledge.rebuild_index(directory)
+        catalog = knowledge.write_command_catalog(directory)
+        return json.dumps(
+            {
+                "ok": True,
+                "app_id": app_id,
+                "controls": len(index["controls"]),
+                "commands": len(knowledge.available_commands(directory)),
+                "catalog": str(catalog),
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    except Exception as error:
+        return f"Error rebuilding UI knowledge index: {error}"
+
+
+# ---------------------------------------------------------------------------
 # Mouse Operations
 # ---------------------------------------------------------------------------
 
@@ -1845,6 +1974,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
             "  Full setup and validation (Python vision deps, Tesseract, UIA, OCR, AI):\n"
             "    easy_uiauto --full-setup-codex --vision-url <URL> --vision-model <MODEL>\n"
             "  easy_uiauto --install-codex | --show-codex-config | --uninstall-codex\n"
+            "  easy_uiauto --install-codex-skills | --uninstall-codex-skills\n"
             "  easy_uiauto --install-claude-code | --show-claude-code-config\n"
             "              | --uninstall-claude-code\n"
             "  Restart the client after changing its MCP configuration.\n\n"
@@ -1870,6 +2000,8 @@ def _build_arg_parser() -> argparse.ArgumentParser:
             "  keyboard: type_text, set_text, press_key, hotkey\n"
             "  batch: run_action, run_actions\n"
             "  screenshot: take_screenshot\n"
+            "  knowledge: scan_window_knowledge, list_ui_knowledge_apps, search_ui_knowledge,\n"
+            "             list_ui_commands, run_ui_command, rebuild_ui_knowledge_index\n"
             "  vision: find_control_by_image, click_by_image, find_text_on_screen, click_text_on_screen,\n"
             "          find_control_by_vision, click_by_vision\n\n"
             "Full documentation: https://github.com/Poggi-Tang/easyautomation"
@@ -1895,6 +2027,16 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         "--install-codex",
         action="store_true",
         help="Add easy_uiauto to the global Codex MCP configuration.",
+    )
+    actions.add_argument(
+        "--install-codex-skills",
+        action="store_true",
+        help="Install or update the bundled learning and operation Codex skills.",
+    )
+    actions.add_argument(
+        "--uninstall-codex-skills",
+        action="store_true",
+        help="Remove the bundled easy_uiauto skills from Codex.",
     )
     actions.add_argument(
         "--uninstall-codex",
@@ -1966,6 +2108,8 @@ def main(argv: Optional[list[str]] = None):
         "install_codex": configuration.install_codex,
         "uninstall_codex": configuration.uninstall_codex,
         "show_codex_config": configuration.show_codex,
+        "install_codex_skills": skill_installation.install_codex_skills,
+        "uninstall_codex_skills": skill_installation.uninstall_codex_skills,
         "install_claude_code": configuration.install_claude_code,
         "uninstall_claude_code": configuration.uninstall_claude_code,
         "show_claude_code_config": configuration.show_claude_code,
