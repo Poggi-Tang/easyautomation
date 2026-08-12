@@ -8,26 +8,63 @@ English | [简体中文](https://github.com/Poggi-Tang/easyautomation/blob/main/
 [![CI](https://github.com/Poggi-Tang/easyautomation/actions/workflows/ci.yml/badge.svg)](https://github.com/Poggi-Tang/easyautomation/actions/workflows/ci.yml)
 [![Publish](https://github.com/Poggi-Tang/easyautomation/actions/workflows/publish.yml/badge.svg)](https://github.com/Poggi-Tang/easyautomation/actions/workflows/publish.yml)
 
-`easy-uiauto` is a UI automation toolkit based on pyautogui and uiautomation.
-
-It provides a comprehensive set of APIs for GUI automation, including mouse control, keyboard input, 
-window management, and control location. It is suitable for automated testing, RPA (Robotic Process 
-Automation), and other desktop automation scenarios.
-
 ![logo](https://github.com/Poggi-Tang/easyautomation/blob/main/src/image/easy-uiauto.png)
 
-## Features
+**Turn a Windows desktop interface into inspectable, reusable UI commands.**
 
-- Mouse control: click, double-click, right-click, drag and drop
-- Keyboard input: text input, key press/release, combination keys
-- Window management: activate, maximize, switch windows
-- Control location: XPath-based positioning, image recognition
-- Visual feedback: real-time control highlighting during recording
-- Action recording: record user interactions and generate scripts
-- Rich text field support: clipboard-based text input
-- Cross-framework support: Win32, Qt, and other UI frameworks
+`easy-uiauto` combines a Python automation library, an MCP server, action
+recording, and an Obsidian-compatible UI knowledge vault. It can locate controls
+through Windows UI Automation, learn the useful parts of a visible application,
+and expose verified operations as commands such as
+`main.keypad.enter-digit-6.click`.
 
-## Installation
+The project is useful for Windows test automation, RPA, agent tooling, and
+building reusable operation knowledge for desktop software. It is Windows-only
+and currently released as a `0.x` project.
+
+> ⚠️ Visual scanning and workflow exploration are still evolving. Review learned
+> commands before using them for messages, payments, deletion, uploads, account
+> changes, or other operations with external effects.
+
+## ✨ What It Includes
+
+- 🖱️ **Desktop automation**: click, double-click, right-click, drag, scroll,
+  keyboard input, hotkeys, window activation, and text entry.
+- 🎬 **Action recording**: record real operations, highlight the selected control,
+  and generate reusable Python actions with a complete `LOCATION`.
+- 🔌 **MCP server**: use the same automation surface from Codex, Claude Code, or
+  another MCP client.
+- 🔎 **Visual-first learning**: identify the important regions and controls in one
+  screenshot, then map them back to stable local UIA controls without walking the
+  whole tree by default.
+- 🧭 **Semantic UI CLI**: turn verified controls into searchable application
+  commands instead of rediscovering coordinates for every task.
+- 🧪 **Effect learning**: compare before/after screenshots, inspect changed UIA
+  properties and new windows, and store an evidence-backed success condition.
+- 🗂️ **Readable knowledge**: keep pages, controls, images, interactions, and
+  quarantine records as Markdown/YAML/PNG files that work directly with Obsidian
+  and version control.
+- 🛟 **Layered lookup**: `LOCATION` first, then saved image states, local OCR, and
+  opt-in remote vision as the final fallback.
+
+## 🚦 Capability Status
+
+| Area | Status | Notes |
+| --- | --- | --- |
+| Python mouse, keyboard, window, and UIA APIs | Stable | The original library surface |
+| Recording and replay | Stable | Produces reusable structured actions |
+| MCP tools and client setup | Beta | Codex and Claude Code installers included |
+| Visual-first scan and generated UI CLI | Beta | Requires an OpenAI-compatible vision endpoint |
+| Before/after effect learning | Beta | Stores local evidence and learned success conditions |
+| Recursive workflow exploration | Experimental | Restricted to reversible commands and bounded depth |
+
+Automated workflow exploration intentionally excludes scrolling and dragging.
+The base automation library still provides those operations for explicit scripts
+and direct MCP calls.
+
+## 📦 Installation
+
+Requirements: Windows and Python 3.11 or newer.
 
 Install from PyPI:
 
@@ -43,7 +80,7 @@ cd easyautomation
 pip install -e .
 ```
 
-### MCP Server
+## 🔌 MCP Setup
 
 Install the optional MCP dependencies when using easy-uiauto from an MCP client:
 
@@ -63,7 +100,7 @@ data (for example `eng` or `chi_sim`). The MCP tools are
 `find_control_by_image`, `click_by_image`, `find_text_on_screen`, and
 `click_text_on_screen`.
 
-Remote multimodal location does not run a local model or require an AI SDK. Set
+Remote visual location does not run a local model or require a vendor SDK. Set
 an OpenAI-compatible vision endpoint and credentials, then use
 `find_control_by_vision` or `click_by_vision`:
 
@@ -76,7 +113,7 @@ EASY_UIAUTO_VISION_MODEL=your-vision-model
 Those tools upload the current screenshot to the configured endpoint only for
 that request. Use them as a final fallback after UIA, OCR, or image matching.
 
-The MCP server is part of the library and reuses the same automation APIs:
+The MCP server ships with the library and reuses the same automation APIs:
 
 ```bash
 easy_uiauto --help
@@ -84,11 +121,10 @@ easy_uiauto --version
 easy_uiauto
 ```
 
-The standard commands below register, inspect, or remove the global MCP
-configuration through the client's own CLI. The standard install command does
-not overwrite an existing entry with the same name.
+The setup commands register, inspect, or remove the MCP entry through the
+client's own CLI. Existing entries are not overwritten by the basic installer.
 
-For a complete Codex deployment, install the package and run full setup:
+For a complete Codex installation:
 
 ```bash
 pip install --upgrade "easy-uiauto[mcp,vision]"
@@ -97,12 +133,10 @@ easy_uiauto --full-setup-codex \
   --vision-model your-vision-model
 ```
 
-Full setup securely prompts for a missing API key, installs missing Python
-vision dependencies, installs Tesseract through winget when necessary, replaces
-only the `easy_uiauto` Codex MCP entry, and validates UIA, local OCR, and remote
-AI vision. The OCR and AI checks use generated test images; they do not upload
-the current desktop. Each result includes its elapsed time, and any failed check
-makes the command fail.
+Full setup asks for a missing API key through hidden input, installs the Python
+vision dependencies and Tesseract when needed, replaces only the `easy_uiauto`
+Codex entry, installs the two bundled skills, and checks UIA, OCR, and the remote
+vision endpoint. Validation uses generated images rather than the current desktop.
 
 For a minimal Codex deployment with remote AI vision, use the quick setup
 command. When the API key is not already present in the Windows user
@@ -116,11 +150,11 @@ easy_uiauto --quick-setup-codex \
   --vision-model your-vision-model
 ```
 
-One-sentence instruction for a Codex agent:
+You can also give Codex this deployment instruction:
 
 > Install the latest `easy-uiauto[mcp,vision]` from PyPI, then run
 > `easy_uiauto --full-setup-codex --vision-url URL --vision-model MODEL`; do not
-> inspect unrelated projects or search the web, report every validation result
+> inspect unrelated projects or search the web; report every validation result
 > and elapsed time, then ask me to restart Codex.
 
 ```bash
@@ -133,9 +167,8 @@ easy_uiauto --show-claude-code-config
 easy_uiauto --uninstall-claude-code
 ```
 
-Codex registration uses its global `config.toml`. Claude Code registration uses
-the `user` scope, so it is available to every local project. Restart the client
-after installing or removing the server.
+Codex registration uses its global `config.toml`. Claude Code uses the `user`
+scope. Restart the client after installing, updating, or removing the server.
 
 The long-running TCP service is also available:
 
@@ -144,95 +177,126 @@ easy_uiauto_service --help
 python -m easy_uiauto.mcp.service --port 9876
 ```
 
-### Application UI Knowledge and CLI
+## 🧭 Learn an Application
 
-Scan any visible Windows application into an Obsidian-compatible knowledge vault:
+The package includes two Codex skills:
+
+- `$easy-uiauto-learning` scans and explores visible Windows applications.
+- `$easy-uiauto-operate` runs commands from an existing application vault.
+
+After setup and a Codex restart, a natural-language request is enough:
+
+```text
+Use $easy-uiauto-learning to learn the currently open WeChat window and build
+its control knowledge and UI commands.
+```
+
+### 🔎 Light Scan
+
+A light scan observes one visible page. It does not click the application.
 
 ```bash
 easy_uiauto_ui scan "Window title"
 easy_uiauto_ui apps
 easy_uiauto_ui commands <app-id>
+```
+
+The default `visual-first` strategy sends one target-window screenshot to the
+configured vision endpoint, identifies useful regions and controls, and maps
+those coordinates back to local UIA controls. It stores stable `LOCATION`
+records, control crops, meaning, aliases, risk, and generated commands. Secondary
+monitors are supported.
+
+Use `--strategy full-uia` for diagnostics when visual targeting is not suitable.
+This mode walks the visible UIA tree and performs a separate semantic pass, so it
+is slower and produces more records.
+
+### 🧪 Deep Exploration
+
+Deep exploration starts with a light scan, executes known reversible commands,
+and records what changed. New pages and dialogs can be scanned recursively.
+
+```text
+Use $easy-uiauto-learning to deeply learn the currently open WeChat window with
+the safe policy, at most 30 actions, and recursion depth 3. Do not send messages,
+delete data, log out, or run any confirmation-required operation.
+```
+
+```bash
+easy_uiauto_ui explore <app-id> --policy safe --max-actions 30 --max-depth 3
+easy_uiauto_ui interactions <app-id>
+```
+
+For each operation, the explorer saves before/after screenshots, local pixel
+differences, changed UIA properties, new or transient windows, the observed
+success condition, and the recovery result. It deduplicates page/command states
+and stops when recovery fails or another user/window interrupts the run.
+
+`safe` executes only commands classified as safe. `supervised` may also execute
+reversible state-changing commands. External, destructive, and
+confirmation-required commands are never explored automatically. Scrolling and
+dragging are not implemented in the explorer.
+
+### ▶️ Run Learned Commands
+
+```bash
 easy_uiauto_ui search <app-id> "search terms"
 easy_uiauto_ui run <app-id> <page.region.control.action> --text "optional text"
-easy_uiauto_ui batch <app-id> '["main.keypad.6.click", "main.keypad.plus.click"]'
+easy_uiauto_ui batch <app-id> '["main.keypad.enter-digit-6.click", "main.keypad.enter-addition-operation.click"]'
 easy_uiauto_ui learn-effect <app-id> <command> --recover
-easy_uiauto_ui explore <app-id> --policy safe --max-actions 10 --max-depth 3
-easy_uiauto_ui interactions <app-id>
 easy_uiauto_ui teach <app-id> <control-id> "Meaning" intent "Description"
 ```
 
-The default vault is `~/easy_uiauto_vault`. Set `EASY_UIAUTO_KNOWLEDGE_DIR`
-to use another Obsidian vault. Each application stores Markdown/YAML records,
-page screenshots, per-control visual-state PNGs, interaction before/after images,
-a quarantine directory, and a generated `operations/UI-CLI.md` catalog.
-`.easy_uiauto/index.json` is only a disposable search cache and can be rebuilt with
-`easy_uiauto_ui reindex`.
+Runtime lookup follows `LOCATION` → saved image states → local OCR → opt-in
+remote vision. Enable the last step with `--allow-vision-fallback` or
+`allow_vision_fallback=true`. Stale, missing, or ambiguous controls are moved to
+quarantine instead of being clicked.
 
-The default `visual-first` scan makes one multimodal request to identify the current
-page, functional regions, and only task-relevant controls. Pixel targets are mapped
-back to local UIA controls and scored for stable names, automation IDs, supported
-actions, and tight bounds. This avoids a complete UIA-tree walk and a second remote
-semantic pass. Use `--strategy full-uia` only for diagnostic coverage when visual
-targeting is unsuitable. Both strategies store user-facing meaning, stable intent,
-description, aliases, evidence, risk, actions, ambiguity, and confidence. Commands are
-published only after high-confidence semantics and LOCATION/image validation. The visual
-request uses SSE streaming when supported and window capture uses virtual-desktop
-coordinates, including secondary monitors. If vision returns no controls, visual-first
-reports an empty scan instead of silently invoking a second remote request.
+Use a batch only for commands on the same stable page. Split the sequence after
+navigation. Commands with external or destructive effects require `--confirm`
+or `confirm=true`.
 
-`learn-effect` captures the target window and local full-desktop state before and after
-one verified command. It waits for delayed changes to stabilize, reduces pixel changes
-to local regions, checks only UIA controls in those regions, inventories new or transient
-top-level windows, captures action-control properties, and asks vision to generalize a
-success condition. Full desktop images stay local; only target-window images and crops
-of newly opened related windows are sent to the configured endpoint. `explore` repeats
-this for known reversible commands, deduplicates page/command states, presses Escape to
-recover, and stops after interference or failed recovery. `safe` permits only safe
-commands; `supervised` also permits reversible state-changing commands. External,
-destructive, or confirmation-required commands are never explored automatically.
-Scrolling and dragging are intentionally not part of exploration.
+### 🗂️ Knowledge Vault
 
-At runtime, resolution follows `LOCATION`, stored multi-state image templates, local
-OCR, and finally opt-in remote vision. Use `--allow-vision-fallback` or
-`allow_vision_fallback=true` for the last step. Ambiguous, stale, or missing controls
-are quarantined and excluded from execution until a successful rescan repairs them.
+The default vault is `~/easy_uiauto_vault`. Set
+`EASY_UIAUTO_KNOWLEDGE_DIR` to use another location. Markdown/YAML and PNG files
+are the source of truth:
 
-Locator/image verification, semantic verification, and functional execution are tracked
-separately. Scanning does not click every control: doing so could send, publish, purchase,
-delete, or otherwise change external state. AI meanings are marked as inferred until
-directly taught or observed, and execution history never masquerades as proof of the
-resulting application behavior. Use `easy_uiauto_ui teach` or the `teach_ui_control` MCP
-tool to correct uncertain meanings; manual semantics survive rescans but cannot bypass a
-failed locator. External or destructive commands require `--confirm` or `confirm=true`.
+```text
+applications/<app-id>/
+├── pages/                 page records
+├── regions/               functional regions
+├── controls/              verified and observed controls
+├── interactions/          before/after effect records
+├── images/                page, control, and interaction images
+├── quarantine/            stale or ambiguous controls
+└── operations/UI-CLI.md   generated command catalog
+```
 
-For consecutive operations on one stable page, use `easy_uiauto_ui batch` or the
-`run_ui_commands` MCP tool. A batch loads the command catalog once, finds and captures
-the window once, verifies every unique control before performing any action, executes
-the ordered sequence, and rebuilds the knowledge index once. Steps may be command
-strings or objects such as `{"command":"main.form.message.set-text","text":"hello"}`.
-Split a workflow after any command that navigates to another page.
+`.easy_uiauto/index.json` is a disposable search cache. Rebuild it with
+`easy_uiauto_ui reindex <app-id>` after editing Markdown by hand.
 
-Knowledge created before contextual control semantics were introduced remains readable,
-but its old commands are intentionally not executable. Rescan each page once to add the
-required semantic evidence, confidence, risk, and verification fields.
+### 🔐 Privacy and Safety
 
-The same workflow is available through MCP tools:
+- Light scanning sends the selected target-window screenshot to the configured
+  endpoint.
+- Effect learning sends target-window before/after images and crops of related
+  new windows. Full desktop snapshots remain local in the vault.
+- API keys are read from environment variables and are not written into the
+  knowledge vault.
+- Inferred control meanings remain separate from locator verification and
+  observed operation effects. Use `teach` to correct a meaning; it cannot bypass
+  failed location checks.
+- Existing reliable controls are retained when a visual-first rescan omits them.
 
-- `scan_window_knowledge`
-- `list_ui_knowledge_apps`
-- `search_ui_knowledge`
-- `list_ui_commands`
-- `run_ui_command`
-- `run_ui_commands`
-- `learn_ui_command_effect`
-- `explore_ui_workflows`
-- `list_ui_interactions`
-- `teach_ui_control`
-- `rebuild_ui_knowledge_index`
+The same workflow is exposed through `scan_window_knowledge`,
+`list_ui_knowledge_apps`, `search_ui_knowledge`, `list_ui_commands`,
+`run_ui_command`, `run_ui_commands`, `learn_ui_command_effect`,
+`explore_ui_workflows`, `list_ui_interactions`, `teach_ui_control`, and
+`rebuild_ui_knowledge_index`.
 
-`--full-setup-codex` also installs or updates the bundled
-`easy-uiauto-learning` and `easy-uiauto-operate` Codex skills. Use
-`--install-codex-skills` to update only those skills.
+`--full-setup-codex` installs or updates both bundled skills. Use
+`--install-codex-skills` when only the skills need to be refreshed.
 
 For MCP client configuration, start the server with `python -m easy_uiauto.mcp.server`.
 Control-vector persistence is optional. To enable it, set
@@ -266,7 +330,7 @@ and the complete result from `get_control_at_position`. Legacy flat arguments
 remain supported for compatibility, but full XPath data is more reliable for
 duplicate or deeply nested controls.
 
-## Quick Start
+## 🧰 Python API Examples
 
 ### Basic Control Operations
 
@@ -327,7 +391,7 @@ run_record(write_file=True)
 # Generated script will be saved to Record{timestamp}.py
 ```
 
-## Project Structure
+## 🏗️ Project Structure
 
 ```text
 easyautomation
@@ -337,12 +401,14 @@ easyautomation
 │       ├── publish.yml
 │       └── release.yml
 ├── src/
-│   └── easy-uiauto/
+│   └── easy_uiauto/
 │       ├── __init__.py
 │       ├── ctrl.py          # Core controller (mouse/keyboard actions)
 │       ├── draw.py          # Visual feedback (control highlighting)
 │       ├── record.py        # Action recording
-│       └── utils.py         # Utility functions (control location, caching)
+│       ├── utils.py         # Control location and utilities
+│       ├── mcp/             # MCP server, scanner, vault, and UI CLI
+│       └── skills/          # Bundled Codex learning and operation skills
 ├── tests/
 ├── CHANGELOG.md
 ├── LICENSE
@@ -351,16 +417,15 @@ easyautomation
 └── pyproject.toml
 ```
 
-## Release Automation
+## 🚀 Release Automation
 
-This repository is prepared for a professional Python package workflow:
+The repository uses GitHub Actions for validation and publishing:
 
-- **CI** runs lint and tests on push and pull request.
-- **Semantic Release** updates the version, changelog, tag, and GitHub Release.
-- **Trusted Publishing** publishes to PyPI from GitHub Actions without a PyPI API token.
-- **Build artifacts** include both source distribution and wheel.
+- **CI** tests Python 3.11, 3.12, and 3.13, then builds the package.
+- **Tagged releases** build and publish through PyPI Trusted Publishing.
+- **Build artifacts** include both an sdist and a wheel.
 
-## Development
+## 🛠️ Development
 
 ```bash
 pip install -e .[dev]
@@ -368,15 +433,15 @@ pytest
 ruff check .
 ```
 
-## Usage Examples
+## 📚 More Examples
 
 For more examples, please refer to the test files in the `demo/` directory or check the docstrings in the source code.
 
-## License
+## 📄 License
 
 MIT License. See [LICENSE](https://github.com/Poggi-Tang/easyautomation/blob/main/LICENSE).
 
-## Contact
+## 💬 Contact
 
 Scan the QR code to add me on WeChat:
 
