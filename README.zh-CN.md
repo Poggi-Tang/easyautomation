@@ -142,6 +142,7 @@ easy_uiauto_ui apps
 easy_uiauto_ui commands <app-id>
 easy_uiauto_ui search <app-id> "检索词"
 easy_uiauto_ui run <app-id> <页面.区域.控件.动作> --text "可选文本"
+easy_uiauto_ui teach <app-id> <control-id> "控件含义" intent "功能说明"
 ```
 
 默认知识库目录为 `~/easy_uiauto_vault`，也可通过
@@ -150,14 +151,26 @@ Markdown/YAML 记录、页面截图、独立控件 PNG、隔离目录以及自�
 `operations/UI-CLI.md`。`.easy_uiauto/index.json` 只是可删除、可重建的
 检索缓存，可使用 `easy_uiauto_ui reindex` 从 Markdown 重建。
 
-扫描会结合完整可见 UIA 树与远程 AI 页面/区域划分。所有可见控件都会保存；可操作
-控件只有通过 LOCATION 和控件图片校验后才生成 UI CLI 命令。LOCATION 不可用时，
+扫描会结合完整可见 UIA 树、远程 AI 页面/区域划分和批量控件语义理解。模型会同时接收
+页面原图、带编号控件框的标注图、UIA 属性、所在功能区域和支持的动作，并为每个控件
+产出面向用户的含义、稳定意图、功能说明、同义词、判断证据、风险、建议动作、歧义说明
+和置信度。所有可见控件都会保存；可操作控件只有在语义达到高置信度，同时通过
+LOCATION 和控件图片校验后才生成 UI CLI 命令。LOCATION 不可用时，
 唯一且高置信的控件图匹配也可用于验证和执行。匹配歧义、失效或缺失的控件会进入
 `quarantine`，成功重扫修复前不会参与执行。
 
+定位/图片验证、语义验证和功能实际执行会分别记录。扫描不会自动点击每个控件，因为这
+可能触发发送、发布、购买、删除等外部影响。AI 判断默认标记为推断，不能冒充功能已经
+实测；执行历史也不等于结果已经验证。语义不确定时可使用 `easy_uiauto_ui teach` 或
+`teach_ui_control` MCP 工具修正。人工结论会在重扫时保留，但不能绕过失败的定位验证。
+外部影响或破坏性命令必须传入 `--confirm` 或 `confirm=true` 才能执行。
+
+旧版本生成的知识仍然可以读取，但由于缺少控件语义证据、置信度和风险字段，旧命令会
+被有意禁止执行。升级后需要把每个页面重新扫描一次，才能生成新版可信语义命令。
+
 对应 MCP 工具为：`scan_window_knowledge`、`list_ui_knowledge_apps`、
 `search_ui_knowledge`、`list_ui_commands`、`run_ui_command`、
-`rebuild_ui_knowledge_index`。
+`teach_ui_control`、`rebuild_ui_knowledge_index`。
 
 `--full-setup-codex` 会同时安装或更新 `easy-uiauto-learning` 和
 `easy-uiauto-operate` 两个 Codex Skill。也可使用 `--install-codex-skills`

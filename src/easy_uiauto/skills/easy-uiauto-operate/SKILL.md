@@ -11,11 +11,14 @@ Prefer verified application knowledge over rediscovering the interface.
 
 1. Call `list_ui_knowledge_apps` to identify the application ID.
 2. Call `list_ui_commands(app_id=...)` or `search_ui_knowledge(app_id=..., query=...)`.
-3. Select a command whose page, region, control meaning, and action match the request.
-4. Call `run_ui_command(app_id=..., command=..., text=...)`.
-5. For `set-text`, pass the user text through the `text` argument. Never place it inside the command name.
-6. After navigation changes the page, query commands again before the next operation.
-7. If execution quarantines a control, stop using that command. Ask the user to expose the correct page and invoke the learning workflow to rescan it.
+3. Select a command whose intent, aliases, description, page, region, and action match the request.
+4. Inspect `risk`, `requires_confirmation`, semantic confidence/source, and function-verification
+   status. Do not claim inferred meanings were function-tested.
+5. Call `run_ui_command(app_id=..., command=..., text=...)`.
+   Pass `confirm=true` only after the user explicitly approves an external or destructive effect.
+6. For `set-text`, pass the user text through the `text` argument. Never place it inside the command name.
+7. After navigation changes the page, query commands again before the next operation.
+8. If execution quarantines a control, stop using that command. Ask the user to expose the correct page and invoke the learning workflow to rescan it.
 
 ## Safety Rules
 

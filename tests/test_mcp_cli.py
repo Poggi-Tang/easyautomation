@@ -4,11 +4,18 @@ from __future__ import annotations
 
 import subprocess
 import sys
+from pathlib import Path
 
 
 def _run_module(module: str, option: str) -> str:
+    source = Path(__file__).resolve().parents[1] / "src"
     result = subprocess.run(
-        [sys.executable, "-m", module, option],
+        [sys.executable, "-c", (
+            "import runpy,sys;"
+            f"sys.path.insert(0,{str(source)!r});"
+            f"sys.argv=[{module!r},{option!r}];"
+            f"runpy.run_module({module!r},run_name='__main__')"
+        )],
         capture_output=True,
         text=True,
     )
@@ -18,7 +25,7 @@ def _run_module(module: str, option: str) -> str:
 
 def test_mcp_server_version() -> None:
     output = _run_module("easy_uiauto.mcp.server", "--version")
-    assert output.strip() == "easy_uiauto 0.2.0"
+    assert output.strip() == "easy_uiauto 0.3.0"
 
 
 def test_mcp_service_help() -> None:

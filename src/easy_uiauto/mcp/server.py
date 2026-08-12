@@ -1013,9 +1013,9 @@ def scan_window_knowledge(
     """Scan one application window into an Obsidian-compatible UI knowledge vault.
 
     The scan stores the page screenshot, AI-defined functional regions, every
-    visible UIA control, per-control PNG crops, and verified semantic commands.
-    Markdown, YAML frontmatter, and PNG files are the source of truth. Controls
-    that fail LOCATION or image verification are quarantined and cannot execute.
+    visible UIA control, per-control PNG crops, and context-grounded control
+    meanings. Commands require high-confidence semantics plus LOCATION/image
+    verification. Low-confidence or stale controls are quarantined.
 
     Args:
         window_name: Exact or partial title of the visible application window.
@@ -1042,7 +1042,7 @@ def scan_window_knowledge(
 
 @mcp.tool()
 def list_ui_knowledge_apps() -> str:
-    """List scanned applications and verified/quarantined control counts."""
+    """List applications and locator/semantic verification counts."""
     try:
         return json.dumps(knowledge.list_apps(), ensure_ascii=False, indent=2)
     except Exception as error:
@@ -1086,20 +1086,62 @@ def list_ui_commands(app_id: str, page_id: str = "") -> str:
 
 
 @mcp.tool()
-def run_ui_command(app_id: str, command: str, text: str = "") -> str:
+def run_ui_command(
+    app_id: str,
+    command: str,
+    text: str = "",
+    confirm: bool = False,
+) -> str:
     """Run one verified application-specific UI command.
 
     Before execution, the saved LOCATION and control PNG are checked against
     the current UI. A stale or mismatched record is quarantined instead of being
-    clicked. Use ``text`` for commands ending in ``.set-text``.
+        clicked. Use ``text`` for commands ending in ``.set-text``. Commands
+        marked external or destructive require ``confirm=true``.
     """
     try:
         blocked = _mode_blocks_operation()
         if blocked:
             return blocked
-        return ui_cli.execute_json(knowledge.app_dir(app_id), command, text)
+        return ui_cli.execute_json(knowledge.app_dir(app_id), command, text, confirm)
     except Exception as error:
         return f"Error running UI command: {error}"
+
+
+@mcp.tool()
+def teach_ui_control(
+    app_id: str,
+    control_id: str,
+    semantic_name: str,
+    intent: str,
+    description: str,
+    actions: str = "",
+    aliases: str = "",
+    risk: str = "safe",
+    requires_confirmation: bool = False,
+) -> str:
+    """Teach or correct one control's real function using human-confirmed semantics.
+
+    This updates semantic fields only. It never bypasses LOCATION/image checks;
+    controls with invalid positioning remain quarantined. ``actions`` and
+    ``aliases`` are comma-separated values.
+    """
+    try:
+        selected_actions = [value.strip() for value in actions.split(",") if value.strip()]
+        record = knowledge.teach_control(
+            knowledge.app_dir(app_id),
+            control_id,
+            semantic_name,
+            intent,
+            description,
+            selected_actions or None,
+            [value.strip() for value in aliases.split(",") if value.strip()],
+            risk,
+            requires_confirmation,
+        )
+        return json.dumps(record, ensure_ascii=False, indent=2)
+    except Exception as error:
+        return f"Error teaching UI control: {error}"
 
 
 @mcp.tool()
@@ -2001,7 +2043,8 @@ def _build_arg_parser() -> argparse.ArgumentParser:
             "  batch: run_action, run_actions\n"
             "  screenshot: take_screenshot\n"
             "  knowledge: scan_window_knowledge, list_ui_knowledge_apps, search_ui_knowledge,\n"
-            "             list_ui_commands, run_ui_command, rebuild_ui_knowledge_index\n"
+            "             list_ui_commands, run_ui_command, teach_ui_control,\n"
+            "             rebuild_ui_knowledge_index\n"
             "  vision: find_control_by_image, click_by_image, find_text_on_screen, click_text_on_screen,\n"
             "          find_control_by_vision, click_by_vision\n\n"
             "Full documentation: https://github.com/Poggi-Tang/easyautomation"

@@ -32,3 +32,17 @@ def test_cli_lists_verified_commands(monkeypatch, capsys, tmp_path) -> None:
 
     result = json.loads(capsys.readouterr().out)
     assert result == [{"command": "main.toolbar.save.click"}]
+
+
+def test_cli_help_lists_teaching_and_confirmation(capsys) -> None:
+    try:
+        ui_cli_command.main(["--help"])
+    except SystemExit as error:
+        assert error.code == 0
+    output = capsys.readouterr().out
+    assert "teach" in output
+    assert "real control meanings" in output
+
+    parser = ui_cli_command._build_parser()
+    run = parser.parse_args(["run", "example", "main.toolbar.delete.click", "--confirm"])
+    assert run.confirm is True

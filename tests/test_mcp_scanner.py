@@ -24,6 +24,9 @@ class FakeControl:
         self.ClassName = control_type
         self.AutomationId = automation_id
         self.FrameworkId = "Fake"
+        self.LocalizedControlType = control_type.removesuffix("Control").lower()
+        self.HelpText = ""
+        self.IsKeyboardFocusable = control_type in {"ButtonControl", "EditControl"}
         self.IsEnabled = True
         self.NativeWindowHandle = 1
         self.ProcessId = 123
@@ -42,6 +45,30 @@ def _test_screen() -> Image.Image:
     draw.rectangle((40, 30, 160, 90), fill="blue")
     draw.line((45, 35, 155, 85), fill="white", width=4)
     return image
+
+
+def _semantic_result(
+    candidates: list[dict],
+    confidence: float = 0.96,
+    intent: str = "save-document",
+) -> dict[int, dict]:
+    return {
+        item["id"]: {
+            "semantic_name": "Save document",
+            "intent": intent,
+            "description": "Save the current document to disk.",
+            "role": "action",
+            "actions": ["click"],
+            "aliases": ["save", "write file"],
+            "risk": "state-changing",
+            "requires_confirmation": False,
+            "confidence": confidence,
+            "evidence": ["Save label", "button in content region"],
+            "ambiguity": "" if confidence >= 0.72 else "Icon meaning is unclear.",
+            "source": "ai-vision-context",
+        }
+        for item in candidates
+    }
 
 
 def test_template_verification_requires_correct_unique_location() -> None:
@@ -107,6 +134,11 @@ def test_scan_writes_images_markdown_and_verified_command(monkeypatch, tmp_path)
         "_verify_location",
         lambda _location, rect: (True, rect, "bounds IoU=1.000"),
     )
+    monkeypatch.setattr(
+        scanner,
+        "analyze_control_semantics",
+        lambda _image, candidates, *_args: _semantic_result(candidates),
+    )
 
     result = scanner.scan_window(
         "Example",
@@ -124,7 +156,12 @@ def test_scan_writes_images_markdown_and_verified_command(monkeypatch, tmp_path)
     assert result["knowledge_controls_total"] == 3
     assert result["commands"] == 1
     assert any(control["status"] == "verified" for control in controls)
-    assert commands[0]["command"].endswith(".save.click")
+    assert commands[0]["command"].endswith(".save-document.click")
+    button_record = next(control for control in controls if control["actions"])
+    assert button_record["semantic_name"] == "Save document"
+    assert button_record["intent"] == "save-document"
+    assert button_record["semantic_confidence"] == 0.96
+    assert button_record["function_verification"]["status"] == "inferred"
     assert list((directory / "images" / "controls").glob("*.png"))
     assert (directory / "operations" / "UI-CLI.md").is_file()
 
@@ -161,6 +198,11 @@ def test_failed_actionable_control_is_quarantined(monkeypatch, tmp_path) -> None
             "detail": "not unique",
         },
     )
+    monkeypatch.setattr(
+        scanner,
+        "analyze_control_semantics",
+        lambda _image, candidates, *_args: _semantic_result(candidates),
+    )
 
     result = scanner.scan_window(
         "Example",
@@ -173,4 +215,50 @@ def test_failed_actionable_control_is_quarantined(monkeypatch, tmp_path) -> None
 
     directory = knowledge.app_dir("example-app", tmp_path)
     assert result["status_counts"]["quarantined"] == 1
+    assert not knowledge.available_commands(directory)
+
+
+def test_low_confidence_semantics_are_quarantined(monkeypatch, tmp_path) -> None:
+    button = FakeControl("", "ButtonControl", (40, 30, 160, 90))
+    window = FakeControl("Example", "WindowControl", (0, 0, 400, 300), [button])
+    monkeypatch.setattr(scanner, "_activate_window", lambda _window: None)
+    monkeypatch.setattr(scanner, "_find_window", lambda _title: window)
+    monkeypatch.setattr(scanner, "_process_name", lambda _pid: "example-app")
+    monkeypatch.setattr(scanner, "_screenshot_window", lambda _rect: _test_screen())
+    monkeypatch.setattr(
+        scanner,
+        "segment_interface",
+        lambda *_args: scanner._validate_segments({}, 400, 300),
+    )
+    monkeypatch.setattr(
+        scanner,
+        "analyze_control_semantics",
+        lambda _image, candidates, *_args: _semantic_result(candidates, confidence=0.4),
+    )
+    monkeypatch.setattr(
+        scanner,
+        "get_control_xpath",
+        lambda control: [{"ControlType": control.ControlTypeName, "Name": control.Name}],
+    )
+    monkeypatch.setattr(
+        scanner,
+        "_verify_location",
+        lambda _location, rect: (True, rect, "bounds IoU=1.000"),
+    )
+
+    result = scanner.scan_window(
+        "Example",
+        "https://api.example/v1",
+        "secret",
+        "vision-model",
+        "1.0.0",
+        root=tmp_path,
+    )
+
+    directory = knowledge.app_dir("example-app", tmp_path)
+    controls = knowledge.load_index(directory)["controls"]
+    button_record = next(control for control in controls if control["supported_actions"])
+    assert result["semantic_counts"]["uncertain"] == 1
+    assert button_record["status"] == "quarantined"
+    assert button_record["semantic_ambiguity"] == "Icon meaning is unclear."
     assert not knowledge.available_commands(directory)

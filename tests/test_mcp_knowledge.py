@@ -13,12 +13,18 @@ def _control_record(control_id: str = "control-1", status: str = "verified") -> 
         "page_id": "main",
         "region_id": "toolbar",
         "semantic_name": "Save",
+        "intent": "save-document",
+        "description": "Save the current document.",
+        "semantic_status": "verified",
+        "semantic_confidence": 0.96,
+        "semantic_source": "ai-vision-context",
         "command": "main.toolbar.save",
         "name": "Save",
         "control_type": "ButtonControl",
         "automation_id": "save",
         "location": {"WindowName": "Example", "Xpath": []},
         "actions": ["click"],
+        "supported_actions": ["click"],
         "is_key": True,
         "status": status,
         "image": "images/controls/control-1.png",
@@ -75,3 +81,52 @@ def test_command_catalog_is_derived_from_verified_records(tmp_path) -> None:
     catalog = knowledge.write_command_catalog(directory)
 
     assert "main.toolbar.save.click" in catalog.read_text(encoding="utf-8")
+
+
+def test_teach_control_repairs_semantics_but_not_failed_positioning(tmp_path) -> None:
+    directory = knowledge.initialize_app("example", "Example", tmp_path)
+    record = _control_record(status="quarantined")
+    record["semantic_status"] = "uncertain"
+    record["verification"] = {"location": "failed", "image": "passed"}
+    knowledge.save_control(directory, record)
+
+    taught = knowledge.teach_control(
+        directory,
+        "control-1",
+        "Save document",
+        "save-document",
+        "Save the current document to disk.",
+        ["click"],
+        ["save", "write file"],
+        "state-changing",
+    )
+
+    assert taught["semantic_source"] == "manual"
+    assert taught["semantic_confidence"] == 1.0
+    assert taught["function_verification"]["status"] == "human-confirmed"
+    assert taught["status"] == "quarantined"
+    assert not knowledge.available_commands(directory)
+
+
+def test_teach_control_publishes_when_positioning_is_verified(tmp_path) -> None:
+    directory = knowledge.initialize_app("example", "Example", tmp_path)
+    record = _control_record(status="quarantined")
+    record["semantic_status"] = "uncertain"
+    record["verification"] = {"location": "passed", "image": "passed"}
+    knowledge.save_control(directory, record)
+
+    taught = knowledge.teach_control(
+        directory,
+        "control-1",
+        "Delete item",
+        "delete-item",
+        "Delete the selected item.",
+        ["click"],
+        ["remove"],
+        "destructive",
+    )
+
+    assert taught["status"] == "verified"
+    assert taught["requires_confirmation"] is True
+    commands = knowledge.available_commands(directory)
+    assert commands[0]["command"] == "main.toolbar.delete-item.click"

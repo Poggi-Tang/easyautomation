@@ -4,6 +4,25 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog and is maintained automatically by Semantic Release.
 
+## [0.3.0] - 2026-08-12
+
+### Added
+
+- Added batched multimodal understanding of control meaning using the original page,
+  numbered control overlays, UIA metadata, region context, and supported actions.
+- Added semantic intent, descriptions, aliases, evidence, ambiguity, confidence, risk,
+  confirmation requirements, and separate function-verification metadata to control knowledge.
+- Added `teach_ui_control` and `easy_uiauto_ui teach` for human corrections that survive
+  rescans without bypassing LOCATION or image verification.
+- Added explicit confirmation for external or destructive semantic UI commands.
+
+### Changed
+
+- Require high-confidence or human-taught semantics in addition to locator/image validation
+  before publishing executable UI commands.
+- Configure pytest to import the working `src` tree so tests cannot silently exercise an
+  older installed package.
+
 ## [0.2.0] - 2026-08-12
 
 ### Added

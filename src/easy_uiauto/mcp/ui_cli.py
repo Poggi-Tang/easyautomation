@@ -67,9 +67,14 @@ def _resolve_verified_control(directory: Path, record: dict):
     )
 
 
-def execute(directory: Path, command: str, text: str = "") -> dict:
+def execute(directory: Path, command: str, text: str = "", confirm: bool = False) -> dict:
     """Execute one verified UI CLI command and quarantine stale knowledge."""
     record, action = knowledge.resolve_command(directory, command)
+    if record.get("requires_confirmation") and not confirm:
+        raise RuntimeError(
+            f"Command requires explicit confirmation because risk is "
+            f"{record.get('risk', 'unknown')}: {command}"
+        )
     try:
         control, similarity, rectangle, resolved_by = _resolve_verified_control(directory, record)
     except Exception as error:
@@ -113,6 +118,14 @@ def execute(directory: Path, command: str, text: str = "") -> dict:
     else:
         raise ValueError(f"Unsupported UI command action: {action}")
 
+    record["function_verification"] = {
+        **record.get("function_verification", {}),
+        "executed": True,
+        "last_executed_at": knowledge.utc_now(),
+    }
+    knowledge.save_control(directory, record)
+    knowledge.rebuild_index(directory)
+
     return {
         "ok": True,
         "command": command,
@@ -124,5 +137,5 @@ def execute(directory: Path, command: str, text: str = "") -> dict:
     }
 
 
-def execute_json(directory: Path, command: str, text: str = "") -> str:
-    return json.dumps(execute(directory, command, text), ensure_ascii=False, indent=2)
+def execute_json(directory: Path, command: str, text: str = "", confirm: bool = False) -> str:
+    return json.dumps(execute(directory, command, text, confirm), ensure_ascii=False, indent=2)

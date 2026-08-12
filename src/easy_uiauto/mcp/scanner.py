@@ -36,6 +36,10 @@ ACTIONABLE_TYPES = {
     "TreeItemControl": ["click", "double-click"],
 }
 
+SEMANTIC_CONFIDENCE_THRESHOLD = 0.72
+SEMANTIC_BATCH_SIZE = 60
+SEMANTIC_RISKS = {"safe", "state-changing", "external", "destructive", "unknown"}
+
 
 def _rect(control) -> dict:
     rectangle = control.BoundingRectangle
@@ -488,6 +492,225 @@ def segment_interface(
     return _validate_segments(result, width, height)
 
 
+def _annotate_controls(screenshot, candidates: list[dict]):
+    """Draw stable numeric labels without changing the source screenshot."""
+    from PIL import ImageDraw
+
+    annotated = screenshot.convert("RGB").copy()
+    draw = ImageDraw.Draw(annotated)
+    for candidate in candidates:
+        rectangle = candidate["relative_rect"]
+        left = rectangle["left"]
+        top = rectangle["top"]
+        right = rectangle["right"]
+        bottom = rectangle["bottom"]
+        label = str(candidate["id"])
+        draw.rectangle((left, top, right, bottom), outline="#ff1744", width=3)
+        label_width = max(18, 8 * len(label) + 8)
+        label_top = max(0, top - 18)
+        draw.rectangle(
+            (left, label_top, min(annotated.width, left + label_width), label_top + 18),
+            fill="#ff1744",
+        )
+        draw.text((left + 4, label_top + 2), label, fill="white")
+    return annotated
+
+
+def _image_data_url(image) -> str:
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+    return "data:image/png;base64," + base64.b64encode(buffer.getvalue()).decode("ascii")
+
+
+def _request_control_semantics(
+    screenshot,
+    candidates: list[dict],
+    page: dict,
+    regions: list[dict],
+    api_url: str,
+    api_key: str,
+    model: str,
+    version: str,
+) -> dict[int, dict]:
+    annotated = _annotate_controls(screenshot, candidates)
+    compact_candidates = [
+        {
+            "id": item["id"],
+            "uia_name": item["uia_name"],
+            "automation_id": item["automation_id"],
+            "control_type": item["control_type"],
+            "localized_control_type": item["localized_control_type"],
+            "class_name": item["class_name"],
+            "help_text": item["help_text"],
+            "is_keyboard_focusable": item["is_keyboard_focusable"],
+            "region": item["region_id"],
+            "supported_actions": item["supported_actions"],
+            "rect": item["relative_rect"],
+        }
+        for item in candidates
+    ]
+    region_context = [
+        {
+            "id": item["id"],
+            "name": item["name"],
+            "role": item["role"],
+            "description": item.get("description", ""),
+        }
+        for item in regions
+    ]
+    prompt = (
+        "Understand the real function of every numbered desktop UI control. "
+        "Use the original screenshot for visual context and the annotated screenshot to map "
+        "numeric IDs. Use the UI Automation metadata below too. Infer meaning from labels, icons, "
+        "nearby text, region, layout, and application context together. Do not merely repeat the "
+        "control type or invent a purpose when evidence is weak. For ambiguous controls, explain "
+        "the ambiguity and set confidence "
+        "below 0.72. Return every input ID exactly once as strict JSON only: "
+        '{"controls":[{"id":1,"semantic_name":"Save document","intent":"save-document",'
+        '"description":"Save the current document to disk","role":"action",'
+        '"actions":["click"],"aliases":["save","write file"],'
+        '"risk":"state-changing","requires_confirmation":false,"confidence":0.96,'
+        '"evidence":["floppy-disk icon","toolbar context"],"ambiguity":""}]}. '
+        "semantic_name must be concise and user-facing. intent must be a stable generic kebab-case "
+        "verb phrase suitable for a CLI. actions must be a subset of supported_actions. risk must "
+        "be one of safe, state-changing, external, destructive, unknown. Sending, publishing, "
+        "purchasing, deleting, "
+        "closing without saving, or changing remote state must require confirmation. "
+        f"Page: {json.dumps(page, ensure_ascii=False)}. "
+        f"Regions: {json.dumps(region_context, ensure_ascii=False)}. "
+        f"Controls: {json.dumps(compact_candidates, ensure_ascii=False)}."
+    )
+    payload = {
+        "model": model,
+        "temperature": 0,
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    "You are a desktop UI analyst. Return grounded control semantics "
+                    "as strict JSON."
+                ),
+            },
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {"type": "image_url", "image_url": {"url": _image_data_url(screenshot)}},
+                    {"type": "image_url", "image_url": {"url": _image_data_url(annotated)}},
+                ],
+            },
+        ],
+    }
+    request = urlrequest.Request(
+        api_url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "User-Agent": f"easy-uiauto/{version}",
+        },
+        method="POST",
+    )
+    try:
+        with urlrequest.urlopen(request, timeout=90) as response:
+            body = json.loads(response.read().decode("utf-8"))
+    except urlerror.HTTPError as error:
+        raise RuntimeError(f"AI control semantics failed with HTTP {error.code}") from error
+    except urlerror.URLError as error:
+        raise RuntimeError(f"AI control semantics failed: {error.reason}") from error
+    try:
+        content = body["choices"][0]["message"]["content"]
+    except (KeyError, IndexError, TypeError) as error:
+        raise RuntimeError("AI control semantics response did not contain a completion") from error
+    if isinstance(content, list):
+        content = "".join(item.get("text", "") for item in content if isinstance(item, dict))
+    result = _parse_json_object(str(content))
+    expected = {item["id"]: item for item in candidates}
+    semantics = {}
+    for raw in result.get("controls", []):
+        if not isinstance(raw, dict):
+            continue
+        try:
+            item_id = int(raw.get("id"))
+        except (TypeError, ValueError):
+            continue
+        candidate = expected.get(item_id)
+        if candidate is None or item_id in semantics:
+            continue
+        supported = candidate["supported_actions"]
+        requested_actions = raw.get("actions", [])
+        if not isinstance(requested_actions, list):
+            requested_actions = []
+        actions = [action for action in supported if action in requested_actions]
+        try:
+            confidence = max(0.0, min(1.0, float(raw.get("confidence", 0))))
+        except (TypeError, ValueError):
+            confidence = 0.0
+        semantic_name = str(raw.get("semantic_name") or "").strip()[:120]
+        intent = knowledge.slugify(raw.get("intent") or "", "")
+        risk = str(raw.get("risk") or "unknown").strip().lower()
+        if risk not in SEMANTIC_RISKS:
+            risk = "unknown"
+        aliases = raw.get("aliases", [])
+        evidence = raw.get("evidence", [])
+        semantics[item_id] = {
+            "semantic_name": semantic_name,
+            "intent": intent,
+            "description": str(raw.get("description") or "").strip()[:500],
+            "role": knowledge.slugify(raw.get("role") or "control"),
+            "actions": actions,
+            "aliases": [str(value).strip() for value in aliases[:12] if str(value).strip()]
+            if isinstance(aliases, list)
+            else [],
+            "risk": risk,
+            "requires_confirmation": bool(raw.get("requires_confirmation"))
+            or risk in {"external", "destructive"},
+            "confidence": round(confidence, 4),
+            "evidence": [str(value).strip() for value in evidence[:12] if str(value).strip()]
+            if isinstance(evidence, list)
+            else [],
+            "ambiguity": str(raw.get("ambiguity") or "").strip()[:500],
+            "source": "ai-vision-context",
+        }
+    return semantics
+
+
+def analyze_control_semantics(
+    screenshot,
+    candidates: list[dict],
+    page: dict,
+    regions: list[dict],
+    api_url: str,
+    api_key: str,
+    model: str,
+    version: str,
+    batch_size: int = SEMANTIC_BATCH_SIZE,
+) -> dict[int, dict]:
+    """Batch controls through the multimodal model and require one result per control."""
+    semantics = {}
+    batch_size = max(1, min(int(batch_size), SEMANTIC_BATCH_SIZE))
+    for offset in range(0, len(candidates), batch_size):
+        batch = candidates[offset : offset + batch_size]
+        semantics.update(
+            _request_control_semantics(
+                screenshot,
+                batch,
+                page,
+                regions,
+                api_url,
+                api_key,
+                model,
+                version,
+            )
+        )
+    missing = [item["id"] for item in candidates if item["id"] not in semantics]
+    if missing:
+        raise RuntimeError(
+            "AI control semantics omitted control IDs: " + ", ".join(map(str, missing[:20]))
+        )
+    return semantics
+
+
 def _validate_segments(result: dict, width: int, height: int) -> dict:
     page = result.get("page") if isinstance(result.get("page"), dict) else {}
     page = {
@@ -577,6 +800,17 @@ def _control_semantic_name(control, index: int) -> str:
 def _command_name(page_id: str, region_id: str, semantic_name: str, control_id: str) -> str:
     control_slug = knowledge.slugify(semantic_name, control_id)
     return ".".join((knowledge.slugify(page_id), knowledge.slugify(region_id), control_slug))
+
+
+def _relative_rect(control_rect: dict, window_rect: dict) -> dict:
+    return {
+        "left": control_rect["left"] - window_rect["left"],
+        "top": control_rect["top"] - window_rect["top"],
+        "right": control_rect["right"] - window_rect["left"],
+        "bottom": control_rect["bottom"] - window_rect["top"],
+        "width": control_rect["width"],
+        "height": control_rect["height"],
+    }
 
 
 def _verify_location(location: dict, expected_rect: dict) -> tuple[bool, dict, str]:
@@ -684,6 +918,56 @@ def scan_window(
 
     progress("Traversing UI Automation controls")
     controls = _walk_controls(window, max(1, min(max_depth, 30)), max(1, max_controls))
+    semantic_candidates = []
+    for index, (control, _depth) in enumerate(controls, start=1):
+        control_rect = _clip_rect(_rect(control), window_rect)
+        if not _valid_rect(control_rect, window_rect):
+            continue
+        control_type = (getattr(control, "ControlTypeName", "") or "Control")
+        supported_actions = _control_actions(
+            control_type,
+            bool(getattr(control, "IsEnabled", True)),
+        )
+        uia_name = (getattr(control, "Name", "") or "").strip()
+        automation_id = (getattr(control, "AutomationId", "") or "").strip()
+        if not supported_actions and not uia_name and not automation_id:
+            continue
+        semantic_candidates.append(
+            {
+                "id": index,
+                "uia_name": uia_name,
+                "automation_id": automation_id,
+                "control_type": control_type,
+                "localized_control_type": str(
+                    getattr(control, "LocalizedControlType", "") or ""
+                ).strip(),
+                "class_name": (getattr(control, "ClassName", "") or "").strip(),
+                "help_text": str(getattr(control, "HelpText", "") or "").strip(),
+                "is_keyboard_focusable": bool(
+                    getattr(control, "IsKeyboardFocusable", False)
+                ),
+                "region_id": _region_for_control(
+                    control_rect,
+                    window_rect,
+                    segmentation["regions"],
+                ),
+                "supported_actions": supported_actions,
+                "relative_rect": _relative_rect(control_rect, window_rect),
+            }
+        )
+    progress(
+        f"Understanding {len(semantic_candidates)} contextual controls with remote AI"
+    )
+    semantics = analyze_control_semantics(
+        screenshot,
+        semantic_candidates,
+        page,
+        segmentation["regions"],
+        api_url,
+        api_key,
+        model,
+        version,
+    )
     verification_screenshot = _screenshot_window(window_rect)
     counts = {"observed": 0, "verified": 0, "suspect": 0, "quarantined": 0}
     key_controls = 0
@@ -693,6 +977,8 @@ def scan_window(
     failures = []
     command_counts: dict[str, int] = {}
     observed_ids = set()
+    previous_by_id = {record.get("id"): record for record in previous_page_records}
+    semantic_counts = {"verified": 0, "uncertain": 0, "manual": 0, "not-required": 0}
     for index, (control, depth) in enumerate(controls, start=1):
         try:
             control_rect = _rect(control)
@@ -703,11 +989,13 @@ def scan_window(
             xpath = get_control_xpath(control)
             location = location_from_xpath(xpath)
             control_type = (getattr(control, "ControlTypeName", "") or "Control")
-            semantic_name = _control_semantic_name(control, index)
             region_id = _region_for_control(control_rect, window_rect, segmentation["regions"])
-            actions = _control_actions(control_type, bool(getattr(control, "IsEnabled", True)))
+            supported_actions = _control_actions(
+                control_type,
+                bool(getattr(control, "IsEnabled", True)),
+            )
             is_key = bool(
-                actions
+                supported_actions
                 or getattr(control, "AutomationId", "")
                 or getattr(control, "Name", "")
             )
@@ -721,11 +1009,53 @@ def scan_window(
             )
             control_id = knowledge.stable_id("control", *identity)
             observed_ids.add(control_id)
-            base_command = _command_name(page_id, region_id, semantic_name, control_id)
-            command_counts[base_command] = command_counts.get(base_command, 0) + 1
+            semantic = semantics.get(index, {})
+            previous = previous_by_id.get(control_id, {})
+            if previous.get("semantic_source") == "manual":
+                semantic = {
+                    "semantic_name": previous.get("semantic_name", ""),
+                    "intent": previous.get("intent", ""),
+                    "description": previous.get("description", ""),
+                    "role": previous.get("semantic_role", "control"),
+                    "actions": previous.get("actions", supported_actions),
+                    "aliases": previous.get("aliases", []),
+                    "risk": previous.get("risk", "unknown"),
+                    "requires_confirmation": previous.get("requires_confirmation", False),
+                    "confidence": 1.0,
+                    "evidence": previous.get("semantic_evidence", ["human teaching"]),
+                    "ambiguity": "",
+                    "source": "manual",
+                }
+            semantic_name = semantic.get("semantic_name") or _control_semantic_name(control, index)
+            intent = semantic.get("intent") or knowledge.slugify(semantic_name, control_id)
+            actions = [
+                action for action in semantic.get("actions", []) if action in supported_actions
+            ]
+            semantic_confidence = float(semantic.get("confidence", 0.0))
+            semantic_status = "not-required"
+            if supported_actions:
+                if semantic.get("source") == "manual":
+                    semantic_status = "manual"
+                elif (
+                    semantic_confidence >= SEMANTIC_CONFIDENCE_THRESHOLD
+                    and semantic.get("semantic_name")
+                    and semantic.get("intent")
+                    and actions
+                ):
+                    semantic_status = "verified"
+                else:
+                    semantic_status = "uncertain"
+            elif semantic.get("source") == "manual":
+                semantic_status = "manual"
+            elif semantic_confidence >= SEMANTIC_CONFIDENCE_THRESHOLD:
+                semantic_status = "verified"
+            semantic_counts[semantic_status] += 1
+            base_command = _command_name(page_id, region_id, intent, control_id)
             command = base_command
-            if command_counts[base_command] > 1:
-                command = f"{base_command}-{command_counts[base_command]}"
+            if supported_actions:
+                command_counts[base_command] = command_counts.get(base_command, 0) + 1
+                if command_counts[base_command] > 1:
+                    command = f"{base_command}-{command_counts[base_command]}"
             image_path = directory / "images" / "controls" / f"{control_id}.png"
             crop = _crop_control(screenshot, control_rect, window_rect)
             crop.save(image_path)
@@ -738,7 +1068,7 @@ def scan_window(
                 _crop_control(verification_screenshot, control_rect, window_rect),
             )
             template_result = {"ok": False, "score": 0.0, "detail": "not checked"}
-            if actions and verified_actions < max(0, verify_limit):
+            if supported_actions and verified_actions < max(0, verify_limit):
                 verification_attempted = True
                 location_ok, verified_rect, location_detail = _verify_location(
                     location,
@@ -758,16 +1088,18 @@ def scan_window(
                     window_rect,
                 )
                 verified_actions += 1
-            elif actions:
+            elif supported_actions:
                 location_detail = "verification limit reached"
             image_ok = similarity >= 0.75
-            if actions:
+            if supported_actions:
                 if not verification_attempted:
                     status = "suspect"
                 else:
                     status = (
                         "verified"
-                        if image_ok and (location_ok or template_result["ok"])
+                        if image_ok
+                        and (location_ok or template_result["ok"])
+                        and semantic_status in {"verified", "manual"}
                         else "quarantined"
                     )
             else:
@@ -779,8 +1111,22 @@ def scan_window(
                         "name": semantic_name,
                         "location": location_detail,
                         "image_similarity": similarity,
+                        "semantic_status": semantic_status,
+                        "semantic_confidence": semantic_confidence,
+                        "semantic_ambiguity": semantic.get("ambiguity", ""),
                     }
                 )
+            previous_function = previous.get("function_verification", {})
+            function_verification = (
+                previous_function
+                if previous_function.get("status") == "human-confirmed"
+                else {
+                    "status": "inferred" if supported_actions else "not-applicable",
+                    "method": semantic.get("source", "uia-metadata"),
+                    "executed": False,
+                    "verified_at": knowledge.utc_now(),
+                }
+            )
             record = {
                 "id": control_id,
                 "app_id": app_id,
@@ -788,16 +1134,35 @@ def scan_window(
                 "page_id": page_id,
                 "region_id": region_id,
                 "semantic_name": semantic_name,
+                "intent": intent,
+                "description": semantic.get("description", ""),
+                "semantic_role": semantic.get("role", "control"),
+                "semantic_confidence": semantic_confidence,
+                "semantic_status": semantic_status,
+                "semantic_source": semantic.get("source", "uia-metadata"),
+                "semantic_evidence": semantic.get("evidence", []),
+                "semantic_ambiguity": semantic.get("ambiguity", ""),
+                "aliases": semantic.get("aliases", []),
+                "risk": semantic.get("risk", "unknown"),
+                "requires_confirmation": bool(semantic.get("requires_confirmation", False)),
                 "command": command,
                 "name": getattr(control, "Name", "") or "",
                 "class_name": getattr(control, "ClassName", "") or "",
                 "control_type": control_type,
                 "automation_id": getattr(control, "AutomationId", "") or "",
                 "framework_id": getattr(control, "FrameworkId", "") or "",
+                "localized_control_type": str(
+                    getattr(control, "LocalizedControlType", "") or ""
+                ),
+                "help_text": str(getattr(control, "HelpText", "") or ""),
+                "is_keyboard_focusable": bool(
+                    getattr(control, "IsKeyboardFocusable", False)
+                ),
                 "depth": depth,
                 "rect": control_rect,
                 "location": location,
                 "actions": actions,
+                "supported_actions": supported_actions,
                 "is_key": is_key,
                 "status": status,
                 "image": str(image_path.relative_to(directory)).replace("\\", "/"),
@@ -814,8 +1179,19 @@ def scan_window(
                     "template_detail": template_result["detail"],
                     "verified_at": knowledge.utc_now(),
                 },
+                "function_verification": function_verification,
                 "model": model,
-                "tags": [control_type, region_id, "key" if is_key else "structural"],
+                "tags": list(
+                    dict.fromkeys(
+                        [
+                            control_type,
+                            region_id,
+                            "key" if is_key else "structural",
+                            intent,
+                            *semantic.get("aliases", []),
+                        ]
+                    )
+                ),
                 "notes": "Generated by scan_window_knowledge.",
                 "scan_id": scan_id,
             }
@@ -868,6 +1244,8 @@ def scan_window(
         "commands": len(knowledge.available_commands(directory)),
         "command_catalog": str(catalog_path),
         "status_counts": counts,
+        "semantic_counts": semantic_counts,
+        "semantic_controls_analyzed": len(semantic_candidates),
         "failures": failures[:50],
         "truncated": len(controls) >= max_controls,
         "elapsed_seconds": elapsed,

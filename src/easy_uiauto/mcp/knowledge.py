@@ -119,6 +119,14 @@ def _control_body(record: dict) -> str:
         f"Page: `{record.get('page_id', 'unknown')}`  \n"
         f"Region: `{record.get('region_id', 'unassigned')}`  \n"
         f"Status: **{record.get('status', 'observed')}**\n\n"
+        "## Meaning\n\n"
+        f"{record.get('description') or 'No semantic description.'}\n\n"
+        f"Intent: `{record.get('intent', 'unknown')}`  \n"
+        f"Confidence: `{record.get('semantic_confidence', 0)}`  \n"
+        f"Source: `{record.get('semantic_source', 'unknown')}`  \n"
+        f"Risk: `{record.get('risk', 'unknown')}`  \n"
+        f"Function verification: "
+        f"`{record.get('function_verification', {}).get('status', 'unknown')}`\n\n"
         "## Operations\n\n"
         f"{action_lines}\n\n"
         "## Notes\n\n"
@@ -141,6 +149,97 @@ def save_control(directory: Path, record: dict) -> Path:
     path = control_path(directory, record["id"], record.get("status", "observed"))
     write_markdown(path, record, _control_body(record))
     return path
+
+
+def teach_control(
+    directory: Path,
+    control_id: str,
+    semantic_name: str,
+    intent: str,
+    description: str,
+    actions: list[str] | None = None,
+    aliases: list[str] | None = None,
+    risk: str = "safe",
+    requires_confirmation: bool = False,
+) -> dict:
+    """Apply a human-confirmed meaning without weakening locator verification."""
+    found = find_control_record(directory, control_id, include_quarantine=True)
+    if found is None:
+        raise KeyError(f"Unknown control: {control_id}")
+    _path, record = found
+    semantic_name = semantic_name.strip()
+    normalized_intent = slugify(intent, "")
+    if not semantic_name or not normalized_intent or not description.strip():
+        raise ValueError("semantic_name, intent, and description are required")
+    supported = record.get("supported_actions", record.get("actions", []))
+    selected = actions if actions is not None else supported
+    selected = list(dict.fromkeys(action for action in selected if action in supported))
+    if supported and not selected:
+        raise ValueError(f"actions must include one of: {', '.join(supported)}")
+    risk = risk.strip().lower()
+    if risk not in {"safe", "state-changing", "external", "destructive", "unknown"}:
+        raise ValueError(f"Unsupported risk: {risk}")
+    positioning_ok = (
+        record.get("verification", {}).get("image") == "passed"
+        and (
+            record.get("verification", {}).get("location") == "passed"
+            or record.get("visual_fallback_ready") is True
+        )
+    )
+    record.update(
+        {
+            "semantic_name": semantic_name,
+            "intent": normalized_intent,
+            "description": description.strip(),
+            "actions": selected,
+            "aliases": list(
+                dict.fromkeys(value.strip() for value in (aliases or []) if value.strip())
+            ),
+            "risk": risk,
+            "requires_confirmation": bool(requires_confirmation)
+            or risk in {"external", "destructive"},
+            "semantic_confidence": 1.0,
+            "semantic_status": "manual",
+            "semantic_source": "manual",
+            "semantic_evidence": ["human teaching"],
+            "semantic_ambiguity": "",
+            "function_verification": {
+                "status": "human-confirmed",
+                "method": "manual teaching",
+                "executed": record.get("function_verification", {}).get("executed", False),
+                "verified_at": utc_now(),
+            },
+            "status": "verified" if positioning_ok else "quarantined",
+        }
+    )
+    command = ".".join(
+        (
+            slugify(record.get("page_id", "main")),
+            slugify(record.get("region_id", "unassigned")),
+            normalized_intent,
+        )
+    )
+    occupied = {
+        item.get("command")
+        for _item_path, item in iter_records(directory, "control")
+        if item.get("id") != control_id
+    }
+    record["command"] = (
+        f"{command}-{slugify(control_id)[-6:]}" if command in occupied else command
+    )
+    record["tags"] = list(
+        dict.fromkeys(
+            [
+                *record.get("tags", []),
+                normalized_intent,
+                *(aliases or []),
+            ]
+        )
+    )
+    save_control(directory, record)
+    rebuild_index(directory)
+    write_command_catalog(directory)
+    return record
 
 
 def save_page(directory: Path, record: dict) -> Path:
@@ -246,6 +345,14 @@ def list_apps(root: Path | None = None) -> list[dict]:
                     control.get("status") == "quarantined"
                     for control in index.get("controls", [])
                 ),
+                "semantic_verified": sum(
+                    control.get("semantic_status") in {"verified", "manual"}
+                    for control in index.get("controls", [])
+                ),
+                "semantic_uncertain": sum(
+                    control.get("semantic_status") == "uncertain"
+                    for control in index.get("controls", [])
+                ),
             }
         )
     return result
@@ -255,6 +362,11 @@ def _search_text(record: dict) -> str:
     values = [
         record.get("id", ""),
         record.get("semantic_name", ""),
+        record.get("intent", ""),
+        record.get("description", ""),
+        record.get("semantic_role", ""),
+        record.get("risk", ""),
+        record.get("semantic_ambiguity", ""),
         record.get("name", ""),
         record.get("control_type", ""),
         record.get("automation_id", ""),
@@ -263,6 +375,8 @@ def _search_text(record: dict) -> str:
         record.get("notes", ""),
         " ".join(record.get("tags", [])),
         " ".join(record.get("actions", [])),
+        " ".join(record.get("aliases", [])),
+        " ".join(record.get("semantic_evidence", [])),
     ]
     return " ".join(str(value) for value in values).casefold()
 
@@ -297,6 +411,8 @@ def search_controls(
 def available_commands(directory: Path, page_id: str = "") -> list[dict]:
     commands = []
     for control in search_controls(directory, statuses=EXECUTABLE_STATUSES, limit=10000):
+        if control.get("semantic_status") not in {"verified", "manual"}:
+            continue
         if page_id and control.get("page_id") != page_id:
             continue
         for action in control.get("actions", []):
@@ -305,6 +421,14 @@ def available_commands(directory: Path, page_id: str = "") -> list[dict]:
                     "command": f"{control['command']}.{action}",
                     "control_id": control["id"],
                     "semantic_name": control.get("semantic_name") or control.get("name"),
+                    "intent": control.get("intent"),
+                    "description": control.get("description", ""),
+                    "aliases": control.get("aliases", []),
+                    "semantic_confidence": control.get("semantic_confidence", 0),
+                    "semantic_source": control.get("semantic_source", "unknown"),
+                    "function_verification": control.get("function_verification", {}),
+                    "risk": control.get("risk", "unknown"),
+                    "requires_confirmation": control.get("requires_confirmation", False),
                     "action": action,
                     "page": control.get("page_id"),
                     "region": control.get("region_id"),

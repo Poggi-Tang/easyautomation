@@ -154,6 +154,7 @@ easy_uiauto_ui apps
 easy_uiauto_ui commands <app-id>
 easy_uiauto_ui search <app-id> "search terms"
 easy_uiauto_ui run <app-id> <page.region.control.action> --text "optional text"
+easy_uiauto_ui teach <app-id> <control-id> "Meaning" intent "Description"
 ```
 
 The default vault is `~/easy_uiauto_vault`. Set `EASY_UIAUTO_KNOWLEDGE_DIR`
@@ -162,12 +163,29 @@ page screenshots, individual control PNG crops, a quarantine directory, and a
 generated `operations/UI-CLI.md` catalog. `.easy_uiauto/index.json` is only a
 disposable search cache and can be rebuilt with `easy_uiauto_ui reindex`.
 
-Scanning combines the complete visible UIA tree with remote AI page/region
-segmentation. All visible controls are saved; actionable controls become UI CLI
-commands only after LOCATION and control-image validation. When LOCATION is not
+Scanning combines the complete visible UIA tree with remote multimodal page/region
+segmentation and batched contextual understanding of controls. The model receives
+the original page screenshot, a numbered-control overlay, UIA metadata, region context,
+and supported actions. It records each control's user-facing meaning, stable intent,
+description, aliases, evidence, risk, recommended actions, ambiguity, and confidence.
+All visible controls are saved; actionable controls become UI CLI commands only when
+their semantics are high-confidence and they pass LOCATION plus control-image validation.
+When LOCATION is not
 available, one unique high-confidence image match can validate and execute the
 control. Ambiguous, stale, or missing controls are quarantined and excluded from
 execution until a successful rescan repairs them.
+
+Locator/image verification, semantic verification, and functional execution are tracked
+separately. Scanning does not click every control: doing so could send, publish, purchase,
+delete, or otherwise change external state. AI meanings are marked as inferred until
+directly taught or observed, and execution history never masquerades as proof of the
+resulting application behavior. Use `easy_uiauto_ui teach` or the `teach_ui_control` MCP
+tool to correct uncertain meanings; manual semantics survive rescans but cannot bypass a
+failed locator. External or destructive commands require `--confirm` or `confirm=true`.
+
+Knowledge created before contextual control semantics were introduced remains readable,
+but its old commands are intentionally not executable. Rescan each page once to add the
+required semantic evidence, confidence, risk, and verification fields.
 
 The same workflow is available through MCP tools:
 
@@ -176,6 +194,7 @@ The same workflow is available through MCP tools:
 - `search_ui_knowledge`
 - `list_ui_commands`
 - `run_ui_command`
+- `teach_ui_control`
 - `rebuild_ui_knowledge_index`
 
 `--full-setup-codex` also installs or updates the bundled

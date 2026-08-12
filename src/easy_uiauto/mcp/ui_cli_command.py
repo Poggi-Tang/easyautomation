@@ -32,7 +32,9 @@ def _vision_settings(args) -> tuple[str, str, str]:
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="easy_uiauto_ui",
-        description="Scan applications and use their verified semantic UI command catalogs.",
+        description=(
+            "Learn real control meanings from page context and run verified semantic UI commands."
+        ),
     )
     parser.add_argument("--version", action="version", version=f"easy_uiauto_ui {__version__}")
     commands = parser.add_subparsers(dest="subcommand", required=True)
@@ -61,6 +63,18 @@ def _build_parser() -> argparse.ArgumentParser:
     run.add_argument("app_id")
     run.add_argument("command")
     run.add_argument("--text", default="")
+    run.add_argument("--confirm", action="store_true")
+
+    teach = commands.add_parser("teach", help="Teach or correct a control's real function.")
+    teach.add_argument("app_id")
+    teach.add_argument("control_id")
+    teach.add_argument("semantic_name")
+    teach.add_argument("intent")
+    teach.add_argument("description")
+    teach.add_argument("--actions", default="")
+    teach.add_argument("--aliases", default="")
+    teach.add_argument("--risk", default="safe")
+    teach.add_argument("--requires-confirmation", action="store_true")
 
     rebuild = commands.add_parser("reindex", help="Rebuild cache and catalog from Markdown.")
     rebuild.add_argument("app_id")
@@ -110,6 +124,22 @@ def main(argv: list[str] | None = None) -> None:
                 knowledge.app_dir(args.app_id),
                 args.command,
                 args.text,
+                args.confirm,
+            )
+        elif args.subcommand == "teach":
+            selected_actions = [
+                value.strip() for value in args.actions.split(",") if value.strip()
+            ]
+            result = knowledge.teach_control(
+                knowledge.app_dir(args.app_id),
+                args.control_id,
+                args.semantic_name,
+                args.intent,
+                args.description,
+                selected_actions or None,
+                [value.strip() for value in args.aliases.split(",") if value.strip()],
+                args.risk,
+                args.requires_confirmation,
             )
         else:
             directory = knowledge.app_dir(args.app_id)

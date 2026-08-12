@@ -15,12 +15,18 @@ def _record() -> dict:
         "page_id": "main",
         "region_id": "toolbar",
         "semantic_name": "Save",
+        "intent": "save-document",
+        "description": "Save the current document.",
+        "semantic_status": "verified",
+        "semantic_confidence": 0.96,
+        "semantic_source": "ai-vision-context",
         "command": "main.toolbar.save",
         "name": "Save",
         "control_type": "ButtonControl",
         "automation_id": "save",
         "location": {"WindowName": "Example", "Xpath": []},
         "actions": ["click"],
+        "supported_actions": ["click"],
         "is_key": True,
         "status": "verified",
         "image": "images/controls/save.png",
@@ -87,3 +93,30 @@ def test_failed_runtime_verification_quarantines_control(monkeypatch, tmp_path) 
 
     assert (directory / "quarantine" / "save.md").is_file()
     assert not knowledge.available_commands(directory)
+
+
+def test_dangerous_command_requires_explicit_confirmation(monkeypatch, tmp_path) -> None:
+    directory = knowledge.initialize_app("example", "Example", tmp_path)
+    record = _record()
+    record["risk"] = "destructive"
+    record["requires_confirmation"] = True
+    knowledge.save_control(directory, record)
+    knowledge.rebuild_index(directory)
+
+    try:
+        ui_cli.execute(directory, "main.toolbar.save.click")
+    except RuntimeError as error:
+        assert "explicit confirmation" in str(error)
+    else:
+        raise AssertionError("dangerous command executed without confirmation")
+
+    clicks: list[bool] = []
+    control = SimpleNamespace(Click=lambda: clicks.append(True))
+    monkeypatch.setattr(
+        ui_cli,
+        "_resolve_verified_control",
+        lambda *_args: (control, 0.95, {}, "location"),
+    )
+    result = ui_cli.execute(directory, "main.toolbar.save.click", confirm=True)
+    assert result["ok"] is True
+    assert clicks == [True]
