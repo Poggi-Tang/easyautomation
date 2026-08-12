@@ -9,29 +9,33 @@ Build reusable UI knowledge through the `easy_uiauto` MCP tools.
 
 ## Workflow
 
-1. Call `list_windows` and identify the exact target window. Do not scan unrelated windows.
-2. Ask the user to navigate to the page that should be learned when the requested scope is unclear.
-3. Call `scan_window_knowledge(window_name=..., strategy="visual-first")`. Use
-   `strategy="full-uia"` only when visual targeting fails or diagnostic coverage is required.
-4. Inspect `strategy`, `visual_targets`, `truncated`, `uia_controls_seen`, `controls_saved_this_scan`,
+1. Call `get_ui_learning_readiness` before listing or scanning windows. If `ready` is false,
+   stop immediately and return its setup instruction. Do not attempt either scan strategy.
+2. Call `list_windows` once and identify the exact target window. Do not scan unrelated windows.
+3. Ask the user to navigate to the page that should be learned when the requested scope is unclear.
+4. Call `scan_window_knowledge(window_name=..., strategy="visual-first")` exactly once.
+   Never retry with `full-uia` after configuration, authentication, timeout, network, or model
+   errors: both strategies require the same remote endpoint. Use `full-uia` only when the user
+   explicitly requests diagnostic UIA coverage after a successful readiness check.
+5. Inspect `strategy`, `visual_targets`, `truncated`, `uia_controls_seen`, `controls_saved_this_scan`,
    `knowledge_controls_total`, `commands`, `status_counts`, and `semantic_counts`.
-5. Treat the scan as incomplete when `truncated` is true. Rescan with a larger limit or split the work across pages.
-6. Call `list_ui_commands(app_id=...)` and report the generated command surface.
-7. Search by user intent and aliases, not only by the original UIA name.
-8. Call `search_ui_knowledge(app_id=..., include_quarantine=true)` when quarantine or
+6. Treat the scan as incomplete when `truncated` is true. Rescan with a larger limit or split the work across pages.
+7. Call `list_ui_commands(app_id=...)` and report the generated command surface.
+8. Search by user intent and aliases, not only by the original UIA name.
+9. Call `search_ui_knowledge(app_id=..., include_quarantine=true)` when quarantine or
    uncertain semantics are nonzero. Inspect `semantic_ambiguity`, evidence, and confidence.
-9. Use `teach_ui_control` only when the user or direct observation establishes the real
+10. Use `teach_ui_control` only when the user or direct observation establishes the real
    function. Teaching semantics never overrides failed LOCATION or image verification.
-10. Rescan the same page after the UI becomes stable. Manually taught meanings survive rescans.
-11. Call `learn_ui_command_effect` for a user-requested command when its real response and
+11. Rescan the same page after the UI becomes stable. Manually taught meanings survive rescans.
+12. Call `learn_ui_command_effect` for a user-requested command when its real response and
    success condition must be learned. Use `recover=true` only when Escape is a valid reversal.
-12. Call `explore_ui_workflows(policy="safe", max_depth=3)` to rescan the current state,
+13. Call `explore_ui_workflows(policy="safe", max_depth=3)` to rescan the current state,
    test known reversible commands, and recursively learn newly opened pages or dialogs. Use
    `policy="supervised"` only with active user supervision. Stop if interference or recovery
    failure is reported. Never request automated scrolling or dragging; they are unsupported.
-13. Call `list_ui_interactions` and report learned before/after states, changed regions,
+14. Call `list_ui_interactions` and report learned before/after states, changed regions,
    popup windows, effects, success conditions, unstable regions, and recovery results.
-14. Repeat visual scanning for every important page or dialog that remains unknown.
+15. Repeat visual scanning for every important page or dialog that remains unknown.
 
 ## Storage Rules
 

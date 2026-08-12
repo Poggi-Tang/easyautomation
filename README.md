@@ -137,6 +137,9 @@ Full setup asks for a missing API key through hidden input, installs the Python
 vision dependencies and Tesseract when needed, replaces only the `easy_uiauto`
 Codex entry, installs the two bundled skills, and checks UIA, OCR, and the remote
 vision endpoint. Validation uses generated images rather than the current desktop.
+Vision settings are read dynamically by a current-version MCP process. Restart
+Codex once after installing or updating the package, MCP entry, or skills; changing
+only the vision settings does not require a second restart.
 
 For a minimal Codex deployment with remote AI vision, use the quick setup
 command. When the API key is not already present in the Windows user
@@ -155,7 +158,8 @@ You can also give Codex this deployment instruction:
 > Install the latest `easy-uiauto[mcp,vision]` from PyPI, then run
 > `easy_uiauto --full-setup-codex --vision-url URL --vision-model MODEL`; do not
 > inspect unrelated projects or search the web; report every validation result
-> and elapsed time, then ask me to restart Codex.
+> and elapsed time, then ask me to restart Codex once. Do not request another
+> restart only because the vision environment variables changed.
 
 ```bash
 easy_uiauto --install-codex
@@ -184,7 +188,7 @@ The package includes two Codex skills:
 - `$easy-uiauto-learning` scans and explores visible Windows applications.
 - `$easy-uiauto-operate` runs commands from an existing application vault.
 
-After setup and a Codex restart, a natural-language request is enough:
+After setup and one Codex restart, a natural-language request is enough:
 
 ```text
 Use $easy-uiauto-learning to learn the currently open WeChat window and build
@@ -289,7 +293,8 @@ applications/<app-id>/
   failed location checks.
 - Existing reliable controls are retained when a visual-first rescan omits them.
 
-The same workflow is exposed through `scan_window_knowledge`,
+The same workflow is exposed through `get_ui_learning_readiness`,
+`scan_window_knowledge`,
 `list_ui_knowledge_apps`, `search_ui_knowledge`, `list_ui_commands`,
 `run_ui_command`, `run_ui_commands`, `learn_ui_command_effect`,
 `explore_ui_workflows`, `list_ui_interactions`, `teach_ui_control`, and

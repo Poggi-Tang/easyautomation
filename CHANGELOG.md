@@ -4,6 +4,22 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog and is maintained automatically by Semantic Release.
 
+## [0.5.1] - 2026-08-12
+
+### Added
+
+- Added `get_ui_learning_readiness` for a fast, non-network preflight that reports
+  learning configuration without exposing API credentials.
+
+### Fixed
+
+- Read vision settings dynamically for every MCP request so configuration changes are
+  visible to an already-running current-version server.
+- Stop the learning Skill immediately on configuration, authentication, network, timeout,
+  or model failures instead of retrying the slower `full-uia` strategy.
+- Clarified that Codex needs one restart for package, MCP registration, or Skill updates,
+  but not a second restart for vision environment changes.
+
 ## [0.5.0] - 2026-08-12
 
 ### Added

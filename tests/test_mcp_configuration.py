@@ -121,7 +121,8 @@ def test_quick_setup_codex_reuses_existing_key_and_replaces_entry(monkeypatch) -
     assert actions == ["remove", "add"]
     assert "easy_uiauto 1.2.3" in output
     assert "secret" not in output
-    assert "Fully restart Codex" in output
+    assert "Restart Codex once" in output
+    assert "available to a current easy_uiauto MCP process immediately" in output
 
 
 def test_quick_setup_codex_prompts_once_for_missing_key(monkeypatch) -> None:
@@ -214,7 +215,27 @@ def test_full_setup_codex_runs_all_validation_steps(monkeypatch) -> None:
     assert "[PASS] OCR" in output
     assert "[PASS] Remote AI vision" in output
     assert "secret" not in output
-    assert "Fully restart Codex" in output
+    assert "Restart Codex once" in output
+    assert "do not restart again just for environment changes" in output
+
+
+def test_vision_configuration_status_never_returns_key(monkeypatch) -> None:
+    values = {
+        configuration.VISION_API_URL: "https://api.example/v1/chat/completions",
+        configuration.VISION_API_KEY: "secret-value",
+        configuration.VISION_MODEL: "vision-model",
+    }
+    monkeypatch.setattr(
+        configuration,
+        "_existing_vision_value",
+        lambda name: values.get(name, ""),
+    )
+
+    status = configuration.vision_configuration_status()
+
+    assert status["ready"] is True
+    assert status["api_key_configured"] is True
+    assert "secret-value" not in str(status)
 
 
 def test_full_setup_codex_fails_when_a_validation_fails(monkeypatch) -> None:

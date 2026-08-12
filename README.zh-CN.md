@@ -126,6 +126,8 @@ easy_uiauto --full-setup-codex \
 完整配置会通过隐藏输入询问缺失的 API Key，补齐 Python 视觉依赖和 Tesseract，
 仅替换 `easy_uiauto` Codex 条目，安装两个配套 Skill，然后检查 UIA、本地 OCR 和
 远程视觉接口。验收使用程序生成的图片，不会上传当前桌面。
+当前版本的 MCP 会在每次调用时读取最新视觉配置。安装或更新 Python 包、MCP 条目、
+Skill 后只需重启 Codex 一次；如果只是修改视觉配置，不需要再次重启。
 
 需要远程视觉的 Codex 最小部署可使用快速配置命令。API Key 未存在于 Windows
 用户环境变量时，命令通过终端隐藏输入；由非交互式 Agent 执行时则弹出密码框。
@@ -141,7 +143,8 @@ easy_uiauto --quick-setup-codex \
 
 > 从 PyPI 安装最新版 `easy-uiauto[mcp,vision]`，然后执行
 > `easy_uiauto --full-setup-codex --vision-url URL --vision-model MODEL`；不要检查无关项目，
-> 不要搜索网页，报告每项验收结果和耗时，最后提示我重启 Codex。
+> 不要搜索网页，报告每项验收结果和耗时，最后提示我只重启 Codex 一次。不要仅因视觉
+> 环境变量发生变化要求再次重启。
 
 ```bash
 easy_uiauto --install-codex
@@ -170,7 +173,7 @@ python -m easy_uiauto.mcp.service --port 9876
 - `$easy-uiauto-learning`：扫描和探索当前可见的 Windows 软件。
 - `$easy-uiauto-operate`：使用已有知识库中的命令操作软件。
 
-完成配置并重启 Codex 后，可以直接这样说：
+完成配置并重启 Codex 一次后，可以直接这样说：
 
 ```text
 使用 $easy-uiauto-learning，学习当前打开的微信界面，生成微信的控件知识库和 UI 命令。
@@ -261,7 +264,8 @@ applications/<app-id>/
   `teach` 修正含义，但人工修正不能绕过失败的定位检查。
 - 视觉优先重扫偶尔漏掉控件时，已有可靠控件不会被直接删除。
 
-对应 MCP 工具包括 `scan_window_knowledge`、`list_ui_knowledge_apps`、
+对应 MCP 工具包括 `get_ui_learning_readiness`、`scan_window_knowledge`、
+`list_ui_knowledge_apps`、
 `search_ui_knowledge`、`list_ui_commands`、`run_ui_command`、`run_ui_commands`、
 `learn_ui_command_effect`、`explore_ui_workflows`、`list_ui_interactions`、
 `teach_ui_control` 和 `rebuild_ui_knowledge_index`。

@@ -25,7 +25,7 @@ def _run_module(module: str, option: str) -> str:
 
 def test_mcp_server_version() -> None:
     output = _run_module("easy_uiauto.mcp.server", "--version")
-    assert output.strip() == "easy_uiauto 0.5.0"
+    assert output.strip() == "easy_uiauto 0.5.1"
 
 
 def test_mcp_service_help() -> None:
@@ -58,6 +58,7 @@ def test_mcp_server_help_explains_core_workflows() -> None:
     assert "run_action(action_json='<recorded action JSON>')" in output
     assert "UIA LOCATION -> multi-state image templates -> OCR" in output
     assert "easy_uiauto_ui learn-effect" in output
+    assert "get_ui_learning_readiness" in output
     assert "Automated learning intentionally excludes scrolling and dragging" in output
     assert "EASY_UIAUTO_VISION_API_URL" in output
     assert "Restart the client" in output

@@ -68,6 +68,30 @@ def _existing_vision_value(name: str) -> str:
     )
 
 
+def vision_configuration_status() -> dict:
+    """Return non-secret readiness details using values visible to current calls."""
+    api_url = _existing_vision_value(VISION_API_URL)
+    api_key = _existing_vision_value(VISION_API_KEY)
+    model = _existing_vision_value(VISION_MODEL)
+    ready = bool(api_url and api_key and model)
+    return {
+        "ready": ready,
+        "api_url_configured": bool(api_url),
+        "api_key_configured": bool(api_key),
+        "model_configured": bool(model),
+        "model": model,
+        "detail": (
+            "UI learning configuration is ready."
+            if ready
+            else (
+                "Run easy_uiauto --quick-setup-codex --vision-url URL "
+                "--vision-model MODEL. Configuration changes are read dynamically; "
+                "do not retry with full-uia."
+            )
+        ),
+    }
+
+
 def _prompt_api_key() -> str:
     """Read the API key from a terminal or a hidden Windows dialog."""
     if sys.stdin.isatty():
@@ -149,7 +173,8 @@ def quick_setup_codex(api_url: str, model: str, version: str) -> str:
         f"Vision model: {model}\n"
         "Vision API key: configured in the Windows user environment (value hidden)\n"
         f"{configured}\n"
-        "Quick setup complete. Fully restart Codex to load the MCP server and environment."
+        "Quick setup complete. Vision settings are available to a current easy_uiauto MCP "
+        "process immediately. Restart Codex once only if the MCP command or package changed."
     )
 
 
@@ -188,8 +213,9 @@ def full_setup_codex(api_url: str, model: str, version: str) -> str:
         f"{report}\n"
         f"{configured}\n"
         f"{skills}\n"
-        "Full setup and validation complete. Fully restart Codex to load the MCP server "
-        "and environment."
+        "Full setup and validation complete. Vision settings are available to a current "
+        "easy_uiauto MCP process immediately. Restart Codex once to load a newly installed "
+        "MCP package or updated skills; do not restart again just for environment changes."
     )
 
 

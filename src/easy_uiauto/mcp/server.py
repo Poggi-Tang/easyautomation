@@ -228,14 +228,18 @@ def _find_text_on_screen(
 
 
 def _vision_api_settings(model: str) -> tuple[str, str, str]:
-    """Read the OpenAI-compatible remote vision API configuration."""
-    url = os.environ.get("EASY_UIAUTO_VISION_API_URL", "").strip()
-    api_key = os.environ.get("EASY_UIAUTO_VISION_API_KEY", "").strip()
-    configured_model = model.strip() or os.environ.get("EASY_UIAUTO_VISION_MODEL", "").strip()
+    """Read current user settings so a running MCP sees setup changes immediately."""
+    url = configuration._existing_vision_value(configuration.VISION_API_URL).strip()
+    api_key = configuration._existing_vision_value(configuration.VISION_API_KEY).strip()
+    configured_model = model.strip() or configuration._existing_vision_value(
+        configuration.VISION_MODEL
+    ).strip()
     if not url or not api_key or not configured_model:
         raise RuntimeError(
             "Remote vision requires EASY_UIAUTO_VISION_API_URL, "
-            "EASY_UIAUTO_VISION_API_KEY, and EASY_UIAUTO_VISION_MODEL."
+            "EASY_UIAUTO_VISION_API_KEY, and EASY_UIAUTO_VISION_MODEL. Run "
+            "easy_uiauto --quick-setup-codex --vision-url URL --vision-model MODEL. "
+            "Do not retry with full-uia because it requires the same configuration."
         )
     return url, api_key, configured_model
 
@@ -997,6 +1001,28 @@ def upsert_control_record(record_json: str) -> str:
 # ---------------------------------------------------------------------------
 # Application knowledge and semantic UI CLI
 # ---------------------------------------------------------------------------
+
+@mcp.tool()
+def get_ui_learning_readiness() -> str:
+    """Check UI-learning configuration without networking or exposing credentials.
+
+    Call this before scanning. Settings are read from the current Windows user
+    environment on every request, so a running MCP process can see configuration
+    changes without another restart.
+    """
+    try:
+        status = configuration.vision_configuration_status()
+        status.update(
+            {
+                "version": __version__,
+                "knowledge_vault": str(knowledge.vault_root()),
+                "known_applications": len(knowledge.list_apps()),
+            }
+        )
+        return json.dumps(status, ensure_ascii=False, indent=2)
+    except Exception as error:
+        return f"Error checking UI learning readiness: {error}"
+
 
 @mcp.tool()
 def scan_window_knowledge(
@@ -2176,7 +2202,8 @@ def _build_arg_parser() -> argparse.ArgumentParser:
             "  keyboard: type_text, set_text, press_key, hotkey\n"
             "  batch: run_action, run_actions\n"
             "  screenshot: take_screenshot\n"
-            "  knowledge: scan_window_knowledge, list_ui_knowledge_apps, search_ui_knowledge,\n"
+            "  knowledge: get_ui_learning_readiness, scan_window_knowledge,\n"
+            "             list_ui_knowledge_apps, search_ui_knowledge,\n"
             "             list_ui_commands, run_ui_command, run_ui_commands,\n"
             "             learn_ui_command_effect, explore_ui_workflows, list_ui_interactions,\n"
             "             teach_ui_control,\n"
