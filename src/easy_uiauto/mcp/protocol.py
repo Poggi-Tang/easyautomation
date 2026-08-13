@@ -62,6 +62,21 @@ def location_from_xpath(
     }
 
 
+def stable_location(value: dict) -> dict:
+    """Prefer stable AutomationId anchors while retaining XPath context as fallback."""
+    location = normalize_location(value)
+    stable_xpath = []
+    for index, raw_step in enumerate(location.get("Xpath", [])):
+        step = dict(raw_step)
+        if index > 0 and step.get("AutomationId"):
+            step.pop("Name", None)
+        stable_xpath.append(step)
+    location["Xpath"] = stable_xpath
+    if location.get("AutomationId"):
+        location["Name"] = ""
+    return location
+
+
 def normalize_location(value: dict) -> dict:
     """Accept a LOCATION, recorded action, coordinate result, or vector record."""
     if not isinstance(value, dict):

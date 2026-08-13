@@ -4,6 +4,31 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog and is maintained automatically by Semantic Release.
 
+## [0.6.1] - 2026-08-13
+
+### Added
+
+- Added window-scoped AutomationId fast lookup with uniqueness checking before XPath traversal.
+- Added `search_ui_knowledge_batch` for retrieving all controls needed by a multi-step workflow
+  in one MCP call.
+- Added semantic entity, observed value, dynamic-context, current-state, state-reason,
+  enabling-condition, relationship, and visual-component knowledge fields.
+- Visual-only names, avatars, badges, content areas, and status elements are now retained as
+  searchable observations when Windows UIA has no distinct node.
+
+### Changed
+
+- Text commands verify UIA `SetValue` and fall back to Unicode-safe clipboard paste. A text
+  command is successful only when an accessible value or exact clipboard readback confirms it.
+- Disabled controls retain their potential commands and learned enabling conditions; runtime
+  execution refuses them until UIA reports that the condition is satisfied.
+- Scanned LOCATION records omit volatile names when AutomationId is available, while retaining
+  XPath as a duplicate-ID and hierarchy fallback. Existing control IDs are reused when the
+  AutomationId is unique on a learned page.
+- The operation Skill batches knowledge searches, performs at most one direct runtime-context
+  check, accepts a precise user send request as one-operation confirmation, and never switches
+  to learning or retries an uncertain external action automatically.
+
 ## [0.6.0] - 2026-08-13
 
 ### Added

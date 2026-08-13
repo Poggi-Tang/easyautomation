@@ -1182,6 +1182,55 @@ def search_ui_knowledge(
 
 
 @mcp.tool()
+def search_ui_knowledge_batch(
+    app_id: str,
+    queries: list[str],
+    include_quarantine: bool = False,
+    limit_per_query: int = 20,
+) -> str:
+    """Search several UI intents in one MCP call and return results by query.
+
+    Use this for workflows that need multiple controls, such as a conversation row,
+    message input, and Send action. Duplicate controls are returned once in ``controls``
+    while ``matches`` preserves the IDs found for each query.
+    """
+    try:
+        normalized_queries = list(
+            dict.fromkeys(str(query).strip() for query in queries if str(query).strip())
+        )
+        if not normalized_queries:
+            raise ValueError("queries must contain at least one non-empty search string")
+        if len(normalized_queries) > 20:
+            raise ValueError("a batch knowledge search is limited to 20 queries")
+        statuses = None
+        if include_quarantine:
+            statuses = {"verified", "observed", "suspect", "quarantined"}
+        directory = knowledge.app_dir(app_id)
+        controls_by_id = {}
+        matches = {}
+        for query in normalized_queries:
+            records = knowledge.search_controls(
+                directory,
+                query,
+                statuses,
+                max(1, min(int(limit_per_query), 100)),
+            )
+            matches[query] = [record["id"] for record in records]
+            controls_by_id.update({record["id"]: record for record in records})
+        return json.dumps(
+            {
+                "queries": normalized_queries,
+                "matches": matches,
+                "controls": list(controls_by_id.values()),
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    except Exception as error:
+        return f"Error batch searching UI knowledge: {error}"
+
+
+@mcp.tool()
 def list_ui_commands(app_id: str, page_id: str = "") -> str:
     """List the verified semantic UI CLI commands for an application or page."""
     try:
@@ -1202,7 +1251,8 @@ def show_ui_controls(
 
     The current target window is captured once and compared with saved local page
     images. This does not run another learning scan or remote AI request. Current
-    boxes are resolved through LOCATION, unique image templates, then local OCR.
+    boxes are resolved through unique AutomationId, contextual XPath, image templates,
+    then local OCR.
     ``executable`` shows only verified actionable controls; ``known`` also shows
     learned structural, suspect, and quarantined controls.
     """
@@ -2327,7 +2377,8 @@ def _build_arg_parser() -> argparse.ArgumentParser:
             "  learn:   capture and store controls without mutating the UI\n"
             "  mixed:   execute operations and learn successful controls\n\n"
             "Visual fallback order:\n"
-            "  UIA LOCATION -> multi-state image templates -> OCR -> opt-in remote AI vision\n"
+            "  unique AutomationId -> contextual XPath -> image templates -> OCR\n"
+            "  -> opt-in remote AI vision\n"
             "  OCR requires Tesseract and easy-uiauto[mcp,vision].\n"
             "  Remote AI vision requires EASY_UIAUTO_VISION_API_URL,\n"
             "  EASY_UIAUTO_VISION_API_KEY, and EASY_UIAUTO_VISION_MODEL.\n"
@@ -2377,6 +2428,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
             "  knowledge: get_ui_learning_readiness, get_ui_learning_status,\n"
             "             scan_window_knowledge, show_ui_controls,\n"
             "             list_ui_knowledge_apps, search_ui_knowledge,\n"
+            "             search_ui_knowledge_batch,\n"
             "             list_ui_commands, run_ui_command, run_ui_commands,\n"
             "             learn_ui_command_effect, explore_ui_workflows, list_ui_interactions,\n"
             "             teach_ui_control,\n"

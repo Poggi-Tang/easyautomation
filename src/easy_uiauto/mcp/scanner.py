@@ -21,7 +21,7 @@ import uiautomation
 from easy_uiauto.utils import get_control_xpath
 
 from . import knowledge, visualization
-from .protocol import location_from_xpath, normalize_location
+from .protocol import location_from_xpath, normalize_location, stable_location
 
 ACTIONABLE_TYPES = {
     "ButtonControl": ["click", "hover"],
@@ -200,6 +200,49 @@ def _descendant_matches(parent, step: dict, max_depth: int) -> list:
     return matches
 
 
+def _automation_id_step(location: dict) -> dict | None:
+    xpath = location.get("Xpath", [])
+    for step in reversed(xpath):
+        if step.get("AutomationId"):
+            return step
+    if location.get("AutomationId"):
+        return {
+            "AutomationId": location["AutomationId"],
+            "ControlType": location.get("ControlType", ""),
+            "ClassName": location.get("ClassName", ""),
+            "foundIndex": location.get("foundIndex", ""),
+        }
+    return None
+
+
+def _resolve_unique_automation_id(window, location: dict):
+    """Use UIA's native property search when an AutomationId is unique in the window."""
+    step = _automation_id_step(location)
+    if not step:
+        return None
+    control_type = getattr(uiautomation.ControlType, step.get("ControlType", ""), None)
+    search_depth = max(1, min(30, int(step.get("searchDepth", 12) or 12)))
+    query = {
+        "AutomationId": step["AutomationId"],
+        "searchDepth": search_depth,
+        "searchInterval": 0.05,
+    }
+    if control_type is not None:
+        query["ControlType"] = control_type
+    if step.get("ClassName"):
+        query["ClassName"] = step["ClassName"]
+    try:
+        first = uiautomation.Control(searchFromControl=window, foundIndex=1, **query)
+        if not first.Exists(0.25, 0.05):
+            return None
+        second = uiautomation.Control(searchFromControl=window, foundIndex=2, **query)
+        if second.Exists(0.15, 0.05):
+            return None
+        return first
+    except Exception:
+        return None
+
+
 def resolve_location(location: dict, window=None, prefix_cache: dict | None = None):
     """Resolve a canonical LOCATION through UIA without logging or window side effects."""
     normalized = normalize_location(location)
@@ -211,6 +254,18 @@ def resolve_location(location: dict, window=None, prefix_cache: dict | None = No
         window = _find_window(window_name)
     current = window
     prefix_cache = prefix_cache if prefix_cache is not None else {}
+    automation_key = (
+        "automation-id",
+        normalized.get("AutomationId", ""),
+        normalized.get("ControlType", ""),
+        normalized.get("ClassName", ""),
+    )
+    if automation_key in prefix_cache:
+        return prefix_cache[automation_key]
+    fast_control = _resolve_unique_automation_id(window, normalized)
+    if fast_control is not None:
+        prefix_cache[automation_key] = fast_control
+        return fast_control
     previous_search_depth = 1
     steps = xpath[1:] if xpath and _matches_step(window, xpath[0]) else xpath
     prefix = []
@@ -225,8 +280,19 @@ def resolve_location(location: dict, window=None, prefix_cache: dict | None = No
         search_depth = int(step.get("searchDepth", previous_search_depth + 1) or 1)
         relative_depth = max(1, min(12, search_depth - previous_search_depth))
         candidates = _descendant_matches(current, step, relative_depth)
+        if not candidates and step.get("AutomationId") and step.get("Name"):
+            relaxed_step = {key: value for key, value in step.items() if key != "Name"}
+            candidates = _descendant_matches(current, relaxed_step, relative_depth)
         if not candidates and relative_depth < 4:
             candidates = _descendant_matches(current, step, 4)
+        if (
+            not candidates
+            and relative_depth < 4
+            and step.get("AutomationId")
+            and step.get("Name")
+        ):
+            relaxed_step = {key: value for key, value in step.items() if key != "Name"}
+            candidates = _descendant_matches(current, relaxed_step, 4)
         if not candidates:
             return None
         found_index = step.get("foundIndex")
@@ -576,12 +642,23 @@ def segment_interface(
         '"description":"","left":0,"top":0,"width":100,"height":100}],'
         '"controls":[{"id":1,"region":"navigation","semantic_name":"Open menu",'
         '"intent":"open-navigation-menu","description":"Open the application navigation",'
-        '"role":"action","actions":["click"],"aliases":["menu"],"risk":"safe",'
+        '"role":"action","entity_type":"navigation-action","observed_value":"",'
+        '"dynamic_context":false,"current_state":"enabled","state_reason":"",'
+        '"enabling_condition":"","relationships":[],"actions":["click"],'
+        '"aliases":["menu"],"risk":"safe",'
         '"requires_confirmation":false,"confidence":0.97,"evidence":["menu icon"],'
         '"ambiguity":"","left":10,"top":10,"width":40,"height":40}]}. '
         "Coordinates must use screenshot pixels. Include all major functional areas, "
         "not each control. Control rectangles must tightly cover the visible target. Include key "
         "read-only status and result fields because they are needed to verify operation effects. "
+        "Include meaningful visible entities even when they are not directly actionable: names, "
+        "avatars, list-row identity, message/content areas, inputs, badges, status values, and "
+        "disabled actions. Separate stable function from the currently observed value. Use a "
+        "generic semantic_name such as 'Current conversation contact name' and put the visible "
+        "name in observed_value with dynamic_context=true. Infer current_state, state_reason, "
+        "enabling_condition, and relationships between controls when visually grounded. For "
+        "example, an empty message input can explain why Send is disabled and non-empty draft "
+        "text is its enabling condition. "
         "Actions may be click, double-click, right-click, hover, or set-text; never propose "
         "scroll or drag. "
         "Risk must be safe, state-changing, external, destructive, or unknown. Sending, "
@@ -658,6 +735,49 @@ def _image_data_url(image) -> str:
     return "data:image/png;base64," + base64.b64encode(buffer.getvalue()).decode("ascii")
 
 
+def _semantic_context(raw: dict) -> dict:
+    relationships = []
+    raw_relationships = raw.get("relationships", [])
+    if not isinstance(raw_relationships, list):
+        raw_relationships = []
+    for item in raw_relationships[:12]:
+        if not isinstance(item, dict):
+            continue
+        relationship = {
+            "type": knowledge.slugify(item.get("type") or "related-to"),
+            "target_intent": knowledge.slugify(item.get("target_intent") or "", ""),
+            "target_entity": knowledge.slugify(item.get("target_entity") or "", ""),
+            "description": str(item.get("description") or "").strip()[:300],
+        }
+        relationships.append({key: value for key, value in relationship.items() if value})
+    return {
+        "entity_type": knowledge.slugify(raw.get("entity_type") or "ui-element"),
+        "observed_value": str(raw.get("observed_value") or "").strip()[:500],
+        "dynamic_context": bool(raw.get("dynamic_context", False)),
+        "current_state": knowledge.slugify(raw.get("current_state") or "unknown"),
+        "state_reason": str(raw.get("state_reason") or "").strip()[:500],
+        "enabling_condition": str(raw.get("enabling_condition") or "").strip()[:500],
+        "relationships": relationships,
+    }
+
+
+def _visual_component(target: dict, window_rect: dict) -> dict:
+    rectangle = target.get("relative_rect")
+    component = {
+        "semantic_name": target.get("semantic_name", ""),
+        "intent": target.get("intent", ""),
+        "description": target.get("description", ""),
+        "role": target.get("role", "control"),
+        **_semantic_context(target),
+    }
+    if isinstance(rectangle, dict):
+        component["normalized_rect"] = knowledge.normalized_rect(
+            rectangle, window_rect, relative=True
+        )
+        component["geometry_role"] = "visual-hint-only"
+    return component
+
+
 def _request_control_semantics(
     screenshot,
     candidates: list[dict],
@@ -679,6 +799,7 @@ def _request_control_semantics(
             "class_name": item["class_name"],
             "help_text": item["help_text"],
             "is_keyboard_focusable": item["is_keyboard_focusable"],
+            "is_enabled": item["is_enabled"],
             "region": item["region_id"],
             "supported_actions": item["supported_actions"],
             "rect": item["relative_rect"],
@@ -704,6 +825,10 @@ def _request_control_semantics(
         "below 0.72. Return every input ID exactly once as strict JSON only: "
         '{"controls":[{"id":1,"semantic_name":"Save document","intent":"save-document",'
         '"description":"Save the current document to disk","role":"action",'
+        '"entity_type":"document-action","observed_value":"",'
+        '"dynamic_context":false,"current_state":"enabled","state_reason":"",'
+        '"enabling_condition":"",'
+        '"relationships":[{"type":"acts-on","target_intent":"current-document"}],'
         '"actions":["click"],"aliases":["save","write file"],'
         '"risk":"state-changing","requires_confirmation":false,"confidence":0.96,'
         '"evidence":["floppy-disk icon","toolbar context"],"ambiguity":""}]}. '
@@ -712,6 +837,13 @@ def _request_control_semantics(
         "be one of safe, state-changing, external, destructive, unknown. Sending, publishing, "
         "purchasing, deleting, "
         "closing without saving, or changing remote state must require confirmation. "
+        "Separate stable function from volatile screen content. For example, a chat composer is "
+        "'Current conversation message input', while a visible contact name such as Alice is "
+        "observed_value='Alice' with dynamic_context=true. Identify entity_type for contact names, "
+        "avatars, conversation rows, message history, inputs, status fields, and action buttons. "
+        "Infer current_state, state_reason, enabling_condition, and relationships only when the "
+        "screenshot, UIA enabled state, and surrounding controls support them. A disabled Send "
+        "button beside an empty message input should state that non-empty draft text enables it. "
         f"Page: {json.dumps(page, ensure_ascii=False)}. "
         f"Regions: {json.dumps(region_context, ensure_ascii=False)}. "
         f"Controls: {json.dumps(compact_candidates, ensure_ascii=False)}."
@@ -803,6 +935,7 @@ def _request_control_semantics(
             else [],
             "ambiguity": str(raw.get("ambiguity") or "").strip()[:500],
             "source": "ai-vision-context",
+            **_semantic_context(raw),
         }
     return semantics
 
@@ -953,6 +1086,7 @@ def _validate_segments(result: dict, width: int, height: int) -> dict:
                 else [],
                 "ambiguity": str(raw.get("ambiguity") or "").strip()[:500],
                 "source": "ai-vision-target",
+                **_semantic_context(raw),
                 "relative_rect": {
                     "left": left,
                     "top": top,
@@ -983,8 +1117,9 @@ def _region_for_control(control_rect: dict, window_rect: dict, regions: list[dic
     return containing[0]["id"]
 
 
-def _control_actions(control_type: str, is_enabled: bool) -> list[str]:
-    return ACTIONABLE_TYPES.get(control_type, []) if is_enabled else []
+def _control_actions(control_type: str, _is_enabled: bool) -> list[str]:
+    """Return potential actions; current enabled state is a separate learned precondition."""
+    return ACTIONABLE_TYPES.get(control_type, [])
 
 
 def _control_semantic_name(control, index: int) -> str:
@@ -997,6 +1132,20 @@ def _control_semantic_name(control, index: int) -> str:
 def _command_name(page_id: str, region_id: str, semantic_name: str, control_id: str) -> str:
     control_slug = knowledge.slugify(semantic_name, control_id)
     return ".".join((knowledge.slugify(page_id), knowledge.slugify(region_id), control_slug))
+
+
+def _previous_control_by_unique_automation_id(
+    records: list[dict], automation_id: str, control_type: str
+) -> dict:
+    if not automation_id:
+        return {}
+    matches = [
+        record
+        for record in records
+        if record.get("automation_id") == automation_id
+        and record.get("control_type") == control_type
+    ]
+    return matches[0] if len(matches) == 1 else {}
 
 
 def _relative_rect(control_rect: dict, window_rect: dict) -> dict:
@@ -1174,7 +1323,7 @@ def controls_from_visual_targets(
     controls = []
     semantics = {}
     failures = []
-    seen = set()
+    seen: dict[str, int] = {}
     for target in targets[: max(1, max_controls)]:
         control = control_from_visual_target(window, window_rect, target)
         if control is None:
@@ -1182,6 +1331,7 @@ def controls_from_visual_targets(
                 {
                     "visual_target": target.get("semantic_name") or target.get("id"),
                     "error": "no UIA control at visual target",
+                    "observation": target,
                 }
             )
             continue
@@ -1193,15 +1343,25 @@ def controls_from_visual_targets(
                 {
                     "visual_target": target.get("semantic_name") or target.get("id"),
                     "error": f"XPath failed: {error}",
+                    "observation": target,
                 }
             )
             continue
         if key in seen:
+            index = seen[key]
+            primary = semantics[index]
+            components = list(primary.get("visual_components", []))
+            if target.get("actions") and not primary.get("actions"):
+                components.append(primary)
+                semantics[index] = {**target, "visual_components": components}
+            else:
+                components.append(target)
+                primary["visual_components"] = components
             continue
-        seen.add(key)
         index = len(controls) + 1
+        seen[key] = index
         controls.append((control, max(0, len(xpath) - 1)))
-        semantics[index] = target
+        semantics[index] = {**target, "visual_components": []}
     return controls, semantics, failures
 
 
@@ -1354,6 +1514,7 @@ def scan_window(
                     "is_keyboard_focusable": bool(
                         getattr(control, "IsKeyboardFocusable", False)
                     ),
+                    "is_enabled": bool(getattr(control, "IsEnabled", True)),
                     "region_id": _region_for_control(
                         control_rect,
                         window_rect,
@@ -1399,7 +1560,7 @@ def scan_window(
             in_bounds += 1
             control_rect = _clip_rect(control_rect, window_rect)
             xpath = get_control_xpath(control)
-            location = location_from_xpath(xpath)
+            location = stable_location(location_from_xpath(xpath))
             control_type = (getattr(control, "ControlTypeName", "") or "Control")
             region_id = _region_for_control(control_rect, window_rect, segmentation["regions"])
             supported_actions = _control_actions(
@@ -1414,15 +1575,23 @@ def scan_window(
             identity = (
                 app_id,
                 page_id,
-                xpath,
+                location["Xpath"],
                 control_type,
                 getattr(control, "AutomationId", ""),
-                getattr(control, "Name", ""),
+                "" if getattr(control, "AutomationId", "") else getattr(control, "Name", ""),
             )
             control_id = knowledge.stable_id("control", *identity)
-            observed_ids.add(control_id)
             semantic = semantics.get(index, {})
             previous = previous_by_id.get(control_id, {})
+            if not previous:
+                previous = _previous_control_by_unique_automation_id(
+                    previous_page_records,
+                    str(getattr(control, "AutomationId", "") or ""),
+                    control_type,
+                )
+                if previous:
+                    control_id = previous["id"]
+            observed_ids.add(control_id)
             if previous.get("semantic_source") == "manual":
                 semantic = {
                     "semantic_name": previous.get("semantic_name", ""),
@@ -1437,6 +1606,14 @@ def scan_window(
                     "evidence": previous.get("semantic_evidence", ["human teaching"]),
                     "ambiguity": "",
                     "source": "manual",
+                    "entity_type": previous.get("entity_type", "ui-element"),
+                    "observed_value": previous.get("observed_value", ""),
+                    "dynamic_context": previous.get("dynamic_context", False),
+                    "current_state": previous.get("current_state", "unknown"),
+                    "state_reason": previous.get("state_reason", ""),
+                    "enabling_condition": previous.get("enabling_condition", ""),
+                    "relationships": previous.get("relationships", []),
+                    "visual_components": previous.get("visual_components", []),
                 }
             semantic_name = semantic.get("semantic_name") or _control_semantic_name(control, index)
             intent = semantic.get("intent") or knowledge.slugify(semantic_name, control_id)
@@ -1560,6 +1737,22 @@ def scan_window(
                 "semantic_source": semantic.get("source", "uia-metadata"),
                 "semantic_evidence": semantic.get("evidence", []),
                 "semantic_ambiguity": semantic.get("ambiguity", ""),
+                "entity_type": semantic.get("entity_type", "ui-element"),
+                "observed_value": semantic.get("observed_value", ""),
+                "dynamic_context": bool(semantic.get("dynamic_context", False)),
+                "current_state": (
+                    "disabled"
+                    if not bool(getattr(control, "IsEnabled", True))
+                    else semantic.get("current_state", "enabled")
+                ),
+                "state_reason": semantic.get("state_reason", ""),
+                "enabling_condition": semantic.get("enabling_condition", ""),
+                "relationships": semantic.get("relationships", []),
+                "visual_components": [
+                    _visual_component(item, window_rect)
+                    for item in semantic.get("visual_components", [])
+                    if isinstance(item, dict)
+                ],
                 "aliases": semantic.get("aliases", []),
                 "risk": semantic.get("risk", "unknown"),
                 "requires_confirmation": bool(semantic.get("requires_confirmation", False)),
@@ -1576,6 +1769,7 @@ def scan_window(
                 "is_keyboard_focusable": bool(
                     getattr(control, "IsKeyboardFocusable", False)
                 ),
+                "is_enabled_at_scan": bool(getattr(control, "IsEnabled", True)),
                 "depth": depth,
                 "normalized_rect": knowledge.normalized_rect(control_rect, window_rect),
                 "geometry_role": "visual-hint-only",
@@ -1624,7 +1818,105 @@ def scan_window(
             counts["suspect"] += 1
             failures.append({"index": index, "error": f"{type(error).__name__}: {error}"})
 
-    if controls and saved_current == 0:
+    visual_observations = 0
+    for failure in visual_failures:
+        target = failure.get("observation")
+        if not isinstance(target, dict) or not isinstance(target.get("relative_rect"), dict):
+            continue
+        rectangle = target["relative_rect"]
+        semantic_name = target.get("semantic_name") or "Visual element"
+        intent = target.get("intent") or knowledge.slugify(semantic_name, "visual-element")
+        region_id = target.get("region_id", "unassigned")
+        control_id = knowledge.stable_id(
+            "visual",
+            app_id,
+            page_id,
+            region_id,
+            intent,
+            target.get("observed_value", ""),
+        )
+        observed_ids.add(control_id)
+        crop = screenshot.crop(
+            (
+                rectangle["left"],
+                rectangle["top"],
+                rectangle["right"],
+                rectangle["bottom"],
+            )
+        )
+        previous = previous_by_id.get(control_id, {})
+        image_path, image_variants, image_sha256 = _save_control_images(
+            directory, control_id, crop, previous
+        )
+        confidence = float(target.get("confidence", 0.0))
+        semantic_status = (
+            "verified" if confidence >= SEMANTIC_CONFIDENCE_THRESHOLD else "uncertain"
+        )
+        knowledge.save_control(
+            directory,
+            {
+                "id": control_id,
+                "app_id": app_id,
+                "app_name": actual_name,
+                "page_id": page_id,
+                "region_id": region_id,
+                "semantic_name": semantic_name,
+                "intent": intent,
+                "description": target.get("description", ""),
+                "semantic_role": target.get("role", "visual-entity"),
+                "semantic_confidence": confidence,
+                "semantic_status": semantic_status,
+                "semantic_source": target.get("source", "ai-vision-target"),
+                "semantic_evidence": target.get("evidence", []),
+                "semantic_ambiguity": target.get("ambiguity", ""),
+                "aliases": target.get("aliases", []),
+                **_semantic_context(target),
+                "risk": target.get("risk", "unknown"),
+                "requires_confirmation": False,
+                "command": "",
+                "name": "",
+                "class_name": "",
+                "control_type": "VisualElement",
+                "automation_id": "",
+                "depth": 0,
+                "normalized_rect": knowledge.normalized_rect(
+                    rectangle, window_rect, relative=True
+                ),
+                "geometry_role": "visual-hint-only",
+                "location": {},
+                "actions": [],
+                "supported_actions": [],
+                "is_key": True,
+                "status": "observed",
+                "image": str(image_path.relative_to(directory)).replace("\\", "/"),
+                "image_variants": image_variants,
+                "image_sha256": image_sha256,
+                "verification": {
+                    "location": "not-available",
+                    "image": "observed",
+                    "detail": failure.get("error", "visual-only observation"),
+                    "verified_at": knowledge.utc_now(),
+                },
+                "function_verification": {
+                    "status": "not-applicable",
+                    "method": "visual-observation",
+                    "executed": False,
+                    "verified_at": knowledge.utc_now(),
+                },
+                "model": model,
+                "tags": ["visual-only", region_id, intent],
+                "notes": "Visual entity retained even though no distinct UIA node resolved.",
+                "scan_id": scan_id,
+                "scan_strategy": effective_strategy,
+            },
+        )
+        counts["observed"] += 1
+        semantic_counts[semantic_status] += 1
+        key_controls += 1
+        saved_current += 1
+        visual_observations += 1
+
+    if (controls or visual_observations) and saved_current == 0:
         raise RuntimeError(
             "UIA returned controls but none remained inside the refreshed window bounds; "
             "the window likely moved or changed during scanning"
@@ -1694,6 +1986,7 @@ def scan_window(
         "regions": len(segmentation["regions"]),
         "strategy": effective_strategy,
         "visual_targets": len(visual_targets),
+        "visual_only_observations": visual_observations,
         "uia_controls_seen": len(controls),
         "controls_in_bounds": in_bounds,
         "controls_saved_this_scan": saved_current,

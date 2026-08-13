@@ -7,7 +7,12 @@ from types import SimpleNamespace
 
 from easy_uiauto import utils
 from easy_uiauto.mcp import server
-from easy_uiauto.mcp.protocol import build_location, location_from_xpath, normalize_location
+from easy_uiauto.mcp.protocol import (
+    build_location,
+    location_from_xpath,
+    normalize_location,
+    stable_location,
+)
 
 XPATH = [
     {
@@ -61,6 +66,16 @@ def test_normalize_location_accepts_recorded_action_wrapper() -> None:
     action = {"TEST_ID": "1", "ACTION": "点击", "LOCATION": location}
 
     assert normalize_location(action) == location
+
+
+def test_stable_location_uses_automation_id_instead_of_dynamic_name() -> None:
+    location = stable_location(location_from_xpath(XPATH))
+
+    assert location["Name"] == ""
+    assert "Name" not in location["Xpath"][-1]
+    assert location["AutomationId"] == "saveButton"
+    assert location["Xpath"][-1]["AutomationId"] == "saveButton"
+    assert location["Xpath"][0]["Name"] == "Example"
 
 
 def test_normalize_location_accepts_vector_record_without_losing_indexes() -> None:

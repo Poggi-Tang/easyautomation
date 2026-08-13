@@ -5,10 +5,12 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-from time import perf_counter
+from time import perf_counter, sleep
 from urllib import request as urlrequest
+from uuid import uuid4
 
 import pyautogui
+import pyperclip
 
 from . import configuration, knowledge, visualization
 from .scanner import (
@@ -261,13 +263,145 @@ def _locate_record_by_vision(record: dict, screenshot, window_rect: dict) -> dic
     }
 
 
+def _read_control_text(control) -> tuple[bool, str]:
+    if control is None:
+        return False, ""
+    readers = (
+        lambda: control.GetValuePattern().Value,
+        lambda: control.GetLegacyIAccessiblePattern().Value,
+        lambda: control.GetTextPattern().DocumentRange.GetText(-1),
+    )
+    for reader in readers:
+        try:
+            value = reader()
+        except Exception:
+            continue
+        if value is not None:
+            return True, str(value)
+    return False, ""
+
+
+def _capture_action_image(rectangle: dict):
+    from PIL import ImageGrab
+
+    bounds = (
+        rectangle["left"],
+        rectangle["top"],
+        rectangle["left"] + rectangle["width"],
+        rectangle["top"] + rectangle["height"],
+    )
+    try:
+        return ImageGrab.grab(bbox=bounds, all_screens=True)
+    except Exception:
+        return pyautogui.screenshot(
+            region=(
+                rectangle["left"],
+                rectangle["top"],
+                rectangle["width"],
+                rectangle["height"],
+            )
+        )
+
+
+def _visual_change_ratio(before, after) -> float:
+    from PIL import ImageChops
+
+    if before.size != after.size:
+        return 1.0
+    difference = ImageChops.difference(before.convert("RGB"), after.convert("RGB")).convert("L")
+    changed = difference.point(lambda value: 255 if value > 12 else 0)
+    histogram = changed.histogram()
+    pixels = max(1, before.width * before.height)
+    return float(histogram[255]) / pixels
+
+
+def _text_write_evidence(control, expected: str, before, after) -> dict:
+    readable, value = _read_control_text(control)
+    normalized_value = value.replace("\r\n", "\n")
+    normalized_expected = expected.replace("\r\n", "\n")
+    if readable and normalized_value == normalized_expected:
+        return {
+            "verified": True,
+            "evidence": "accessible-value",
+            "observed_value": value,
+            "visual_change_ratio": 0.0,
+        }
+    ratio = _visual_change_ratio(before, after)
+    return {
+        "verified": False,
+        "evidence": "visual-change-only" if ratio >= 0.0005 else "no-observable-change",
+        "observed_value": value if readable else None,
+        "visual_change_ratio": round(ratio, 6),
+    }
+
+
+def _paste_text_with_clipboard(text: str, control, rectangle: dict, fast: bool) -> dict:
+    if control is not None:
+        if fast:
+            control.Click(simulateMove=False, waitTime=0)
+        else:
+            control.Click()
+    else:
+        pyautogui.click(
+            rectangle["left"] + rectangle["width"] // 2,
+            rectangle["top"] + rectangle["height"] // 2,
+        )
+    pyautogui.hotkey("ctrl", "a")
+    sleep(0.05)
+    before = _capture_action_image(rectangle)
+    try:
+        previous_clipboard = pyperclip.paste()
+    except Exception:
+        previous_clipboard = None
+    try:
+        pyperclip.copy(text)
+        pyautogui.hotkey("ctrl", "v")
+        sleep(0.12)
+        after = _capture_action_image(rectangle)
+        evidence = _text_write_evidence(control, text, before, after)
+        if not evidence["verified"]:
+            sentinel = f"__easy_uiauto_verify_{uuid4().hex}__"
+            pyperclip.copy(sentinel)
+            pyautogui.hotkey("ctrl", "a")
+            pyautogui.hotkey("ctrl", "c")
+            sleep(0.05)
+            try:
+                copied_back = pyperclip.paste()
+            except Exception:
+                copied_back = sentinel
+            pyautogui.press("end")
+            if copied_back != sentinel and copied_back.replace("\r\n", "\n") == text.replace(
+                "\r\n", "\n"
+            ):
+                evidence.update(
+                    {
+                        "verified": True,
+                        "evidence": "clipboard-readback",
+                        "observed_value": copied_back,
+                    }
+                )
+    finally:
+        if previous_clipboard is not None:
+            sleep(0.05)
+            try:
+                pyperclip.copy(previous_clipboard)
+            except Exception:
+                pass
+    if not evidence["verified"]:
+        raise RuntimeError(
+            "Text paste could not be read back from the target control; "
+            "the command was not recorded as successful"
+        )
+    return {"method": "clipboard-paste", **evidence}
+
+
 def _perform_action(
     action: str,
     text: str,
     control,
     rectangle: dict,
     fast: bool = False,
-) -> None:
+) -> dict:
     if action == "click":
         if control is not None:
             if fast:
@@ -279,53 +413,52 @@ def _perform_action(
                 rectangle["left"] + rectangle["width"] // 2,
                 rectangle["top"] + rectangle["height"] // 2,
             )
-    elif action == "double-click":
+        return {"method": "uia-click" if control is not None else "coordinate-click"}
+    if action == "double-click":
         pyautogui.doubleClick(
             rectangle["left"] + rectangle["width"] // 2,
             rectangle["top"] + rectangle["height"] // 2,
         )
-    elif action == "right-click":
+        return {"method": "coordinate-double-click"}
+    if action == "right-click":
         pyautogui.rightClick(
             rectangle["left"] + rectangle["width"] // 2,
             rectangle["top"] + rectangle["height"] // 2,
         )
-    elif action == "hover":
+        return {"method": "coordinate-right-click"}
+    if action == "hover":
         pyautogui.moveTo(
             rectangle["left"] + rectangle["width"] // 2,
             rectangle["top"] + rectangle["height"] // 2,
             duration=0 if fast else 0.1,
         )
-    elif action == "set-text":
+        return {"method": "coordinate-hover"}
+    if action == "set-text":
         if not text:
             raise ValueError("text is required for set-text commands")
-        try:
-            if control is None:
-                raise RuntimeError("set-text resolved by image")
-            control.GetValuePattern().SetValue(text)
-        except Exception:
-            if control is not None:
-                if fast:
-                    control.Click(simulateMove=False, waitTime=0)
-                else:
-                    control.Click()
-            else:
-                pyautogui.click(
-                    rectangle["left"] + rectangle["width"] // 2,
-                    rectangle["top"] + rectangle["height"] // 2,
-                )
-            pyautogui.hotkey("ctrl", "a")
-            pyautogui.write(text)
-    else:
-        raise ValueError(f"Unsupported UI command action: {action}")
+        if control is not None:
+            before = _capture_action_image(rectangle)
+            try:
+                control.GetValuePattern().SetValue(text)
+                sleep(0.1)
+                after = _capture_action_image(rectangle)
+                evidence = _text_write_evidence(control, text, before, after)
+                if evidence["verified"]:
+                    return {"method": "uia-set-value", **evidence}
+            except Exception:
+                pass
+        return _paste_text_with_clipboard(text, control, rectangle, fast)
+    raise ValueError(f"Unsupported UI command action: {action}")
 
 
-def _record_execution(record: dict, count: int = 1) -> None:
+def _record_execution(record: dict, count: int = 1, evidence: dict | None = None) -> None:
     verification = record.get("function_verification", {})
     record["function_verification"] = {
         **verification,
         "executed": True,
         "execution_count": int(verification.get("execution_count", 0)) + count,
         "last_executed_at": knowledge.utc_now(),
+        "last_action_verification": evidence or {},
     }
 
 
@@ -393,8 +526,13 @@ def execute(
             highlight_duration_ms,
             highlight_wait_ms,
         )
-    _perform_action(action, text, control, rectangle)
-    _record_execution(record)
+    if control is not None and action != "hover" and not bool(
+        getattr(control, "IsEnabled", True)
+    ):
+        condition = record.get("enabling_condition") or "the control must become enabled"
+        raise RuntimeError(f"Control is currently disabled; required condition: {condition}")
+    action_verification = _perform_action(action, text, control, rectangle)
+    _record_execution(record, evidence=action_verification)
     knowledge.save_control(directory, record)
     knowledge.rebuild_index(directory)
 
@@ -407,6 +545,7 @@ def execute(
         "resolved_by": resolved_by,
         "location": record["location"],
         "overlay": overlay,
+        "action_verification": action_verification,
     }
 
 
@@ -546,7 +685,18 @@ def execute_many(
     for item in prepared:
         control, similarity, rectangle, resolved_by = resolved[item["control_id"]]
         try:
-            _perform_action(item["action"], item["text"], control, rectangle, fast=True)
+            if control is not None and item["action"] != "hover" and not bool(
+                getattr(control, "IsEnabled", True)
+            ):
+                condition = item["record"].get("enabling_condition") or (
+                    "the control must become enabled"
+                )
+                raise RuntimeError(
+                    f"Control is currently disabled; required condition: {condition}"
+                )
+            action_verification = _perform_action(
+                item["action"], item["text"], control, rectangle, fast=True
+            )
         except Exception as error:
             failed_step = {
                 "index": item["index"],
@@ -565,12 +715,21 @@ def execute_many(
                 "action": item["action"],
                 "image_similarity": similarity,
                 "resolved_by": resolved_by,
+                "action_verification": action_verification,
             }
         )
 
     for control_id, count in execution_counts.items():
         record = records[control_id]
-        _record_execution(record, count)
+        evidence = next(
+            (
+                item["action_verification"]
+                for item in reversed(results)
+                if item["control_id"] == control_id
+            ),
+            {},
+        )
+        _record_execution(record, count, evidence)
         knowledge.save_control(directory, record)
     if execution_counts:
         knowledge.rebuild_index(directory)

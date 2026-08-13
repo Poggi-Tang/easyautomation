@@ -5,7 +5,7 @@ from __future__ import annotations
 from copy import deepcopy
 from types import SimpleNamespace
 
-from PIL import Image
+from PIL import Image, ImageDraw
 
 from easy_uiauto.mcp import knowledge, ui_cli
 
@@ -126,6 +126,146 @@ def test_perform_action_supports_right_click_and_hover(monkeypatch) -> None:
     ui_cli._perform_action("hover", "", None, rectangle, fast=True)
 
     assert calls == [("right-click", 70, 60), ("hover", 70, 60, 0)]
+
+
+def test_set_text_verifies_uia_value_without_using_clipboard(monkeypatch) -> None:
+    pattern = SimpleNamespace(Value="")
+
+    def set_value(value):
+        pattern.Value = value
+
+    pattern.SetValue = set_value
+    control = SimpleNamespace(GetValuePattern=lambda: pattern)
+    monkeypatch.setattr(
+        ui_cli,
+        "_capture_action_image",
+        lambda _rectangle: Image.new("RGB", (100, 30), "white"),
+    )
+    monkeypatch.setattr(
+        ui_cli,
+        "_paste_text_with_clipboard",
+        lambda *_args: (_ for _ in ()).throw(AssertionError("clipboard was not expected")),
+    )
+
+    result = ui_cli._perform_action(
+        "set-text",
+        "你好",
+        control,
+        {"left": 0, "top": 0, "width": 100, "height": 30},
+    )
+
+    assert result["method"] == "uia-set-value"
+    assert result["verified"] is True
+    assert result["evidence"] == "accessible-value"
+
+
+def test_set_text_falls_back_to_verified_unicode_clipboard_paste(monkeypatch) -> None:
+    pattern = SimpleNamespace(Value="", SetValue=lambda _value: None)
+    control = SimpleNamespace(
+        GetValuePattern=lambda: pattern,
+        Click=lambda **_kwargs: None,
+    )
+    unchanged = Image.new("RGB", (100, 30), "white")
+    changed = unchanged.copy()
+    ImageDraw.Draw(changed).rectangle((5, 5, 40, 20), fill="black")
+    images = iter((unchanged, unchanged, unchanged, changed))
+    monkeypatch.setattr(ui_cli, "_capture_action_image", lambda _rectangle: next(images))
+    hotkeys = []
+    monkeypatch.setattr(ui_cli.pyautogui, "hotkey", lambda *keys: hotkeys.append(keys))
+    monkeypatch.setattr(ui_cli.pyautogui, "press", lambda key: hotkeys.append((key,)))
+    copied = []
+    clipboard = ["original clipboard"]
+    monkeypatch.setattr(ui_cli.pyperclip, "paste", lambda: clipboard[0])
+
+    def copy(value):
+        copied.append(value)
+        clipboard[0] = value
+
+    def hotkey(*keys):
+        hotkeys.append(keys)
+        if keys == ("ctrl", "c"):
+            clipboard[0] = "你好"
+
+    monkeypatch.setattr(ui_cli.pyautogui, "hotkey", hotkey)
+    monkeypatch.setattr(ui_cli.pyperclip, "copy", copy)
+    monkeypatch.setattr(ui_cli, "sleep", lambda _seconds: None)
+
+    result = ui_cli._perform_action(
+        "set-text",
+        "你好",
+        control,
+        {"left": 0, "top": 0, "width": 100, "height": 30},
+    )
+
+    assert result["method"] == "clipboard-paste"
+    assert result["verified"] is True
+    assert result["evidence"] == "clipboard-readback"
+    assert hotkeys == [
+        ("ctrl", "a"),
+        ("ctrl", "v"),
+        ("ctrl", "a"),
+        ("ctrl", "c"),
+        ("end",),
+    ]
+    assert copied[0] == "你好"
+    assert copied[-1] == "original clipboard"
+
+
+def test_set_text_rejects_clipboard_paste_without_observable_effect(monkeypatch) -> None:
+    control = SimpleNamespace(
+        GetValuePattern=lambda: SimpleNamespace(Value="", SetValue=lambda _value: None),
+        Click=lambda **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        ui_cli,
+        "_capture_action_image",
+        lambda _rectangle: Image.new("RGB", (100, 30), "white"),
+    )
+    monkeypatch.setattr(ui_cli.pyautogui, "hotkey", lambda *_keys: None)
+    monkeypatch.setattr(ui_cli.pyautogui, "press", lambda _key: None)
+    monkeypatch.setattr(ui_cli.pyperclip, "paste", lambda: "")
+    monkeypatch.setattr(ui_cli.pyperclip, "copy", lambda _value: None)
+    monkeypatch.setattr(ui_cli, "sleep", lambda _seconds: None)
+
+    try:
+        ui_cli._perform_action(
+            "set-text",
+            "你好",
+            control,
+            {"left": 0, "top": 0, "width": 100, "height": 30},
+        )
+    except RuntimeError as error:
+        assert "not recorded as successful" in str(error)
+    else:
+        raise AssertionError("unchanged input was reported as successful")
+
+
+def test_execute_rejects_currently_disabled_control_with_learned_condition(
+    monkeypatch, tmp_path
+) -> None:
+    directory = knowledge.initialize_app("example", "Example", tmp_path)
+    record = _record()
+    record["enabling_condition"] = "Enter non-empty draft text"
+    knowledge.save_control(directory, record)
+    knowledge.rebuild_index(directory)
+    control = SimpleNamespace(IsEnabled=False)
+    monkeypatch.setattr(
+        ui_cli,
+        "_resolve_verified_control",
+        lambda *_args: (
+            control,
+            0.95,
+            {"left": 0, "top": 0, "width": 100, "height": 30},
+            "automation-id",
+        ),
+    )
+
+    try:
+        ui_cli.execute(directory, "main.toolbar.save.click")
+    except RuntimeError as error:
+        assert "Enter non-empty draft text" in str(error)
+    else:
+        raise AssertionError("disabled control was clicked")
 
 
 def test_resolution_uses_ocr_after_location_and_templates_fail(monkeypatch, tmp_path) -> None:

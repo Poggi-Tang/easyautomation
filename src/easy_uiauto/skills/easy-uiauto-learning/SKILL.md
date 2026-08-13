@@ -28,6 +28,10 @@ Build reusable UI knowledge through the `easy_uiauto` MCP tools.
    `knowledge_controls_total`, `commands`, `status_counts`, `semantic_counts`,
    `annotated_controls`, `annotated_page_image`, `command_items`, `quarantine_summary`,
    and `stage_timings`. These fields are sufficient to finish a basic learning request.
+   Also inspect key records for `entity_type`, `observed_value`, `dynamic_context`,
+   `current_state`, `state_reason`, `enabling_condition`, `relationships`, and
+   `visual_components`. Basic learning must understand visible UI meaning and state; these
+   fields do not require interactive deep exploration.
 7. Treat the scan as incomplete when `truncated` is true. Rescan with a larger limit or split the work across pages.
 8. Report the returned `command_items` and quarantine summary. Do not call
    `list_ui_commands` or `search_ui_knowledge` again after a successful basic scan unless
@@ -59,6 +63,12 @@ Build reusable UI knowledge through the `easy_uiauto` MCP tools.
 - Keep page, region, and semantic names generic and application-derived. Do not inject unrelated product knowledge.
 - Keep locator, image, semantic, and function verification separate. An image match does not
   prove a control's purpose, and an AI inference does not prove the operation was executed.
+- Keep stable function separate from volatile values. Contact names, document names, selected
+  rows, and current results belong in `observed_value` with `dynamic_context=true`; generic
+  inputs and actions must not be renamed for whichever item happened to be visible during scan.
+- Retain meaningful visual-only entities such as avatars, names, message areas, badges, and
+  status fields even when Windows UIA exposes no distinct node. They remain observations and
+  never become executable commands without a verified locator.
 - Never probe sending, publishing, deleting, purchasing, closing without saving, or other
   externally visible/destructive controls during unattended learning.
 - Preserve quarantined records as diagnostics. Do not delete them merely to improve pass rates.
@@ -73,6 +83,8 @@ Build reusable UI knowledge through the `easy_uiauto` MCP tools.
 - No scan is silently truncated.
 - Verified commands are listed.
 - Every actionable control has a high-confidence contextual meaning or a reported quarantine reason.
+- Disabled actions include a grounded state reason and enabling condition when visible context
+  supports one, such as a Send button disabled because the message draft is empty.
 - Explicitly requested command effects have a before/after record and an evidence-based success condition.
 - Quarantined controls and their reasons are reported.
 - The vault path, source page screenshot, and numbered annotated page screenshot are returned.

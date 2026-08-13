@@ -240,6 +240,12 @@ def _control_body(record: dict) -> str:
         "## Meaning\n\n"
         f"{record.get('description') or 'No semantic description.'}\n\n"
         f"Intent: `{record.get('intent', 'unknown')}`  \n"
+        f"Entity: `{record.get('entity_type', 'ui-element')}`  \n"
+        f"Observed value: `{record.get('observed_value', '')}`  \n"
+        f"Dynamic context: `{record.get('dynamic_context', False)}`  \n"
+        f"Current state: `{record.get('current_state', 'unknown')}`  \n"
+        f"State reason: {record.get('state_reason') or 'Not established.'}  \n"
+        f"Enabling condition: {record.get('enabling_condition') or 'Not applicable.'}  \n"
         f"Confidence: `{record.get('semantic_confidence', 0)}`  \n"
         f"Source: `{record.get('semantic_source', 'unknown')}`  \n"
         f"Risk: `{record.get('risk', 'unknown')}`  \n"
@@ -580,6 +586,11 @@ def _search_text(record: dict) -> str:
         record.get("intent", ""),
         record.get("description", ""),
         record.get("semantic_role", ""),
+        record.get("entity_type", ""),
+        record.get("observed_value", ""),
+        record.get("current_state", ""),
+        record.get("state_reason", ""),
+        record.get("enabling_condition", ""),
         record.get("risk", ""),
         record.get("semantic_ambiguity", ""),
         record.get("name", ""),
@@ -592,6 +603,8 @@ def _search_text(record: dict) -> str:
         " ".join(record.get("actions", [])),
         " ".join(record.get("aliases", [])),
         " ".join(record.get("semantic_evidence", [])),
+        json.dumps(record.get("relationships", []), ensure_ascii=False),
+        json.dumps(record.get("visual_components", []), ensure_ascii=False),
     ]
     return " ".join(str(value) for value in values).casefold()
 
@@ -638,6 +651,13 @@ def available_commands(directory: Path, page_id: str = "") -> list[dict]:
                     "semantic_name": control.get("semantic_name") or control.get("name"),
                     "intent": control.get("intent"),
                     "description": control.get("description", ""),
+                    "entity_type": control.get("entity_type", "ui-element"),
+                    "observed_value": control.get("observed_value", ""),
+                    "dynamic_context": control.get("dynamic_context", False),
+                    "current_state": control.get("current_state", "unknown"),
+                    "state_reason": control.get("state_reason", ""),
+                    "enabling_condition": control.get("enabling_condition", ""),
+                    "relationships": control.get("relationships", []),
                     "aliases": control.get("aliases", []),
                     "semantic_confidence": control.get("semantic_confidence", 0),
                     "semantic_source": control.get("semantic_source", "unknown"),

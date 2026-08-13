@@ -37,6 +37,9 @@ and currently released as a `0.x` project.
 - 🔎 **Visual-first learning**: identify the important regions and controls in one
   screenshot, then map them back to stable local UIA controls without walking the
   whole tree by default.
+- 🧠 **State-aware semantics**: distinguish stable functions from dynamic values,
+  retain names and avatars, connect related controls, and explain visible states such
+  as a Send button disabled while its message input is empty.
 - 🧭 **Semantic UI CLI**: turn verified controls into searchable application
   commands instead of rediscovering coordinates for every task.
 - 🖼️ **Control overlays**: number every learned or executable control in one
@@ -48,8 +51,10 @@ and currently released as a `0.x` project.
   and version control.
 - 📐 **Stable records**: persist structured `LOCATION` identities and normalized
   visual hints, never process IDs, window handles, or absolute desktop rectangles.
-- 🛟 **Layered lookup**: `LOCATION` first, then saved image states, local OCR, and
-  opt-in remote vision as the final fallback.
+- 🛟 **Layered lookup**: unique `AutomationId`, contextual XPath, saved image states,
+  local OCR, then opt-in remote vision as the final fallback.
+- ⚡ **Fast anchors**: use a unique window-scoped `AutomationId` before XPath, while
+  keeping hierarchy as the fallback for missing or duplicate IDs.
 
 ## 🚦 Capability Status
 
@@ -265,12 +270,17 @@ easy_uiauto_ui learn-effect <app-id> <command> --recover
 easy_uiauto_ui teach <app-id> <control-id> "Meaning" intent "Description"
 ```
 
-Runtime lookup follows `LOCATION` → saved image states → local OCR → opt-in
+Runtime lookup follows unique `AutomationId` → contextual XPath → saved image states → local OCR → opt-in
 remote vision. Enable the last step with `--allow-vision-fallback` or
 `allow_vision_fallback=true`. Stale, missing, or ambiguous controls are moved to
 quarantine instead of being clicked. Single and batch commands preview their
 resolved targets in red by default; pass `--no-highlight` or `highlight=false`
 to remove the roughly 100 ms visual-preview wait.
+
+`set-text` first verifies UIA value assignment, then falls back to clipboard paste
+for Unicode text. It reports success only after an accessible value or exact clipboard
+readback confirms the write; a local image change is diagnostic evidence only. The user's
+previous text clipboard value is restored after pasting.
 
 Use a batch only for commands on the same stable page. Split the sequence after
 navigation. Commands with external or destructive effects require `--confirm`
@@ -320,7 +330,8 @@ window handles when an older vault index is rebuilt.
 
 The same workflow is exposed through `get_ui_learning_readiness`,
 `get_ui_learning_status`, `scan_window_knowledge`, `show_ui_controls`,
-`list_ui_knowledge_apps`, `search_ui_knowledge`, `list_ui_commands`,
+`list_ui_knowledge_apps`, `search_ui_knowledge`, `search_ui_knowledge_batch`,
+`list_ui_commands`,
 `run_ui_command`, `run_ui_commands`, `learn_ui_command_effect`,
 `explore_ui_workflows`, `list_ui_interactions`, `teach_ui_control`, and
 `rebuild_ui_knowledge_index`.

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from easy_uiauto.mcp import knowledge
+import json
+
+from easy_uiauto.mcp import knowledge, server
 
 
 def _control_record(control_id: str = "control-1", status: str = "verified") -> dict:
@@ -60,6 +62,41 @@ def test_only_verified_controls_produce_ui_commands(tmp_path) -> None:
 
     assert [item["command"] for item in commands] == ["main.toolbar.save.click"]
     assert (directory / "quarantine" / "bad.md").is_file()
+
+
+def test_batch_search_returns_multiple_intents_without_duplicate_controls(
+    monkeypatch, tmp_path
+) -> None:
+    directory = knowledge.initialize_app("example", "Example", tmp_path)
+    input_record = _control_record("input")
+    input_record.update(
+        {
+            "semantic_name": "Current conversation message input",
+            "intent": "compose-message",
+            "aliases": ["message input"],
+        }
+    )
+    send_record = _control_record("send")
+    send_record.update(
+        {
+            "semantic_name": "Send message",
+            "intent": "send-message",
+            "aliases": ["send"],
+        }
+    )
+    knowledge.save_control(directory, input_record)
+    knowledge.save_control(directory, send_record)
+    knowledge.rebuild_index(directory)
+    monkeypatch.setattr(knowledge, "app_dir", lambda _app_id: directory)
+
+    result = server.search_ui_knowledge_batch(
+        "example", ["message", "send", "message"], limit_per_query=10
+    )
+    parsed = json.loads(result)
+
+    assert parsed["queries"] == ["message", "send"]
+    assert set(parsed["matches"]) == {"message", "send"}
+    assert {item["id"] for item in parsed["controls"]} == {"input", "send"}
 
 
 def test_control_status_move_removes_old_markdown(tmp_path) -> None:

@@ -25,7 +25,7 @@ def _run_module(module: str, option: str) -> str:
 
 def test_mcp_server_version() -> None:
     output = _run_module("easy_uiauto.mcp.server", "--version")
-    assert output.strip() == "easy_uiauto 0.6.0"
+    assert output.strip() == "easy_uiauto 0.6.1"
 
 
 def test_mcp_service_help() -> None:
@@ -56,7 +56,7 @@ def test_mcp_server_help_explains_core_workflows() -> None:
     assert "run_record(write_file=True)" in output
     assert "from easy_uiauto.record import run_record" in output
     assert "run_action(action_json='<recorded action JSON>')" in output
-    assert "UIA LOCATION -> multi-state image templates -> OCR" in output
+    assert "unique AutomationId -> contextual XPath -> image templates -> OCR" in output
     assert "easy_uiauto_ui learn-effect" in output
     assert "get_ui_learning_readiness" in output
     assert "get_ui_learning_status" in output

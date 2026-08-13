@@ -141,6 +141,65 @@ def test_location_resolution_reuses_shared_xpath_prefixes() -> None:
     assert calls["window"] == 1
 
 
+def test_location_uses_unique_automation_id_before_xpath(monkeypatch) -> None:
+    class SearchResult:
+        def __init__(self, found_index: int) -> None:
+            self.found_index = found_index
+
+        def Exists(self, *_args) -> bool:
+            return self.found_index == 1
+
+    def find_control(**kwargs):
+        return SearchResult(kwargs["foundIndex"])
+
+    monkeypatch.setattr(scanner.uiautomation, "Control", find_control)
+    window = SimpleNamespace(
+        GetChildren=lambda: (_ for _ in ()).throw(AssertionError("XPath was traversed"))
+    )
+    location = {
+        "WindowName": "Example",
+        "AutomationId": "chat_input_field",
+        "ControlType": "EditControl",
+        "Xpath": [
+            {"ControlType": "WindowControl", "Name": "Example"},
+            {
+                "ControlType": "EditControl",
+                "Name": "Old contact",
+                "AutomationId": "chat_input_field",
+            },
+        ],
+    }
+
+    assert scanner.resolve_location(location, window=window).found_index == 1
+
+
+def test_disabled_control_keeps_potential_actions() -> None:
+    assert scanner._control_actions("ButtonControl", False) == ["click", "hover"]
+
+
+def test_previous_control_identity_reuses_unique_automation_id() -> None:
+    previous = {
+        "id": "old-control-id",
+        "automation_id": "chat_input_field",
+        "control_type": "EditControl",
+    }
+
+    assert (
+        scanner._previous_control_by_unique_automation_id(
+            [previous], "chat_input_field", "EditControl"
+        )
+        == previous
+    )
+    assert (
+        scanner._previous_control_by_unique_automation_id(
+            [previous, {**previous, "id": "duplicate"}],
+            "chat_input_field",
+            "EditControl",
+        )
+        == {}
+    )
+
+
 def _semantic_result(
     candidates: list[dict],
     confidence: float = 0.96,
@@ -160,6 +219,13 @@ def _semantic_result(
             "evidence": ["Save label", "button in content region"],
             "ambiguity": "" if confidence >= 0.72 else "Icon meaning is unclear.",
             "source": "ai-vision-context",
+            "entity_type": "document-action",
+            "observed_value": "",
+            "dynamic_context": False,
+            "current_state": "enabled",
+            "state_reason": "",
+            "enabling_condition": "",
+            "relationships": [],
         }
         for item in candidates
     }
@@ -241,6 +307,60 @@ def test_visual_target_selects_actionable_ancestor() -> None:
     assert selected is button
 
 
+def test_visual_targets_on_same_uia_control_keep_semantic_components(monkeypatch) -> None:
+    control = FakeControl("圆子", "ListItemControl", (20, 20, 180, 80), automation_id="圆子")
+    window = FakeControl("微信", "WindowControl", (0, 0, 400, 300), [control])
+    targets = [
+        {
+            "id": 1,
+            "semantic_name": "Open conversation",
+            "intent": "open-conversation",
+            "actions": ["click"],
+            "relative_rect": {
+                "left": 20,
+                "top": 20,
+                "right": 180,
+                "bottom": 80,
+                "width": 160,
+                "height": 60,
+            },
+        },
+        {
+            "id": 2,
+            "semantic_name": "Contact avatar",
+            "intent": "identify-contact-avatar",
+            "actions": [],
+            "entity_type": "contact-avatar",
+            "relative_rect": {
+                "left": 25,
+                "top": 25,
+                "right": 65,
+                "bottom": 65,
+                "width": 40,
+                "height": 40,
+            },
+        },
+    ]
+    monkeypatch.setattr(scanner, "control_from_visual_target", lambda *_args: control)
+    monkeypatch.setattr(
+        scanner,
+        "get_control_xpath",
+        lambda _control: [
+            {"ControlType": "WindowControl", "Name": "微信"},
+            {"ControlType": "ListItemControl", "AutomationId": "圆子"},
+        ],
+    )
+
+    controls, semantics, failures = scanner.controls_from_visual_targets(
+        window, scanner._rect(window), targets, 20
+    )
+
+    assert len(controls) == 1
+    assert failures == []
+    assert semantics[1]["intent"] == "open-conversation"
+    assert semantics[1]["visual_components"][0]["entity_type"] == "contact-avatar"
+
+
 def test_segment_validation_keeps_only_valid_key_targets() -> None:
     result = scanner._validate_segments(
         {
@@ -252,6 +372,13 @@ def test_segment_validation_keeps_only_valid_key_targets() -> None:
                     "actions": ["click"],
                     "risk": "state-changing",
                     "confidence": 0.95,
+                    "entity_type": "message-action",
+                    "current_state": "disabled",
+                    "state_reason": "Message draft is empty",
+                    "enabling_condition": "Enter non-empty draft text",
+                    "relationships": [
+                        {"type": "enabled-by", "target_intent": "compose-message"}
+                    ],
                     "left": 10,
                     "top": 20,
                     "width": 80,
@@ -267,6 +394,12 @@ def test_segment_validation_keeps_only_valid_key_targets() -> None:
     assert len(result["controls"]) == 1
     assert result["controls"][0]["intent"] == "save-document"
     assert result["controls"][0]["relative_rect"]["width"] == 80
+    assert result["controls"][0]["entity_type"] == "message-action"
+    assert result["controls"][0]["current_state"] == "disabled"
+    assert result["controls"][0]["enabling_condition"] == "Enter non-empty draft text"
+    assert result["controls"][0]["relationships"] == [
+        {"type": "enabled-by", "target_intent": "compose-message"}
+    ]
 
 
 def test_scan_writes_images_markdown_and_verified_command(monkeypatch, tmp_path) -> None:
@@ -342,6 +475,8 @@ def test_scan_writes_images_markdown_and_verified_command(monkeypatch, tmp_path)
     assert button_record["intent"] == "save-document"
     assert button_record["semantic_confidence"] == 0.96
     assert button_record["function_verification"]["status"] == "inferred"
+    assert button_record["entity_type"] == "document-action"
+    assert button_record["current_state"] == "enabled"
     assert "rect" not in button_record
     assert button_record["normalized_rect"] == {
         "left": 0.1,
@@ -465,6 +600,90 @@ def test_visual_first_scan_skips_full_tree_and_second_ai_request(monkeypatch, tm
     assert result["semantic_controls_analyzed"] == 1
     assert result["controls_retained_unobserved"] == 1
     assert knowledge.find_control_record(directory, "previous-key-control") is not None
+
+
+def test_visual_first_scan_retains_visual_entity_without_distinct_uia_node(
+    monkeypatch, tmp_path
+) -> None:
+    window = FakeControl("Example", "WindowControl", (0, 0, 400, 300))
+    target = {
+        "id": 1,
+        "region_id": "content",
+        "semantic_name": "Current contact avatar",
+        "intent": "identify-current-contact-avatar",
+        "description": "Avatar for the current conversation contact.",
+        "role": "identity",
+        "entity_type": "contact-avatar",
+        "observed_value": "",
+        "dynamic_context": True,
+        "current_state": "visible",
+        "state_reason": "",
+        "enabling_condition": "",
+        "relationships": [
+            {"type": "identifies", "target_entity": "current-conversation-contact"}
+        ],
+        "actions": [],
+        "aliases": ["avatar"],
+        "risk": "safe",
+        "requires_confirmation": False,
+        "confidence": 0.95,
+        "evidence": ["portrait beside conversation title"],
+        "ambiguity": "",
+        "source": "ai-vision-target",
+        "relative_rect": {
+            "left": 20,
+            "top": 20,
+            "right": 70,
+            "bottom": 70,
+            "width": 50,
+            "height": 50,
+        },
+    }
+    monkeypatch.setattr(scanner, "_activate_window", lambda _window: None)
+    monkeypatch.setattr(scanner, "_find_window", lambda _title: window)
+    monkeypatch.setattr(scanner, "_process_name", lambda _pid: "example-app")
+    monkeypatch.setattr(scanner, "_screenshot_window", lambda _rect: _test_screen())
+    monkeypatch.setattr(
+        scanner,
+        "segment_interface",
+        lambda *_args: {
+            "page": {"id": "main", "name": "Main", "description": ""},
+            "regions": scanner._validate_segments({}, 400, 300)["regions"],
+            "controls": [target],
+        },
+    )
+    monkeypatch.setattr(
+        scanner,
+        "controls_from_visual_targets",
+        lambda *_args: (
+            [],
+            {},
+            [
+                {
+                    "visual_target": "Current contact avatar",
+                    "error": "no distinct UIA node",
+                    "observation": target,
+                }
+            ],
+        ),
+    )
+
+    result = scanner.scan_window(
+        "Example",
+        "https://api.example/v1",
+        "secret",
+        "vision-model",
+        "0.6.1",
+        root=tmp_path,
+    )
+
+    directory = knowledge.app_dir("example-app", tmp_path)
+    records = knowledge.search_controls(directory, "contact avatar")
+    assert result["visual_only_observations"] == 1
+    assert records[0]["status"] == "observed"
+    assert records[0]["entity_type"] == "contact-avatar"
+    assert records[0]["dynamic_context"] is True
+    assert records[0]["actions"] == []
 
 
 def test_failed_actionable_control_is_quarantined(monkeypatch, tmp_path) -> None:

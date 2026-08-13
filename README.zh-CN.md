@@ -31,6 +31,8 @@
 - 🔌 **MCP 服务**：在 Codex、Claude Code 或其他 MCP 客户端中调用同一套能力。
 - 🔎 **视觉优先学习**：先从截图中找出关键区域和控件，再映射到本地稳定的
   UIA 控件；默认不遍历完整控件树。
+- 🧠 **状态语义理解**：区分稳定功能和动态值，保留联系人名称、头像等实体，
+  建立控件关系，并解释“消息为空，因此发送按钮禁用”这类可见状态。
 - 🧭 **软件 UI CLI**：把验证通过的控件转换成可搜索的软件命令，执行任务时
   不必重新猜坐标。
 - 🖼️ **控件框选反馈**：使用一个点击穿透覆盖层为整页控件编号，保存页面标注图，
@@ -41,8 +43,10 @@
   Markdown/YAML/PNG，可直接用 Obsidian 或 Git 管理。
 - 📐 **稳定记录**：持久化结构化 `LOCATION` 和窗口内归一化视觉提示，不保存
   PID、窗口句柄或桌面绝对坐标。
-- 🛟 **分层定位兜底**：依次使用 `LOCATION`、多状态控件图、本地 OCR，最后才
-  使用显式开启的远程视觉定位。
+- 🛟 **分层定位兜底**：依次使用唯一 `AutomationId`、上下文 XPath、多状态控件图、
+  本地 OCR，最后才使用显式开启的远程视觉定位。
+- ⚡ **快速定位锚点**：优先使用窗口内唯一的 `AutomationId`，缺失或重复时再
+  使用 XPath 层级消歧。
 
 ## 🚦 能力成熟度
 
@@ -241,11 +245,16 @@ easy_uiauto_ui learn-effect <app-id> <command> --recover
 easy_uiauto_ui teach <app-id> <control-id> "控件含义" intent "功能说明"
 ```
 
-运行时依次使用 `LOCATION` → 多状态控件图 → 本地 OCR → 显式开启的远程视觉。
+运行时依次使用唯一 `AutomationId` → 上下文 XPath → 多状态控件图 → 本地 OCR
+→ 显式开启的远程视觉。
 最后一级需要传入 `--allow-vision-fallback` 或 `allow_vision_fallback=true`。
 控件失效、缺失或匹配不唯一时会进入隔离区，不会继续点击。单条和批量命令默认会用
 红框预览实际解析出的目标；可通过 `--no-highlight` 或 `highlight=false` 关闭约 100 ms
 的可视预览等待。
+
+`set-text` 会先验证 UIA 直接写入；失败时改用支持中文的剪贴板粘贴。只有可访问值
+或从目标输入框精确复制回读确认文本已经写入，命令才会返回成功；控件局部画面变化
+仅作为诊断信息。粘贴后会恢复原文本剪贴板。
 
 批量执行只适用于同一个稳定页面，发生页面跳转后应拆成下一批。涉及外部影响或破坏性的
 命令必须传入 `--confirm` 或 `confirm=true`。
@@ -289,7 +298,8 @@ applications/<app-id>/
 对应 MCP 工具包括 `get_ui_learning_readiness`、`get_ui_learning_status`、
 `scan_window_knowledge`、`show_ui_controls`、
 `list_ui_knowledge_apps`、
-`search_ui_knowledge`、`list_ui_commands`、`run_ui_command`、`run_ui_commands`、
+`search_ui_knowledge`、`search_ui_knowledge_batch`、`list_ui_commands`、
+`run_ui_command`、`run_ui_commands`、
 `learn_ui_command_effect`、`explore_ui_workflows`、`list_ui_interactions`、
 `teach_ui_control` 和 `rebuild_ui_knowledge_index`。
 
