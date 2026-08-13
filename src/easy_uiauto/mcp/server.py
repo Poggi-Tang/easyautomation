@@ -40,6 +40,7 @@ from . import (
     scanner,
     skill_installation,
     ui_cli,
+    visual_segmentation,
     visualization,
 )
 from .protocol import location_from_xpath, normalize_location
@@ -2108,6 +2109,44 @@ def run_actions(
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
+def detect_visual_elements(
+    rect: dict,
+    min_width: int = 6,
+    min_height: int = 6,
+    max_boxes: int = 300,
+    save_annotated: bool = True,
+) -> str:
+    """Detect visual element rectangles inside one UIA control's screen bounds.
+
+    This tool is intended for a coarse UIA Pane, Document, or Custom control whose
+    internally drawn elements have no UIA nodes. Pass either its direct rectangle,
+    a ``{"bounds": ...}`` result from ``find_control`` or
+    ``get_control_at_position``, or a ``{"rect": ...}`` wrapper. The detector
+    captures only that region and returns class-agnostic absolute and normalized
+    rectangles with containment relationships. It does not traverse UIA, call OCR,
+    upload a screenshot, or infer element meaning.
+
+    Args:
+        rect: Screen rectangle or a control result containing ``bounds``/``rect``.
+        min_width: Smallest candidate width in pixels.
+        min_height: Smallest candidate height in pixels.
+        max_boxes: Maximum returned rectangles, up to 2000.
+        save_annotated: Save a numbered local preview image and return its path.
+    """
+    try:
+        result = visual_segmentation.detect_screen_rectangles(
+            rect,
+            min_width=min_width,
+            min_height=min_height,
+            max_boxes=max_boxes,
+            save_annotated=save_annotated,
+        )
+        return json.dumps(result, ensure_ascii=False, indent=2)
+    except Exception as error:
+        return f"Error detecting visual elements: {type(error).__name__}: {error}"
+
+
+@mcp.tool()
 def take_screenshot(
     region_x: int = 0,
     region_y: int = 0,
@@ -2424,7 +2463,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
             "  mouse: click, click_at_position, move_mouse, drag_control, scroll, mouse_scroll\n"
             "  keyboard: type_text, set_text, press_key, hotkey\n"
             "  batch: run_action, run_actions\n"
-            "  screenshot: take_screenshot\n"
+            "  screenshot: take_screenshot, detect_visual_elements(rect=...)\n"
             "  knowledge: get_ui_learning_readiness, get_ui_learning_status,\n"
             "             scan_window_knowledge, show_ui_controls,\n"
             "             list_ui_knowledge_apps, search_ui_knowledge,\n"

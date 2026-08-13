@@ -4,6 +4,22 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog and is maintained automatically by Semantic Release.
 
+## [0.7.0] - 2026-08-13
+
+### Added
+
+- Added `detect_visual_elements`, a local class-agnostic rectangle detector for coarse UIA
+  canvases whose internally drawn elements have no UIA nodes.
+- The detector accepts direct screen bounds or `find_control` / `get_control_at_position`
+  results, captures only that rectangle, and returns absolute rectangles, parent-relative
+  normalized rectangles, containment relationships, confidence, and a numbered preview.
+
+### Changed
+
+- Visual canvas segmentation runs locally without UIA traversal, OCR, remote AI, semantic
+  classification, or model downloads. Multi-mask rectangle proposals are merged and small
+  internal texture or character fragments are suppressed.
+
 ## [0.6.1] - 2026-08-13
 
 ### Added

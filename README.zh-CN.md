@@ -99,6 +99,18 @@ Tesseract 可执行文件及相应语言数据，例如 `eng` 或 `chi_sim`。�
 `find_control_by_image`、`click_by_image`、`find_text_on_screen`、
 `click_text_on_screen`。
 
+如果 UIA 只暴露一个大画布、内部元素没有 UIA 节点，可把控件返回结果或其中的矩形
+直接交给本地矩形检测器：
+
+```text
+get_control_at_position(x, y)
+detect_visual_elements(rect=<上一步返回的控件对象>)
+```
+
+`detect_visual_elements` 只截图传入的矩形，返回编号后的无类别候选框、屏幕绝对矩形、
+相对输入区域的归一化矩形、包含关系、置信度、耗时和标注预览图路径。它不会遍历 UIA、
+运行 OCR、理解控件含义、下载模型或调用远程 API。
+
 远程视觉定位不会运行本地模型，也不依赖厂商 SDK。设置一个 OpenAI 兼容视觉 API 的
 端点和凭证后，可使用 `find_control_by_vision` 或 `click_by_vision`：
 

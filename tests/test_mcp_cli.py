@@ -25,7 +25,7 @@ def _run_module(module: str, option: str) -> str:
 
 def test_mcp_server_version() -> None:
     output = _run_module("easy_uiauto.mcp.server", "--version")
-    assert output.strip() == "easy_uiauto 0.6.1"
+    assert output.strip() == "easy_uiauto 0.7.0"
 
 
 def test_mcp_service_help() -> None:
@@ -74,4 +74,5 @@ def test_mcp_server_help_explains_testing_and_diagnostics() -> None:
     assert "python -m pytest -q" in output
     assert "find_text_on_screen(text=..., language='eng')" in output
     assert "find_control_by_vision(description=...)" in output
+    assert "detect_visual_elements(rect=...)" in output
     assert "sends the selected screenshot" in output

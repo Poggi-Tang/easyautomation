@@ -109,6 +109,19 @@ data (for example `eng` or `chi_sim`). The MCP tools are
 `find_control_by_image`, `click_by_image`, `find_text_on_screen`, and
 `click_text_on_screen`.
 
+For a coarse UIA canvas whose internal elements have no UIA nodes, pass the
+control result or its bounds directly to the local rectangle detector:
+
+```text
+get_control_at_position(x, y)
+detect_visual_elements(rect=<the returned control object>)
+```
+
+`detect_visual_elements` captures only the supplied rectangle and returns numbered
+class-agnostic boxes, absolute screen rectangles, input-relative normalized rectangles,
+containment relationships, confidence, timing, and an annotated preview path. It does
+not traverse UIA, run OCR, infer semantics, download a model, or call a remote API.
+
 Remote visual location does not run a local model or require a vendor SDK. Set
 an OpenAI-compatible vision endpoint and credentials, then use
 `find_control_by_vision` or `click_by_vision`:

@@ -69,6 +69,11 @@ Build reusable UI knowledge through the `easy_uiauto` MCP tools.
 - Retain meaningful visual-only entities such as avatars, names, message areas, badges, and
   status fields even when Windows UIA exposes no distinct node. They remain observations and
   never become executable commands without a verified locator.
+- When UIA exposes one coarse Pane, Document, or Custom control for several internally drawn
+  elements, pass that control result or its `bounds` once to `detect_visual_elements`. Use the
+  returned rectangles and containment tree as local geometry candidates. This tool is local,
+  class-agnostic, and non-semantic; do not run it over native child controls already exposed by
+  UIA, and do not mistake a rectangle candidate for a verified action.
 - Never probe sending, publishing, deleting, purchasing, closing without saving, or other
   externally visible/destructive controls during unattended learning.
 - Preserve quarantined records as diagnostics. Do not delete them merely to improve pass rates.
