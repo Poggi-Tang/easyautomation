@@ -897,6 +897,32 @@ def strategy_xpath(name, class_name, control_type, Xpath,debug=False):
         return False
 
 
+def _find_window_scope(window_name, xpath=None):
+    """Find a top-level UIA window without relying on a timed descendant query."""
+    root = uiautomation.GetRootControl()
+    if not window_name:
+        return root
+    first_step = xpath[0] if xpath else {}
+    expected_class = first_step.get('ClassName', '')
+    partial_matches = []
+    try:
+        children = root.GetChildren()
+    except Exception:
+        children = []
+    for child in children:
+        name = (getattr(child, 'Name', '') or '').strip()
+        class_name = getattr(child, 'ClassName', '') or ''
+        if expected_class and class_name != expected_class:
+            continue
+        if name == window_name:
+            return child
+        if window_name.casefold() in name.casefold():
+            partial_matches.append(child)
+    if partial_matches:
+        return partial_matches[0]
+    return False
+
+
 @timeit
 def find_control(LOCATION,debug= False):
     """
@@ -950,45 +976,61 @@ def find_control(LOCATION,debug= False):
             CURRENT_APP_NAME = WindowName
 
     start_time = int(datetime.now().timestamp() * 1000)
-    control = strategy_xpath(Name, ClassName, ControlTypeName, xpath, debug)
-    if control:
-        current_time_ms = int(datetime.now().timestamp() * 1000)
-        push_message(f"[计时] strategy_dictionary 执行耗时: {current_time_ms - start_time}ms")
-        return control
-    start_time = int(datetime.now().timestamp() * 1000)
-    # 精准匹配
+    window = _find_window_scope(WindowName, xpath)
+
+    # 1. AutomationId is normally the most stable and cheapest selector. Dynamic
+    # Name and foundIndex values must not prevent an otherwise exact ID match.
+    if AutomationId and window:
+        automation_selector = {
+            'ControlType': ControlTypeName,
+            'ClassName': ClassName,
+            'AutomationId': AutomationId,
+        }
+        control = strategy_dictionary(automation_selector, window)
+        if control:
+            current_time_ms = int(datetime.now().timestamp() * 1000)
+            push_message(
+                f"[计时] AutomationId 定位耗时: {current_time_ms - start_time}ms"
+            )
+            return control
+
+    # 2. Preserve the recorded hierarchy when AutomationId is absent, duplicated,
+    # or stale. Never call the XPath strategy with an empty path: historically that
+    # returned the desktop root and produced a false successful match.
     if xpath:
-        window = strategy_dictionary(xpath[0])
-        if window:
-            control = strategy_dictionary(xpath[-1], window)
+        control = strategy_xpath(Name, ClassName, ControlTypeName, xpath, debug)
+        if control:
+            current_time_ms = int(datetime.now().timestamp() * 1000)
+            push_message(f"[计时] XPath 定位耗时: {current_time_ms - start_time}ms")
+            return control
+        xpath_window = strategy_dictionary(xpath[0])
+        if xpath_window:
+            control = strategy_dictionary(xpath[-1], xpath_window)
             if control:
                 current_time_ms = int(datetime.now().timestamp() * 1000)
-                push_message(f"[计时] strategy_dictionary 执行耗时: {current_time_ms - start_time}ms")
+                push_message(
+                    f"[计时] XPath 末级定位耗时: {current_time_ms - start_time}ms"
+                )
                 return control
-        push_message(f"\n所有定位策略均失败，未找到控件")
-        return False
-    else:
-        window_dictionary = {'ControlType': 'WindowControl', 'Name': WindowName}
-        pane_dictionary = {'ControlType': 'PaneControl', 'Name': WindowName}
-        # control_dictionary = {'ControlType': ControlTypeName, 'Name': Name,
-        #                       'ClassName': ClassName, 'AutomationId': AutomationId,
-        #                       'searchDepth':searchDepth,'foundIndex': foundIndex}
-        control_dictionary = {'ControlType': ControlTypeName, 'Name': Name,
-                              'ClassName': ClassName, 'AutomationId': AutomationId}
-        window = strategy_dictionary(window_dictionary)
-        if window:
-            control = strategy_dictionary(control_dictionary, window)
-        else:
-            pane = strategy_dictionary(pane_dictionary)
-            if pane:
-                control = strategy_dictionary(control_dictionary, pane)
-        current_time_ms = int(datetime.now().timestamp() * 1000)
-        push_message(f"[计时] find_control_dictionary 执行耗时: {current_time_ms - start_time}ms")
+
+    # 3. Fall back to the legacy property combination. AutomationId is omitted
+    # here because the dedicated first strategy already proved it unavailable.
+    if window:
+        combination_selector = {
+            'ControlType': ControlTypeName,
+            'Name': Name,
+            'ClassName': ClassName,
+        }
+        control = strategy_dictionary(combination_selector, window)
         if control:
+            current_time_ms = int(datetime.now().timestamp() * 1000)
+            push_message(
+                f"[计时] 组合属性定位耗时: {current_time_ms - start_time}ms"
+            )
             return control
-        else:
-            push_message(f"\n所有定位策略均失败，未找到控件")
-            return False
+
+    push_message(f"\n所有定位策略均失败，未找到控件")
+    return False
 
 
 def strategy_dictionary(dictionary, Prant=uiautomation.GetRootControl(), timeout=10):
@@ -1007,13 +1049,18 @@ def strategy_dictionary(dictionary, Prant=uiautomation.GetRootControl(), timeout
     """
     uiautomation.SetGlobalSearchTimeout(timeout)
     conditions = {
-        'ControlType': CONTROL_TYPE_IDS[dictionary['ControlType']],
         'Name': None if dictionary.get('Name') == '' else dictionary.get('Name', None),
         'ClassName': None if dictionary.get('ClassName') == '' else dictionary.get('ClassName', None),
         'AutomationId': None if dictionary.get('AutomationId') == '' else dictionary.get('AutomationId', None),
         # 'searchDepth': dictionary.get('searchDepth', 0xFFFFFFFF),
         # 'foundIndex': dictionary.get('foundIndex', 1)
     }
+    control_type_name = dictionary.get('ControlType', '')
+    if control_type_name:
+        control_type = CONTROL_TYPE_IDS.get(control_type_name)
+        if control_type is None:
+            return False
+        conditions['ControlType'] = control_type
     try:
         control = Prant.Control(**conditions)
         state = control.Refind(maxSearchSeconds=0, raiseException=False)

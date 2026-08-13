@@ -794,9 +794,9 @@ def find_control(
     """Find a control from a complete easy_uiauto LOCATION object.
 
     Prefer ``location`` from an easy_uiauto recorded action or from
-    ``get_control_at_position``. The complete XPath retains hierarchy,
-    duplicate indexes, and search depth. Legacy individual selector arguments
-    remain available for compatibility.
+    ``get_control_at_position``. Lookup uses window-scoped AutomationId first,
+    contextual XPath second, and the Name/ClassName/ControlType combination third.
+    Legacy individual selector arguments remain available for compatibility.
 
     Args:
         location: Complete LOCATION object, a recorded action containing
@@ -2417,7 +2417,8 @@ def _build_arg_parser() -> argparse.ArgumentParser:
             "  learn:   capture and store controls without mutating the UI\n"
             "  mixed:   execute operations and learn successful controls\n\n"
             "Visual fallback order:\n"
-            "  unique AutomationId -> contextual XPath -> image templates -> OCR\n"
+            "  unique AutomationId -> contextual XPath -> property combination\n"
+            "  -> image templates -> OCR\n"
             "  -> opt-in remote AI vision\n"
             "  OCR requires Tesseract and easy-uiauto[mcp,vision].\n"
             "  Remote AI vision requires EASY_UIAUTO_VISION_API_URL,\n"

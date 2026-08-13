@@ -221,10 +221,11 @@ def _resolve_unique_automation_id(window, location: dict):
     if not step:
         return None
     control_type = getattr(uiautomation.ControlType, step.get("ControlType", ""), None)
-    search_depth = max(1, min(30, int(step.get("searchDepth", 12) or 12)))
     query = {
         "AutomationId": step["AutomationId"],
-        "searchDepth": search_depth,
+        # Stored XPath depth is only an observation and may change when an app
+        # rebuilds its UI tree. Search the complete target window for a unique ID.
+        "searchDepth": 30,
         "searchInterval": 0.05,
     }
     if control_type is not None:
@@ -241,6 +242,30 @@ def _resolve_unique_automation_id(window, location: dict):
         return first
     except Exception:
         return None
+
+
+def _resolve_property_combination(window, location: dict):
+    """Resolve the final Name/Class/ControlType fallback without AutomationId."""
+    step = {
+        key: location.get(key, "")
+        for key in ("ControlType", "Name", "ClassName")
+        if location.get(key)
+    }
+    if not step:
+        return None
+    candidates = _descendant_matches(window, step, 30)
+    if not candidates:
+        return None
+    found_index = location.get("foundIndex")
+    if found_index not in (None, ""):
+        try:
+            index = int(found_index) - 1
+        except (TypeError, ValueError):
+            return None
+        if 0 <= index < len(candidates):
+            return candidates[index]
+        return None
+    return candidates[0] if len(candidates) == 1 else None
 
 
 def resolve_location(location: dict, window=None, prefix_cache: dict | None = None):
@@ -266,6 +291,8 @@ def resolve_location(location: dict, window=None, prefix_cache: dict | None = No
     if fast_control is not None:
         prefix_cache[automation_key] = fast_control
         return fast_control
+    if not xpath:
+        return _resolve_property_combination(window, normalized)
     previous_search_depth = 1
     steps = xpath[1:] if xpath and _matches_step(window, xpath[0]) else xpath
     prefix = []
@@ -294,7 +321,7 @@ def resolve_location(location: dict, window=None, prefix_cache: dict | None = No
             relaxed_step = {key: value for key, value in step.items() if key != "Name"}
             candidates = _descendant_matches(current, relaxed_step, 4)
         if not candidates:
-            return None
+            return _resolve_property_combination(window, normalized)
         found_index = step.get("foundIndex")
         try:
             candidate_index = max(0, int(found_index) - 1) if found_index not in (None, "") else 0

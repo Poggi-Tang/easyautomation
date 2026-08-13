@@ -150,6 +150,7 @@ def test_core_find_control_keeps_legacy_empty_xpath_fallback(monkeypatch) -> Non
         return control
 
     monkeypatch.setattr(utils, "CURRENT_APP_NAME", "Example")
+    monkeypatch.setattr(utils, "_find_window_scope", lambda *_args: window)
     monkeypatch.setattr(utils, "strategy_xpath", lambda *_args, **_kwargs: False)
     monkeypatch.setattr(utils, "strategy_dictionary", fake_strategy_dictionary)
     location = build_location(
@@ -161,3 +162,91 @@ def test_core_find_control_keeps_legacy_empty_xpath_fallback(monkeypatch) -> Non
     )
 
     assert utils.find_control(location) is control
+
+
+def test_core_find_control_prefers_automation_id_before_xpath(monkeypatch) -> None:
+    control = _fake_control()
+    window = SimpleNamespace()
+    selectors = []
+
+    def fake_strategy_dictionary(selector, parent=None):
+        selectors.append(selector)
+        if selector.get("ControlType") == "WindowControl":
+            return window
+        assert parent is window
+        if selector.get("AutomationId") == "saveButton":
+            return control
+        return False
+
+    monkeypatch.setattr(utils, "CURRENT_APP_NAME", "Example")
+    monkeypatch.setattr(utils, "_find_window_scope", lambda *_args: window)
+    monkeypatch.setattr(utils, "strategy_dictionary", fake_strategy_dictionary)
+    monkeypatch.setattr(
+        utils,
+        "strategy_xpath",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("XPath must not run after an AutomationId match")
+        ),
+    )
+
+    assert utils.find_control(location_from_xpath(XPATH)) is control
+    assert selectors[0] == {
+        "ControlType": "ButtonControl",
+        "ClassName": "ButtonClass",
+        "AutomationId": "saveButton",
+    }
+
+
+def test_core_find_control_does_not_call_xpath_when_path_is_empty(monkeypatch) -> None:
+    control = _fake_control()
+    window = SimpleNamespace()
+
+    def fake_strategy_dictionary(selector, parent=None):
+        if selector.get("ControlType") == "WindowControl":
+            return window
+        if selector.get("AutomationId"):
+            return False
+        return control
+
+    monkeypatch.setattr(utils, "CURRENT_APP_NAME", "Example")
+    monkeypatch.setattr(utils, "_find_window_scope", lambda *_args: window)
+    monkeypatch.setattr(utils, "strategy_dictionary", fake_strategy_dictionary)
+    monkeypatch.setattr(
+        utils,
+        "strategy_xpath",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("empty XPath must never be resolved")
+        ),
+    )
+    location = build_location(
+        window_name="Example",
+        name="Save",
+        class_name="ButtonClass",
+        control_type="ButtonControl",
+        automation_id="stale-id",
+    )
+
+    assert utils.find_control(location) is control
+
+
+def test_core_find_control_uses_xpath_before_property_combination(monkeypatch) -> None:
+    control = _fake_control()
+    window = SimpleNamespace()
+    combination_used = False
+
+    def fake_strategy_dictionary(selector, parent=None):
+        nonlocal combination_used
+        if selector.get("ControlType") == "WindowControl":
+            return window
+        if selector.get("AutomationId"):
+            return False
+        combination_used = True
+        return control
+
+    monkeypatch.setattr(utils, "CURRENT_APP_NAME", "Example")
+    monkeypatch.setattr(utils, "_find_window_scope", lambda *_args: window)
+    monkeypatch.setattr(utils, "strategy_dictionary", fake_strategy_dictionary)
+    monkeypatch.setattr(utils, "strategy_xpath", lambda *_args, **_kwargs: control)
+
+    assert utils.find_control(location_from_xpath(XPATH)) is control
+    assert combination_used is False

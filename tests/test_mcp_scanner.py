@@ -149,7 +149,10 @@ def test_location_uses_unique_automation_id_before_xpath(monkeypatch) -> None:
         def Exists(self, *_args) -> bool:
             return self.found_index == 1
 
+    queries = []
+
     def find_control(**kwargs):
+        queries.append(kwargs)
         return SearchResult(kwargs["foundIndex"])
 
     monkeypatch.setattr(scanner.uiautomation, "Control", find_control)
@@ -171,6 +174,30 @@ def test_location_uses_unique_automation_id_before_xpath(monkeypatch) -> None:
     }
 
     assert scanner.resolve_location(location, window=window).found_index == 1
+    assert queries[0]["searchDepth"] == 30
+
+
+def test_location_falls_back_to_property_combination_after_xpath(monkeypatch) -> None:
+    button = FakeControl("Save", "ButtonControl", (40, 30, 160, 90))
+    window = FakeControl("Example", "WindowControl", (0, 0, 400, 300), [button])
+    location = {
+        "WindowName": "Example",
+        "Name": "Save",
+        "ClassName": button.ClassName,
+        "ControlType": "ButtonControl",
+        "AutomationId": "stale-id",
+        "Xpath": [
+            {"ControlType": "WindowControl", "Name": "Example"},
+            {
+                "ControlType": "ButtonControl",
+                "Name": "Save",
+                "AutomationId": "stale-id",
+            },
+        ],
+    }
+    monkeypatch.setattr(scanner, "_resolve_unique_automation_id", lambda *_args: None)
+
+    assert scanner.resolve_location(location, window=window) is button
 
 
 def test_disabled_control_keeps_potential_actions() -> None:

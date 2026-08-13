@@ -51,8 +51,8 @@ and currently released as a `0.x` project.
   and version control.
 - 📐 **Stable records**: persist structured `LOCATION` identities and normalized
   visual hints, never process IDs, window handles, or absolute desktop rectangles.
-- 🛟 **Layered lookup**: unique `AutomationId`, contextual XPath, saved image states,
-  local OCR, then opt-in remote vision as the final fallback.
+- 🛟 **Layered lookup**: unique `AutomationId`, contextual XPath, stable property
+  combinations, saved image states, local OCR, then opt-in remote vision.
 - ⚡ **Fast anchors**: use a unique window-scoped `AutomationId` before XPath, while
   keeping hierarchy as the fallback for missing or duplicate IDs.
 
@@ -287,8 +287,8 @@ easy_uiauto_ui learn-effect <app-id> <command> --recover
 easy_uiauto_ui teach <app-id> <control-id> "Meaning" intent "Description"
 ```
 
-Runtime lookup follows unique `AutomationId` → contextual XPath → saved image states → local OCR → opt-in
-remote vision. Enable the last step with `--allow-vision-fallback` or
+Runtime lookup follows unique `AutomationId` → contextual XPath → `Name`/`ClassName`/`ControlType`
+combination → saved image states → local OCR → opt-in remote vision. Enable the last step with `--allow-vision-fallback` or
 `allow_vision_fallback=true`. Stale, missing, or ambiguous controls are moved to
 quarantine instead of being clicked. Single and batch commands preview their
 resolved targets in red by default; pass `--no-highlight` or `highlight=false`
@@ -385,8 +385,8 @@ flat selector. Obtain it from a recorded action or from
 
 `find_control` also accepts a complete recorded action containing `LOCATION`
 and the complete result from `get_control_at_position`. Legacy flat arguments
-remain supported for compatibility, but full XPath data is more reliable for
-duplicate or deeply nested controls.
+remain supported. A present AutomationId is tried before the stored XPath and ignores
+dynamic Name, `foundIndex`, and recorded geometry; XPath handles missing or duplicate IDs.
 
 ## 🧰 Python API Examples
 

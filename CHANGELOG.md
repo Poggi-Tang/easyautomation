@@ -4,6 +4,23 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog and is maintained automatically by Semantic Release.
 
+## [0.7.2] - 2026-08-13
+
+### Changed
+
+- Control lookup now uses window-scoped `AutomationId` first, contextual XPath second,
+  and the `Name`/`ClassName`/`ControlType` property combination third.
+- AutomationId lookup searches the complete current window instead of trusting a recorded
+  XPath depth or dynamic `foundIndex`.
+
+### Fixed
+
+- Empty XPath input no longer resolves to the desktop root as a false successful control.
+- Public `find_control` now enumerates top-level UIA windows directly, avoiding slow or
+  unsuccessful descendant queries for Qt application windows.
+- Runtime command lookup falls back to a unique property combination only after both
+  AutomationId and XPath fail.
+
 ## [0.7.1] - 2026-08-13
 
 ### Added

@@ -43,8 +43,8 @@
   Markdown/YAML/PNG，可直接用 Obsidian 或 Git 管理。
 - 📐 **稳定记录**：持久化结构化 `LOCATION` 和窗口内归一化视觉提示，不保存
   PID、窗口句柄或桌面绝对坐标。
-- 🛟 **分层定位兜底**：依次使用唯一 `AutomationId`、上下文 XPath、多状态控件图、
-  本地 OCR，最后才使用显式开启的远程视觉定位。
+- 🛟 **分层定位兜底**：依次使用唯一 `AutomationId`、上下文 XPath、稳定属性组合、
+  多状态控件图、本地 OCR，最后才使用显式开启的远程视觉定位。
 - ⚡ **快速定位锚点**：优先使用窗口内唯一的 `AutomationId`，缺失或重复时再
   使用 XPath 层级消歧。
 
@@ -260,8 +260,8 @@ easy_uiauto_ui learn-effect <app-id> <command> --recover
 easy_uiauto_ui teach <app-id> <control-id> "控件含义" intent "功能说明"
 ```
 
-运行时依次使用唯一 `AutomationId` → 上下文 XPath → 多状态控件图 → 本地 OCR
-→ 显式开启的远程视觉。
+运行时依次使用唯一 `AutomationId` → 上下文 XPath → `Name`/`ClassName`/`ControlType`
+属性组合 → 多状态控件图 → 本地 OCR → 显式开启的远程视觉。
 最后一级需要传入 `--allow-vision-fallback` 或 `allow_vision_fallback=true`。
 控件失效、缺失或匹配不唯一时会进入隔离区，不会继续点击。单条和批量命令默认会用
 红框预览实际解析出的目标；可通过 `--no-highlight` 或 `highlight=false` 关闭约 100 ms
@@ -347,8 +347,8 @@ MCP 客户端配置可使用 `python -m easy_uiauto.mcp.server` 启动服务。
 ```
 
 `find_control` 也可直接接收包含 `LOCATION` 的完整录制动作，或者
-`get_control_at_position` 的完整返回结果。旧的扁平参数仍兼容，但遇到重名或深层控件时，
-应使用包含完整 XPath 的结构。
+`get_control_at_position` 的完整返回结果。旧的扁平参数仍兼容。存在 AutomationId 时会先
+在目标窗口内查找，并忽略动态 Name、`foundIndex` 和历史坐标；ID 缺失或重复时再使用 XPath。
 
 ## 🧰 Python API 示例
 
