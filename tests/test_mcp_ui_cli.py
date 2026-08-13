@@ -58,6 +58,37 @@ def test_execute_clicks_verified_control(monkeypatch, tmp_path) -> None:
     assert result["resolved_by"] == "location"
 
 
+def test_execute_highlights_resolved_target_before_action(monkeypatch, tmp_path) -> None:
+    directory = knowledge.initialize_app("example", "Example", tmp_path)
+    record = _record()
+    knowledge.save_control(directory, record)
+    knowledge.rebuild_index(directory)
+    events = []
+    rectangle = {"left": 20, "top": 40, "right": 120, "bottom": 80, "width": 100, "height": 40}
+    control = SimpleNamespace(Click=lambda: events.append("click"))
+    monkeypatch.setattr(
+        ui_cli,
+        "_resolve_verified_control",
+        lambda *_args: (control, 0.95, rectangle, "location"),
+    )
+    monkeypatch.setattr(
+        ui_cli.visualization,
+        "show_markers",
+        lambda markers, *_args: events.append(("overlay", markers)) or {"shown": True},
+    )
+
+    result = ui_cli.execute(
+        directory,
+        "main.toolbar.save.click",
+        highlight=True,
+    )
+
+    assert events[0][0] == "overlay"
+    assert events[0][1][0]["rect"] == rectangle
+    assert events[1] == "click"
+    assert result["overlay"]["shown"] is True
+
+
 def test_execute_uses_verified_image_fallback(monkeypatch, tmp_path) -> None:
     directory = knowledge.initialize_app("example", "Example", tmp_path)
     knowledge.save_control(directory, _record())

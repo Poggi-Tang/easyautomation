@@ -10,21 +10,27 @@ Prefer verified application knowledge over rediscovering the interface.
 ## Workflow
 
 1. Call `list_ui_knowledge_apps` to identify the application ID.
-2. Call `list_ui_commands(app_id=...)` or `search_ui_knowledge(app_id=..., query=...)`.
-3. Select a command whose intent, aliases, description, page, region, and action match the request.
-4. Inspect `risk`, `requires_confirmation`, semantic confidence/source, and function-verification
+2. When the user asks what can be operated on the current page, call
+   `show_ui_controls(app_id=..., include="executable")`. Report its numbered legend and do
+   not run a separate UIA scan or remote vision request.
+3. Otherwise call `list_ui_commands(app_id=...)` or
+   `search_ui_knowledge(app_id=..., query=...)`.
+4. Select a command whose intent, aliases, description, page, region, and action match the request.
+5. Inspect `risk`, `requires_confirmation`, semantic confidence/source, and function-verification
    status. Do not claim inferred meanings were function-tested.
-5. For two or more commands on the same stable page, call
-   `run_ui_commands(app_id=..., steps=[...])` once. Use command strings for clicks and
+6. For two or more commands on the same stable page, call
+   `run_ui_commands(app_id=..., steps=[...], highlight=true)` once. Use command strings for clicks and
    `{ "command": "...set-text", "text": "..." }` for text entry. The batch verifies
-   all unique controls before the first action and stops at the first action error.
-6. Use `run_ui_command(app_id=..., command=..., text=...)` for one command or when a
-   prior command navigates to another page.
+   all unique controls, highlights all batch targets in one overlay before the first action,
+   and stops at the first action error.
+7. Use `run_ui_command(app_id=..., command=..., text=..., highlight=true)` for one command
+   or when a prior command navigates to another page. The red frame identifies the verified
+   runtime target; it is click-through and does not remain in the input path.
    Pass `confirm=true` only after the user explicitly approves an external or destructive effect.
-7. For `set-text`, pass the user text through the `text` field. Never place it inside the command name.
-8. After navigation changes the page, query commands again before the next operation.
-9. If execution quarantines a control, stop using that command. Ask the user to expose the correct page and invoke the learning workflow to rescan it.
-10. Use `list_ui_interactions` when an effect record exists and verify its success condition
+8. For `set-text`, pass the user text through the `text` field. Never place it inside the command name.
+9. After navigation changes the page, query commands again before the next operation.
+10. If execution quarantines a control, stop using that command. Ask the user to expose the correct page and invoke the learning workflow to rescan it.
+11. Use `list_ui_interactions` when an effect record exists and verify its success condition
     against the observed post-operation state. Do not infer success only because a click ran.
 
 ## Safety Rules

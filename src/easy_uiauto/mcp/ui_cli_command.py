@@ -8,7 +8,7 @@ import sys
 
 from easy_uiauto import __version__
 
-from . import configuration, interaction_learning, knowledge, scanner, ui_cli
+from . import configuration, interaction_learning, knowledge, scanner, ui_cli, visualization
 
 
 def _vision_settings(args) -> tuple[str, str, str]:
@@ -51,6 +51,8 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     scan.add_argument("--vision-url", default="")
     scan.add_argument("--vision-model", default="")
+    scan.add_argument("--no-overlay", action="store_true")
+    scan.add_argument("--overlay-duration", type=int, default=3000)
 
     commands.add_parser("apps", help="List scanned applications.")
 
@@ -64,12 +66,20 @@ def _build_parser() -> argparse.ArgumentParser:
     list_commands.add_argument("app_id")
     list_commands.add_argument("--page", default="")
 
+    show = commands.add_parser("show", help="Box controls on the current learned page.")
+    show.add_argument("app_id")
+    show.add_argument("--page", default="")
+    show.add_argument("--include", choices=("executable", "known"), default="executable")
+    show.add_argument("--duration", type=int, default=5000)
+
     run = commands.add_parser("run", help="Run one verified UI command.")
     run.add_argument("app_id")
     run.add_argument("command")
     run.add_argument("--text", default="")
     run.add_argument("--confirm", action="store_true")
     run.add_argument("--allow-vision-fallback", action="store_true")
+    run.add_argument("--no-highlight", action="store_true")
+    run.add_argument("--highlight-duration", type=int, default=900)
 
     batch = commands.add_parser(
         "batch",
@@ -85,6 +95,8 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     batch.add_argument("--confirm", action="store_true")
     batch.add_argument("--allow-vision-fallback", action="store_true")
+    batch.add_argument("--no-highlight", action="store_true")
+    batch.add_argument("--highlight-duration", type=int, default=1200)
 
     effect = commands.add_parser(
         "learn-effect",
@@ -156,6 +168,8 @@ def main(argv: list[str] | None = None) -> None:
                 verify_limit=args.verify_limit,
                 strategy=args.strategy,
                 progress=lambda message: print(f"[scan] {message}", flush=True),
+                show_overlay=not args.no_overlay,
+                overlay_duration_ms=args.overlay_duration,
             )
         elif args.subcommand == "apps":
             result = knowledge.list_apps()
@@ -174,6 +188,13 @@ def main(argv: list[str] | None = None) -> None:
                 knowledge.app_dir(args.app_id),
                 args.page,
             )
+        elif args.subcommand == "show":
+            result = visualization.show_page_controls(
+                knowledge.app_dir(args.app_id),
+                args.page,
+                args.include,
+                args.duration,
+            )
         elif args.subcommand == "run":
             result = ui_cli.execute(
                 knowledge.app_dir(args.app_id),
@@ -181,6 +202,9 @@ def main(argv: list[str] | None = None) -> None:
                 args.text,
                 args.confirm,
                 args.allow_vision_fallback,
+                not args.no_highlight,
+                args.highlight_duration,
+                100,
             )
         elif args.subcommand == "batch":
             value = args.steps_json
@@ -190,9 +214,20 @@ def main(argv: list[str] | None = None) -> None:
             steps = json.loads(value)
             batch_args = (knowledge.app_dir(args.app_id), steps, args.confirm)
             result = (
-                ui_cli.execute_many(*batch_args, allow_vision_fallback=True)
+                ui_cli.execute_many(
+                    *batch_args,
+                    allow_vision_fallback=True,
+                    highlight=not args.no_highlight,
+                    highlight_duration_ms=args.highlight_duration,
+                    highlight_wait_ms=100,
+                )
                 if args.allow_vision_fallback
-                else ui_cli.execute_many(*batch_args)
+                else ui_cli.execute_many(
+                    *batch_args,
+                    highlight=not args.no_highlight,
+                    highlight_duration_ms=args.highlight_duration,
+                    highlight_wait_ms=100,
+                )
             )
         elif args.subcommand == "learn-effect":
             api_url, api_key, model = _vision_settings(args)

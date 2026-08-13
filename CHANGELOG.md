@@ -4,6 +4,36 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog and is maintained automatically by Semantic Release.
 
+## [0.6.0] - 2026-08-13
+
+### Added
+
+- Added a single-window, click-through overlay that can draw and number a complete page
+  of controls without creating four tracking windows per control.
+- Added numbered annotated page images for every learning scan and returned their vault
+  paths in scan results.
+- Added `show_ui_controls` and `easy_uiauto_ui show` to match the current learned page,
+  box its executable or known controls, and return the corresponding command legend.
+- Added target previews before single and batch semantic UI command execution, with
+  configurable duration and an option to disable highlighting.
+- Added MCP progress heartbeats, per-control verification counts, persistent in-process
+  learning task status, and `get_ui_learning_status` for distinguishing a client wait
+  timeout from a failed or still-running scan.
+- Added automatic migration from absolute desktop rectangles and process-local window
+  identifiers to window-relative visual hints.
+
+### Changed
+
+- Updated the bundled learning and operation Skills to show learned controls, answer
+  current-page capability questions visually, and highlight verified runtime targets.
+- Ordinary learn or scan requests now stop after the basic page scan. Recursive safe
+  interaction runs only for an explicit deep-learning or autonomous-exploration request.
+- Scan verification reuses shared XPath prefixes, and scan/exploration workers continue
+  recording status after an MCP client wait timeout without blocking status queries.
+- Knowledge records no longer persist PIDs, window handles, or absolute screen rectangles.
+  Normalized geometry is marked as a visual hint only; live overlays resolve current
+  `LOCATION`, image-template, or OCR positions before drawing.
+
 ## [0.5.1] - 2026-08-12
 
 ### Added

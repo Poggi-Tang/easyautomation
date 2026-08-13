@@ -3,8 +3,11 @@
 # @Author:    tang
 # @Date:      2025/10/9-18:40
 # @depict:
+import ctypes
+import threading
 import tkinter as tk
 from dataclasses import dataclass
+
 import uiautomation
 
 from .utils import get_control_info
@@ -372,6 +375,168 @@ class ScreenLineBox:
     def run(self):
         if self._owns_root:
             self.root.mainloop()
+
+
+def _overlay_items(items):
+    """Normalize rectangle dictionaries for the one-window overlay."""
+    normalized = []
+    for index, item in enumerate(items, start=1):
+        rectangle = item.get("rect", item)
+        try:
+            left = int(rectangle["left"])
+            top = int(rectangle["top"])
+            right = int(rectangle.get("right", left + int(rectangle["width"])))
+            bottom = int(rectangle.get("bottom", top + int(rectangle["height"])))
+        except (KeyError, TypeError, ValueError):
+            continue
+        if right <= left or bottom <= top:
+            continue
+        normalized.append(
+            {
+                "index": int(item.get("index", index)),
+                "label": str(item.get("label", "")).strip(),
+                "left": left,
+                "top": top,
+                "right": right,
+                "bottom": bottom,
+                "color": str(item.get("color", "#00c853")),
+                "target": bool(item.get("target", False)),
+            }
+        )
+    return normalized
+
+
+class ScreenControlOverlay:
+    """Draw many labeled control rectangles in one click-through window."""
+
+    TRANSPARENT_COLOR = "#010203"
+    TARGET_COLOR = "#ff1744"
+
+    def __init__(self, root, items, show_time=1500, line_width=3):
+        self.root = root
+        self.items = _overlay_items(items)
+        self.show_time = max(100, int(show_time))
+        self.line_width = max(1, int(line_width))
+        self.window = None
+        if not self.items:
+            self.root.after(0, self.root.destroy)
+            return
+        self._draw()
+
+    def _draw(self):
+        padding = 24
+        left = min(item["left"] for item in self.items) - padding
+        top = min(item["top"] for item in self.items) - padding
+        right = max(item["right"] for item in self.items) + padding
+        bottom = max(item["bottom"] for item in self.items) + padding
+
+        window = tk.Toplevel(self.root)
+        self.window = window
+        window.overrideredirect(True)
+        window.configure(bg=self.TRANSPARENT_COLOR)
+        window.wm_attributes("-topmost", True)
+        try:
+            window.wm_attributes("-transparentcolor", self.TRANSPARENT_COLOR)
+        except tk.TclError:
+            window.wm_attributes("-alpha", 0.85)
+        window.geometry(f"{right - left}x{bottom - top}{left:+d}{top:+d}")
+
+        canvas = tk.Canvas(
+            window,
+            width=right - left,
+            height=bottom - top,
+            bg=self.TRANSPARENT_COLOR,
+            highlightthickness=0,
+        )
+        canvas.pack(fill="both", expand=True)
+        for item in self.items:
+            x1 = item["left"] - left
+            y1 = item["top"] - top
+            x2 = item["right"] - left
+            y2 = item["bottom"] - top
+            color = self.TARGET_COLOR if item["target"] else item["color"]
+            width = self.line_width + (2 if item["target"] else 0)
+            canvas.create_rectangle(x1, y1, x2, y2, outline=color, width=width)
+            label = str(item["index"])
+            label_id = canvas.create_text(
+                x1 + 4,
+                max(10, y1 - 10),
+                text=label,
+                anchor="w",
+                fill="white",
+                font=("Segoe UI", 10, "bold"),
+            )
+            bounds = canvas.bbox(label_id)
+            if bounds:
+                background = canvas.create_rectangle(
+                    bounds[0] - 3,
+                    bounds[1] - 1,
+                    bounds[2] + 3,
+                    bounds[3] + 1,
+                    fill=color,
+                    outline=color,
+                )
+                canvas.tag_lower(background, label_id)
+
+        window.update_idletasks()
+        self._make_click_through(window)
+        window.after(self.show_time, self.destroy)
+
+    @staticmethod
+    def _make_click_through(window):
+        if not hasattr(ctypes, "windll"):
+            return
+        try:
+            hwnd = int(window.winfo_id())
+            get_style = ctypes.windll.user32.GetWindowLongW
+            set_style = ctypes.windll.user32.SetWindowLongW
+            style = get_style(hwnd, -20)
+            # WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE
+            set_style(hwnd, -20, style | 0x80000 | 0x20 | 0x80 | 0x08000000)
+        except Exception:
+            pass
+
+    def destroy(self):
+        try:
+            if self.window is not None:
+                self.window.destroy()
+        finally:
+            try:
+                self.root.destroy()
+            except tk.TclError:
+                pass
+
+
+def show_control_overlay(items, show_time=1500, line_width=3, wait_ms=100):
+    """Show many controls without blocking input or creating four windows per control."""
+    normalized = _overlay_items(items)
+    if not normalized:
+        return {"shown": False, "controls": 0, "detail": "no valid rectangles"}
+
+    ready = threading.Event()
+    state = {"shown": False, "error": ""}
+
+    def run_overlay():
+        try:
+            root = tk.Tk()
+            root.withdraw()
+            ScreenControlOverlay(root, normalized, show_time=show_time, line_width=line_width)
+            root.update_idletasks()
+            state["shown"] = True
+            ready.set()
+            root.mainloop()
+        except Exception as error:
+            state["error"] = f"{type(error).__name__}: {error}"
+            ready.set()
+
+    threading.Thread(target=run_overlay, daemon=True).start()
+    ready.wait(max(0, int(wait_ms)) / 1000)
+    return {
+        "shown": state["shown"],
+        "controls": len(normalized),
+        "duration_ms": max(100, int(show_time)),
+        "detail": state["error"] or "click-through overlay started",
+    }
 
 
 def check_visibl(control_point, top_window_point, check_map=None):

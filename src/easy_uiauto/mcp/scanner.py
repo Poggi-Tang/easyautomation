@@ -20,7 +20,7 @@ import uiautomation
 
 from easy_uiauto.utils import get_control_xpath
 
-from . import knowledge
+from . import knowledge, visualization
 from .protocol import location_from_xpath, normalize_location
 
 ACTIONABLE_TYPES = {
@@ -200,7 +200,7 @@ def _descendant_matches(parent, step: dict, max_depth: int) -> list:
     return matches
 
 
-def resolve_location(location: dict, window=None):
+def resolve_location(location: dict, window=None, prefix_cache: dict | None = None):
     """Resolve a canonical LOCATION through UIA without logging or window side effects."""
     normalized = normalize_location(location)
     xpath = normalized.get("Xpath", [])
@@ -210,9 +210,18 @@ def resolve_location(location: dict, window=None):
     if window is None:
         window = _find_window(window_name)
     current = window
+    prefix_cache = prefix_cache if prefix_cache is not None else {}
     previous_search_depth = 1
     steps = xpath[1:] if xpath and _matches_step(window, xpath[0]) else xpath
+    prefix = []
     for step in steps:
+        prefix.append(json.dumps(step, ensure_ascii=False, sort_keys=True))
+        cache_key = tuple(prefix)
+        cached = prefix_cache.get(cache_key)
+        if cached is not None:
+            current = cached
+            previous_search_depth = int(step.get("searchDepth", previous_search_depth + 1) or 1)
+            continue
         search_depth = int(step.get("searchDepth", previous_search_depth + 1) or 1)
         relative_depth = max(1, min(12, search_depth - previous_search_depth))
         candidates = _descendant_matches(current, step, relative_depth)
@@ -226,6 +235,7 @@ def resolve_location(location: dict, window=None):
         except (TypeError, ValueError):
             candidate_index = 0
         current = candidates[min(candidate_index, len(candidates) - 1)]
+        prefix_cache[cache_key] = current
         previous_search_depth = search_depth
     return current
 
@@ -309,11 +319,18 @@ def _rect_iou(first: dict, second: dict) -> float:
         min(first["bottom"], second["bottom"]) - max(first["top"], second["top"]),
     )
     intersection = intersection_width * intersection_height
-    union = first["width"] * first["height"] + second["width"] * second["height"] - intersection
+    first_area = (first["right"] - first["left"]) * (first["bottom"] - first["top"])
+    second_area = (second["right"] - second["left"]) * (second["bottom"] - second["top"])
+    union = first_area + second_area - intersection
     return intersection / union if union else 0.0
 
 
-def _reuse_region_identities(directory: Path, page_id: str, regions: list[dict]) -> list[dict]:
+def _reuse_region_identities(
+    directory: Path,
+    page_id: str,
+    regions: list[dict],
+    window_rect: dict,
+) -> list[dict]:
     previous_regions = [
         record
         for _path, record in knowledge.iter_records(directory, "region")
@@ -322,12 +339,20 @@ def _reuse_region_identities(directory: Path, page_id: str, regions: list[dict])
     reused = []
     claimed = set()
     for region in regions:
+        current_rect = knowledge.normalized_rect(region["rect"], window_rect, relative=True)
         candidates = []
         for previous in previous_regions:
             previous_id = str(previous.get("id", "")).split(".", 1)[-1]
-            if previous_id in claimed or not isinstance(previous.get("rect"), dict):
+            if previous_id in claimed:
                 continue
-            candidates.append((_rect_iou(region["rect"], previous["rect"]), previous_id))
+            previous_rect = previous.get("normalized_rect")
+            if not isinstance(previous_rect, dict) and isinstance(previous.get("rect"), dict):
+                previous_rect = knowledge.normalized_rect(
+                    previous["rect"], window_rect, relative=True
+                )
+            if not isinstance(previous_rect, dict):
+                continue
+            candidates.append((_rect_iou(current_rect, previous_rect), previous_id))
         candidates.sort(reverse=True)
         if candidates and candidates[0][0] >= 0.6:
             region = {**region, "id": candidates[0][1]}
@@ -985,9 +1010,14 @@ def _relative_rect(control_rect: dict, window_rect: dict) -> dict:
     }
 
 
-def _verify_location(location: dict, expected_rect: dict) -> tuple[bool, dict, str]:
+def _verify_location(
+    location: dict,
+    expected_rect: dict,
+    window=None,
+    prefix_cache: dict | None = None,
+) -> tuple[bool, dict, str]:
     try:
-        located = resolve_location(location)
+        located = resolve_location(location, window=window, prefix_cache=prefix_cache)
         if not located or located is False:
             return False, {}, "LOCATION did not resolve"
         actual_rect = _rect(located)
@@ -1187,10 +1217,22 @@ def scan_window(
     strategy: str = "visual-first",
     root: Path | None = None,
     progress: Callable[[str], None] | None = None,
+    show_overlay: bool = False,
+    overlay_duration_ms: int = 3000,
 ) -> dict:
     """Scan one visible application window and persist its UI command knowledge."""
     started = time.perf_counter()
-    progress = progress or (lambda _message: None)
+    external_progress = progress or (lambda _message: None)
+    stage_timings = []
+
+    def progress(message: str) -> None:
+        stage_timings.append(
+            {
+                "stage": message,
+                "elapsed_seconds": round(time.perf_counter() - started, 2),
+            }
+        )
+        external_progress(message)
     strategy = strategy.strip().lower()
     if strategy not in SCAN_STRATEGIES:
         raise ValueError(f"strategy must be one of: {', '.join(sorted(SCAN_STRATEGIES))}")
@@ -1203,8 +1245,9 @@ def scan_window(
 
     process_id = int(getattr(window, "ProcessId", 0) or 0)
     process_name = _process_name(process_id)
-    app_id = knowledge.slugify(process_name or actual_name, f"app-{process_id}")
+    app_id = knowledge.slugify(process_name or actual_name, "application")
     directory = knowledge.initialize_app(app_id, actual_name, root)
+    knowledge.load_index(directory)
     progress("Capturing window screenshot")
     screenshot = _screenshot_window(window_rect)
     page_image = directory / "images" / "pages" / "latest.png"
@@ -1223,6 +1266,7 @@ def scan_window(
         directory,
         page_id,
         segmentation["regions"],
+        window_rect,
     )
     scan_id = knowledge.stable_id("scan", app_id, page_id, knowledge.utc_now())
     previous_page_records = [
@@ -1232,25 +1276,27 @@ def scan_window(
     ]
     page_image_named = directory / "images" / "pages" / f"{page_id}.png"
     screenshot.save(page_image_named)
-    knowledge.save_page(
-        directory,
-        {
-            **page,
-            "app_id": app_id,
-            "window_name": actual_name,
-            "image": str(page_image_named.relative_to(directory)).replace("\\", "/"),
-            "rect": window_rect,
-            "model": model,
-        },
-    )
+    page_record = {
+        **page,
+        "app_id": app_id,
+        "window_name": actual_name,
+        "image": str(page_image_named.relative_to(directory)).replace("\\", "/"),
+        "model": model,
+    }
+    knowledge.save_page(directory, page_record)
     for region in segmentation["regions"]:
+        region_record = {key: value for key, value in region.items() if key != "rect"}
         knowledge.save_region(
             directory,
             {
-                **region,
+                **region_record,
                 "id": f"{page_id}.{region['id']}",
                 "page_id": page_id,
                 "app_id": app_id,
+                "normalized_rect": knowledge.normalized_rect(
+                    region["rect"], window_rect, relative=True
+                ),
+                "geometry_role": "visual-hint-only",
             },
         )
 
@@ -1341,7 +1387,11 @@ def scan_window(
     observed_ids = set()
     previous_by_id = {record.get("id"): record for record in previous_page_records}
     semantic_counts = {"verified": 0, "uncertain": 0, "manual": 0, "not-required": 0}
+    verification_interval = max(1, len(controls) // 20)
+    location_prefix_cache: dict = {}
     for index, (control, depth) in enumerate(controls, start=1):
+        if index == 1 or index == len(controls) or index % verification_interval == 0:
+            progress(f"Verifying controls {index}/{len(controls)}")
         try:
             control_rect = _rect(control)
             if not _valid_rect(control_rect, window_rect):
@@ -1439,6 +1489,8 @@ def scan_window(
                 location_ok, verified_rect, location_detail = _verify_location(
                     location,
                     control_rect,
+                    window,
+                    location_prefix_cache,
                 )
                 if location_ok:
                     verification_crop = _crop_control(
@@ -1525,7 +1577,8 @@ def scan_window(
                     getattr(control, "IsKeyboardFocusable", False)
                 ),
                 "depth": depth,
-                "rect": control_rect,
+                "normalized_rect": knowledge.normalized_rect(control_rect, window_rect),
+                "geometry_role": "visual-hint-only",
                 "location": location,
                 "actions": actions,
                 "supported_actions": supported_actions,
@@ -1597,7 +1650,35 @@ def scan_window(
         knowledge.save_control(directory, previous)
         counts["quarantined"] += 1
 
+    progress("Saving learned controls and annotated page image")
+    scanned_records = [
+        record
+        for _path, record in knowledge.iter_records(directory, "control")
+        if record.get("scan_id") == scan_id
+    ]
+    annotated_path, annotation_markers = visualization.save_scan_annotation(
+        directory,
+        page_id,
+        screenshot,
+        window_rect,
+        scanned_records,
+    )
+    page_record["annotated_image"] = str(annotated_path.relative_to(directory)).replace(
+        "\\", "/"
+    )
+    knowledge.save_page(directory, page_record)
+    overlay = {"shown": False, "controls": 0, "detail": "disabled"}
+    if show_overlay:
+        live_markers = visualization.control_markers(
+            scanned_records,
+            window_rect,
+            window_rect,
+        )
+        overlay = visualization.show_markers(live_markers, overlay_duration_ms)
+
+    progress("Finalizing knowledge index and command catalog")
     index = knowledge.rebuild_index(directory)
+    command_items = knowledge.available_commands(directory)
     catalog_path = knowledge.write_command_catalog(directory)
     elapsed = round(time.perf_counter() - started, 2)
     return {
@@ -1607,6 +1688,9 @@ def scan_window(
         "page_id": page_id,
         "vault": str(directory),
         "page_image": str(page_image_named),
+        "annotated_page_image": str(annotated_path),
+        "annotated_controls": len(annotation_markers),
+        "overlay": overlay,
         "regions": len(segmentation["regions"]),
         "strategy": effective_strategy,
         "visual_targets": len(visual_targets),
@@ -1616,7 +1700,18 @@ def scan_window(
         "controls_retained_unobserved": retained_unobserved,
         "knowledge_controls_total": len(index["controls"]),
         "key_controls": key_controls,
-        "commands": len(knowledge.available_commands(directory)),
+        "commands": len(command_items),
+        "command_items": command_items,
+        "quarantine_summary": [
+            {
+                "control_id": item.get("id"),
+                "semantic_name": item.get("semantic_name") or item.get("name"),
+                "semantic_ambiguity": item.get("semantic_ambiguity", ""),
+                "location_detail": item.get("verification", {}).get("location_detail", ""),
+            }
+            for item in index["controls"]
+            if item.get("status") == "quarantined"
+        ],
         "command_catalog": str(catalog_path),
         "status_counts": counts,
         "semantic_counts": semantic_counts,
@@ -1628,4 +1723,5 @@ def scan_window(
         "failures": failures[:50],
         "truncated": len(controls) >= max_controls,
         "elapsed_seconds": elapsed,
+        "stage_timings": stage_timings,
     }

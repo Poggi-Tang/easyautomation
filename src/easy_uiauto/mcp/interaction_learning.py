@@ -582,8 +582,10 @@ def learn_command_effect(
     recover: bool = False,
     maximum_wait_seconds: float = 3.0,
     post_effect: Callable[[dict], dict] | None = None,
+    progress: Callable[[str], None] | None = None,
 ) -> dict:
     """Execute one verified command and persist its observed before/after effect."""
+    progress = progress or (lambda _message: None)
     record, _action = knowledge.resolve_command(directory, command)
     if record.get("requires_confirmation") and not confirm:
         raise RuntimeError(f"Command requires explicit confirmation: {command}")
@@ -596,13 +598,17 @@ def learn_command_effect(
     window = scanner._find_window(record["app_name"])
     scanner._activate_window(window)
     time.sleep(0.05)
+    progress(f"Capturing before state for {command}")
     before = capture_snapshot(record["app_name"], record["location"])
+    progress(f"Executing reversible command {command}")
     execution = ui_cli.execute(directory, command, text, confirm)
+    progress(f"Waiting for UI stability after {command}")
     after, stability = wait_for_stability(
         record["app_name"],
         record["location"],
         maximum_seconds=max(0.5, min(float(maximum_wait_seconds), 15.0)),
     )
+    progress(f"Inspecting changed regions after {command}")
     regions = changed_regions(before["_target_image"], after["_target_image"])
     window_changes = _window_differences(before["windows"], after["windows"])
     changed_controls = _controls_in_changed_regions(
@@ -620,6 +626,7 @@ def learn_command_effect(
         for key in set(before["action_control"]) | set(after["action_control"])
         if before["action_control"].get(key) != after["action_control"].get(key)
     }
+    progress(f"Understanding operation effect for {command} with remote AI")
     interpretation = _interpret_effects(
         before["_target_image"],
         after["_target_image"],
@@ -687,6 +694,8 @@ def learn_command_effect(
             else ""
         ),
     }
+    if recover:
+        progress(f"Recovering previous UI state after {command}")
     recovery = _attempt_recovery(
         record["app_name"],
         before,
@@ -734,6 +743,7 @@ def learn_command_effect(
         "interference": interference,
         "model": model,
     }
+    progress(f"Saving interaction knowledge for {command}")
     path = knowledge.save_interaction(directory, interaction)
     found = knowledge.find_control_record(directory, record["id"])
     if found:
@@ -784,8 +794,10 @@ def explore_application(
     max_actions: int = 10,
     confirm: bool = False,
     max_depth: int = 3,
+    progress: Callable[[str], None] | None = None,
 ) -> dict:
     """Recursively explore known low-risk commands and learn their operation effects."""
+    progress = progress or (lambda _message: None)
     policy = policy.strip().lower()
     if policy not in {"safe", "supervised"}:
         raise ValueError("policy must be safe or supervised")
@@ -829,6 +841,7 @@ def explore_application(
     app_name = index.get("application", {}).get("name", "")
     if not app_name:
         raise RuntimeError("application knowledge has no window name")
+    progress("Scanning current page before interactive exploration")
     initial_scan = scanner.scan_window(
         app_name,
         api_url,
@@ -837,11 +850,14 @@ def explore_application(
         version,
         strategy="visual-first",
         root=directory.parent.parent,
+        progress=lambda message: progress(f"Initial scan: {message}"),
     )
     if initial_scan.get("app_id") != directory.name:
         raise RuntimeError("visible window does not match the selected application knowledge")
     initial_pages = [initial_scan["page_id"]]
     considered = sum(len(candidates_for_page(page)) for page in initial_pages)
+    planned = min(considered, action_limit)
+    progress(f"Exploring actions 0/{planned}")
 
     def explore_page(page_id: str, depth: int) -> list[dict]:
         nested_results = []
@@ -852,6 +868,9 @@ def explore_application(
                 break
             pair = (item.get("page"), item.get("command"))
             visited.add(pair)
+            progress(
+                f"Exploring action {len(results) + 1}/{planned}: {item['command']}"
+            )
 
             def discover(context: dict) -> dict:
                 if depth >= depth_limit:
@@ -872,6 +891,9 @@ def explore_application(
                         version,
                         strategy="visual-first",
                         root=directory.parent.parent,
+                        progress=lambda message, title=title: progress(
+                            f"Nested page scan ({title}): {message}"
+                        ),
                     )
                     if scan.get("app_id") != directory.name:
                         continue
@@ -902,6 +924,7 @@ def explore_application(
                     confirm=confirm,
                     recover=True,
                     post_effect=discover,
+                    progress=progress,
                 )
             except Exception as error:
                 stopped.append(f"{item['command']}: {type(error).__name__}: {error}")

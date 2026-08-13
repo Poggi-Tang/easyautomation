@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """easy-uiauto - UI automation toolkit based on pyautogui and uiautomation"""
 
-__version__ = "0.5.1"
+__version__ = "0.6.0"
 __author__ = "Poggi-Tang"
 
 from .ctrl import (
@@ -41,10 +41,13 @@ from .utils import (
     auto_scroll,
 )
 
-from .draw import ScreenLineBox
+from .draw import ScreenControlOverlay, ScreenLineBox, show_control_overlay
 
 __all__ = [
     "Controller",
+    "ScreenControlOverlay",
+    "ScreenLineBox",
+    "show_control_overlay",
     "left_click",
     "right_click",
     "double_click",
@@ -74,5 +77,4 @@ __all__ = [
     "push_message",
     "set_top_window",
     "auto_scroll",
-    "ScreenLineBox",
 ]

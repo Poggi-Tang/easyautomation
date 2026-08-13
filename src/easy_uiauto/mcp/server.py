@@ -1,6 +1,7 @@
 """easy_uiauto MCP server for Windows desktop UI automation."""
 
 import argparse
+import asyncio
 import base64
 import ctypes
 import io
@@ -17,7 +18,7 @@ from urllib import request as urlrequest
 
 import pyautogui
 import uiautomation
-from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp import Context, FastMCP
 from mcp.server.fastmcp import Image as MCPImage
 
 # easy-uiauto imports
@@ -31,13 +32,23 @@ from easy_uiauto.utils import (
 )
 
 from .. import __version__
-from . import configuration, interaction_learning, knowledge, scanner, skill_installation, ui_cli
+from . import (
+    configuration,
+    interaction_learning,
+    knowledge,
+    learning_progress,
+    scanner,
+    skill_installation,
+    ui_cli,
+    visualization,
+)
 from .protocol import location_from_xpath, normalize_location
 
 # Disable pyautogui failsafe for automation (moving mouse to corner won't crash)
 pyautogui.FAILSAFE = False
 # Disable pyautogui pause between actions for faster automation
 pyautogui.PAUSE = 0.1
+LEARNING_HEARTBEAT_SECONDS = 5.0
 
 mcp = FastMCP(
     "easy_uiauto",
@@ -1025,12 +1036,15 @@ def get_ui_learning_readiness() -> str:
 
 
 @mcp.tool()
-def scan_window_knowledge(
+async def scan_window_knowledge(
     window_name: str,
+    ctx: Context,
     max_depth: int = 12,
     max_controls: int = 3000,
     verify_limit: int = 500,
     strategy: str = "visual-first",
+    show_overlay: bool = True,
+    overlay_duration_ms: int = 3000,
 ) -> str:
     """Scan one application window into an Obsidian-compatible UI knowledge vault.
 
@@ -1044,23 +1058,92 @@ def scan_window_knowledge(
         max_controls: Hard cap for controls visited; the result reports truncation.
         verify_limit: Maximum actionable controls to verify during this scan.
         strategy: ``visual-first`` (default) or diagnostic ``full-uia``.
+        show_overlay: Draw all controls learned by this scan in one click-through overlay.
+        overlay_duration_ms: Overlay lifetime from 300 to 30000 milliseconds.
     """
     try:
-        api_url, api_key, model = _vision_api_settings("")
-        result = scanner.scan_window(
-            window_name=window_name,
-            api_url=api_url,
-            api_key=api_key,
-            model=model,
-            version=__version__,
-            max_depth=max_depth,
-            max_controls=max_controls,
-            verify_limit=verify_limit,
-            strategy=strategy,
-        )
-        return json.dumps(result, ensure_ascii=False, indent=2)
+        task_id = learning_progress.begin(window_name, strategy)
     except Exception as error:
         return f"Error scanning application knowledge: {error}"
+    loop = asyncio.get_running_loop()
+    progress_changed = asyncio.Event()
+
+    def update_progress(message: str) -> None:
+        learning_progress.update(task_id, message)
+        loop.call_soon_threadsafe(progress_changed.set)
+
+    def run_scan() -> dict:
+        try:
+            result = scanner.scan_window(
+                window_name=window_name,
+                api_url=api_url,
+                api_key=api_key,
+                model=model,
+                version=__version__,
+                max_depth=max_depth,
+                max_controls=max_controls,
+                verify_limit=verify_limit,
+                strategy=strategy,
+                show_overlay=show_overlay,
+                overlay_duration_ms=overlay_duration_ms,
+                progress=update_progress,
+            )
+            result["learning_task_id"] = task_id
+            learning_progress.complete(task_id, result)
+            return result
+        except BaseException as error:
+            learning_progress.fail(task_id, error)
+            raise
+
+    async def report_status() -> None:
+        status = learning_progress.get(task_id)
+        message = (
+            f"[{task_id}] {status['stage']} | "
+            f"elapsed {status['elapsed_seconds']:.1f}s"
+        )
+        try:
+            await ctx.report_progress(status["progress_percent"], 100, message)
+            await ctx.info(message)
+        except Exception:
+            pass
+
+    try:
+        api_url, api_key, model = _vision_api_settings("")
+        await report_status()
+        worker = loop.run_in_executor(None, run_scan)
+        while not worker.done():
+            changed = asyncio.create_task(progress_changed.wait())
+            done, _pending = await asyncio.wait(
+                {worker, changed},
+                timeout=LEARNING_HEARTBEAT_SECONDS,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if changed in done:
+                progress_changed.clear()
+            else:
+                changed.cancel()
+            if changed in done or not done:
+                await report_status()
+        result = await worker
+        await report_status()
+        return json.dumps(result, ensure_ascii=False, indent=2)
+    except Exception as error:
+        if learning_progress.get(task_id).get("state") == "running":
+            learning_progress.fail(task_id, error)
+        return f"Error scanning application knowledge: {error}"
+
+
+@mcp.tool()
+def get_ui_learning_status(task_id: str = "") -> str:
+    """Return the latest learning task state after progress loss or client timeout.
+
+    An empty task ID selects the latest scan in this MCP process. ``running``
+    means the original scan is still active and must not be started again.
+    """
+    try:
+        return json.dumps(learning_progress.get(task_id), ensure_ascii=False, indent=2)
+    except Exception as error:
+        return f"Error checking UI learning status: {error}"
 
 
 @mcp.tool()
@@ -1109,19 +1192,50 @@ def list_ui_commands(app_id: str, page_id: str = "") -> str:
 
 
 @mcp.tool()
+def show_ui_controls(
+    app_id: str,
+    page_id: str = "",
+    include: str = "executable",
+    duration_ms: int = 5000,
+) -> str:
+    """Box controls on the current learned page and return their numbered command legend.
+
+    The current target window is captured once and compared with saved local page
+    images. This does not run another learning scan or remote AI request. Current
+    boxes are resolved through LOCATION, unique image templates, then local OCR.
+    ``executable`` shows only verified actionable controls; ``known`` also shows
+    learned structural, suspect, and quarantined controls.
+    """
+    try:
+        result = visualization.show_page_controls(
+            knowledge.app_dir(app_id),
+            page_id,
+            include,
+            duration_ms,
+        )
+        return json.dumps(result, ensure_ascii=False, indent=2)
+    except Exception as error:
+        return f"Error showing UI controls: {error}"
+
+
+@mcp.tool()
 def run_ui_command(
     app_id: str,
     command: str,
     text: str = "",
     confirm: bool = False,
     allow_vision_fallback: bool = False,
+    highlight: bool = True,
+    highlight_duration_ms: int = 900,
 ) -> str:
     """Run one verified application-specific UI command.
 
     Before execution, the saved LOCATION and control PNG are checked against
     the current UI. A stale or mismatched record is quarantined instead of being
-        clicked. Use ``text`` for commands ending in ``.set-text``. Commands
-        marked external or destructive require ``confirm=true``.
+    clicked. Use ``text`` for commands ending in ``.set-text``. Commands
+    marked external or destructive require ``confirm=true``. By default, a
+    click-through red frame previews the resolved target without delaying for
+    the full overlay lifetime. Set ``highlight=false`` to disable it.
     """
     try:
         blocked = _mode_blocks_operation()
@@ -1133,6 +1247,9 @@ def run_ui_command(
             text,
             confirm,
             allow_vision_fallback,
+            highlight,
+            highlight_duration_ms,
+            100,
         )
     except Exception as error:
         return f"Error running UI command: {error}"
@@ -1144,6 +1261,8 @@ def run_ui_commands(
     steps: list[dict | str],
     confirm: bool = False,
     allow_vision_fallback: bool = False,
+    highlight: bool = True,
+    highlight_duration_ms: int = 1200,
 ) -> str:
     """Run a verified same-page UI command sequence with one shared preflight.
 
@@ -1168,6 +1287,9 @@ def run_ui_commands(
             steps,
             confirm,
             allow_vision_fallback,
+            highlight,
+            highlight_duration_ms,
+            100,
         )
     except Exception as error:
         return f"Error running UI command batch: {error}"
@@ -1212,8 +1334,9 @@ def learn_ui_command_effect(
 
 
 @mcp.tool()
-def explore_ui_workflows(
+async def explore_ui_workflows(
     app_id: str,
+    ctx: Context,
     policy: str = "safe",
     max_actions: int = 10,
     confirm: bool = False,
@@ -1232,19 +1355,68 @@ def explore_ui_workflows(
         if blocked:
             return blocked
         api_url, api_key, model = _vision_api_settings("")
-        result = interaction_learning.explore_application(
-            knowledge.app_dir(app_id),
-            api_url,
-            api_key,
-            model,
-            __version__,
-            policy=policy,
-            max_actions=max_actions,
-            confirm=confirm,
-            max_depth=max_depth,
-        )
+        task_id = learning_progress.begin(app_id, policy, task_type="exploration")
+        loop = asyncio.get_running_loop()
+        progress_changed = asyncio.Event()
+
+        def update_progress(message: str) -> None:
+            learning_progress.update(task_id, message)
+            loop.call_soon_threadsafe(progress_changed.set)
+
+        def run_exploration() -> dict:
+            try:
+                value = interaction_learning.explore_application(
+                    knowledge.app_dir(app_id),
+                    api_url,
+                    api_key,
+                    model,
+                    __version__,
+                    policy=policy,
+                    max_actions=max_actions,
+                    confirm=confirm,
+                    max_depth=max_depth,
+                    progress=update_progress,
+                )
+                value["learning_task_id"] = task_id
+                learning_progress.complete(task_id, value)
+                return value
+            except BaseException as error:
+                learning_progress.fail(task_id, error)
+                raise
+
+        async def report_status() -> None:
+            status = learning_progress.get(task_id)
+            message = (
+                f"[{task_id}] {status['stage']} | "
+                f"elapsed {status['elapsed_seconds']:.1f}s"
+            )
+            try:
+                await ctx.report_progress(status["progress_percent"], 100, message)
+                await ctx.info(message)
+            except Exception:
+                pass
+
+        await report_status()
+        worker = loop.run_in_executor(None, run_exploration)
+        while not worker.done():
+            changed = asyncio.create_task(progress_changed.wait())
+            done, _pending = await asyncio.wait(
+                {worker, changed},
+                timeout=LEARNING_HEARTBEAT_SECONDS,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if changed in done:
+                progress_changed.clear()
+            else:
+                changed.cancel()
+            if changed in done or not done:
+                await report_status()
+        result = await worker
+        await report_status()
         return json.dumps(result, ensure_ascii=False, indent=2)
     except Exception as error:
+        if "task_id" in locals() and learning_progress.get(task_id).get("state") == "running":
+            learning_progress.fail(task_id, error)
         return f"Error exploring UI workflows: {error}"
 
 
@@ -2202,7 +2374,8 @@ def _build_arg_parser() -> argparse.ArgumentParser:
             "  keyboard: type_text, set_text, press_key, hotkey\n"
             "  batch: run_action, run_actions\n"
             "  screenshot: take_screenshot\n"
-            "  knowledge: get_ui_learning_readiness, scan_window_knowledge,\n"
+            "  knowledge: get_ui_learning_readiness, get_ui_learning_status,\n"
+            "             scan_window_knowledge, show_ui_controls,\n"
             "             list_ui_knowledge_apps, search_ui_knowledge,\n"
             "             list_ui_commands, run_ui_command, run_ui_commands,\n"
             "             learn_ui_command_effect, explore_ui_workflows, list_ui_interactions,\n"

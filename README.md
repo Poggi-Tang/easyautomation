@@ -39,11 +39,15 @@ and currently released as a `0.x` project.
   whole tree by default.
 - 🧭 **Semantic UI CLI**: turn verified controls into searchable application
   commands instead of rediscovering coordinates for every task.
+- 🖼️ **Control overlays**: number every learned or executable control in one
+  click-through overlay, save annotated page images, and preview operation targets.
 - 🧪 **Effect learning**: compare before/after screenshots, inspect changed UIA
   properties and new windows, and store an evidence-backed success condition.
 - 🗂️ **Readable knowledge**: keep pages, controls, images, interactions, and
   quarantine records as Markdown/YAML/PNG files that work directly with Obsidian
   and version control.
+- 📐 **Stable records**: persist structured `LOCATION` identities and normalized
+  visual hints, never process IDs, window handles, or absolute desktop rectangles.
 - 🛟 **Layered lookup**: `LOCATION` first, then saved image states, local OCR, and
   opt-in remote vision as the final fallback.
 
@@ -203,13 +207,22 @@ A light scan observes one visible page. It does not click the application.
 easy_uiauto_ui scan "Window title"
 easy_uiauto_ui apps
 easy_uiauto_ui commands <app-id>
+easy_uiauto_ui show <app-id>
 ```
 
 The default `visual-first` strategy sends one target-window screenshot to the
 configured vision endpoint, identifies useful regions and controls, and maps
 those coordinates back to local UIA controls. It stores stable `LOCATION`
 records, control crops, meaning, aliases, risk, and generated commands. Secondary
-monitors are supported.
+monitors are supported. The scan also saves `<page-id>.annotated.png` and briefly
+draws the same numbered controls over the live window. Use `--no-overlay` when
+visual feedback is not wanted.
+
+MCP scans report their task ID, stage, elapsed time, and control-verification count
+every five seconds. If a client stops waiting, call `get_ui_learning_status` before
+retrying. A `running` task continues in the MCP process and must not be started twice.
+Plain learning requests stop after this scan. Interactive `explore_ui_workflows`
+runs only when deep or autonomous exploration is explicitly requested.
 
 Use `--strategy full-uia` for diagnostics when visual targeting is not suitable.
 This mode walks the visible UIA tree and performs a separate semantic pass, so it
@@ -245,6 +258,7 @@ dragging are not implemented in the explorer.
 
 ```bash
 easy_uiauto_ui search <app-id> "search terms"
+easy_uiauto_ui show <app-id> --include executable
 easy_uiauto_ui run <app-id> <page.region.control.action> --text "optional text"
 easy_uiauto_ui batch <app-id> '["main.keypad.enter-digit-6.click", "main.keypad.enter-addition-operation.click"]'
 easy_uiauto_ui learn-effect <app-id> <command> --recover
@@ -254,7 +268,9 @@ easy_uiauto_ui teach <app-id> <control-id> "Meaning" intent "Description"
 Runtime lookup follows `LOCATION` → saved image states → local OCR → opt-in
 remote vision. Enable the last step with `--allow-vision-fallback` or
 `allow_vision_fallback=true`. Stale, missing, or ambiguous controls are moved to
-quarantine instead of being clicked.
+quarantine instead of being clicked. Single and batch commands preview their
+resolved targets in red by default; pass `--no-highlight` or `highlight=false`
+to remove the roughly 100 ms visual-preview wait.
 
 Use a batch only for commands on the same stable page. Split the sequence after
 navigation. Commands with external or destructive effects require `--confirm`
@@ -280,6 +296,13 @@ applications/<app-id>/
 `.easy_uiauto/index.json` is a disposable search cache. Rebuild it with
 `easy_uiauto_ui reindex <app-id>` after editing Markdown by hand.
 
+Control and region geometry is stored only as a window-relative `normalized_rect`
+with `geometry_role: visual-hint-only`. It is useful for annotations and visual
+comparison, but never identifies or clicks a control. Live overlays and operations
+resolve the current `LOCATION` first, then use a unique image template or local OCR
+fallback. Version 0.6 automatically removes legacy absolute rectangles, PIDs, and
+window handles when an older vault index is rebuilt.
+
 ### 🔐 Privacy and Safety
 
 - Light scanning sends the selected target-window screenshot to the configured
@@ -288,13 +311,15 @@ applications/<app-id>/
   new windows. Full desktop snapshots remain local in the vault.
 - API keys are read from environment variables and are not written into the
   knowledge vault.
+- PIDs, native window handles, and absolute desktop coordinates are runtime
+  observations only and are not persisted as application knowledge.
 - Inferred control meanings remain separate from locator verification and
   observed operation effects. Use `teach` to correct a meaning; it cannot bypass
   failed location checks.
 - Existing reliable controls are retained when a visual-first rescan omits them.
 
 The same workflow is exposed through `get_ui_learning_readiness`,
-`scan_window_knowledge`,
+`get_ui_learning_status`, `scan_window_knowledge`, `show_ui_controls`,
 `list_ui_knowledge_apps`, `search_ui_knowledge`, `list_ui_commands`,
 `run_ui_command`, `run_ui_commands`, `learn_ui_command_effect`,
 `explore_ui_workflows`, `list_ui_interactions`, `teach_ui_control`, and

@@ -53,8 +53,8 @@ def test_cli_batch_accepts_command_strings_and_text_objects(monkeypatch, capsys,
     monkeypatch.setattr(knowledge, "app_dir", lambda _app_id: tmp_path)
     captured = {}
 
-    def execute_many(directory, steps, confirm):
-        captured.update(directory=directory, steps=steps, confirm=confirm)
+    def execute_many(directory, steps, confirm, **options):
+        captured.update(directory=directory, steps=steps, confirm=confirm, options=options)
         return {"ok": True, "completed_steps": len(steps)}
 
     monkeypatch.setattr(ui_cli_command.ui_cli, "execute_many", execute_many)
@@ -70,4 +70,9 @@ def test_cli_batch_accepts_command_strings_and_text_objects(monkeypatch, capsys,
             {"command": "main.form.name.set-text", "text": "A"},
         ],
         "confirm": True,
+        "options": {
+            "highlight": True,
+            "highlight_duration_ms": 1200,
+            "highlight_wait_ms": 100,
+        },
     }

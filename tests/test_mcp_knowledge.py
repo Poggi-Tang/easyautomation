@@ -130,3 +130,94 @@ def test_teach_control_publishes_when_positioning_is_verified(tmp_path) -> None:
     assert taught["requires_confirmation"] is True
     commands = knowledge.available_commands(directory)
     assert commands[0]["command"] == "main.toolbar.delete-item.click"
+
+
+def test_rebuild_migrates_volatile_geometry_and_process_fields(tmp_path) -> None:
+    directory = knowledge.initialize_app("example", "Example", tmp_path)
+    page_rect = {
+        "left": 100,
+        "top": 200,
+        "right": 500,
+        "bottom": 500,
+        "width": 400,
+        "height": 300,
+    }
+    knowledge.write_markdown(
+        directory / "pages" / "main.md",
+        {"kind": "page", "id": "main", "name": "Main", "rect": page_rect},
+        "# Main\n",
+    )
+    control = _control_record()
+    control.update({"kind": "control", "rect": {**page_rect}})
+    knowledge.write_markdown(directory / "controls" / "control-1.md", control, "# Save\n")
+    knowledge.write_markdown(
+        directory / "regions" / "main.toolbar.md",
+        {
+            "kind": "region",
+            "id": "main.toolbar",
+            "page_id": "main",
+            "rect": {
+                "left": 0,
+                "top": 0,
+                "right": 200,
+                "bottom": 60,
+                "width": 200,
+                "height": 60,
+            },
+        },
+        "# Toolbar\n",
+    )
+    knowledge.write_markdown(
+        directory / "interactions" / "effect.md",
+        {
+            "kind": "interaction",
+            "id": "effect",
+            "before": {
+                "window_rect": page_rect,
+                "target_handle": 99,
+                "windows": [
+                    {
+                        "title": "Example",
+                        "handle": 99,
+                        "owner_handle": 1,
+                        "process_id": 11320,
+                        "rect": page_rect,
+                    }
+                ],
+            },
+            "after": {"window_rect": page_rect, "windows": []},
+            "changed_regions": [{"left": 40, "top": 30, "right": 160, "bottom": 90}],
+        },
+        "# Effect\n",
+    )
+
+    first = knowledge.rebuild_index(directory)
+    second = knowledge.rebuild_index(directory)
+
+    assert "rect" not in first["pages"][0]
+    assert "rect" not in first["regions"][0]
+    assert first["regions"][0]["normalized_rect"] == {
+        "left": 0.0,
+        "top": 0.0,
+        "right": 0.5,
+        "bottom": 0.2,
+    }
+    migrated_control = first["controls"][0]
+    assert "rect" not in migrated_control
+    assert migrated_control["normalized_rect"] == {
+        "left": 0.0,
+        "top": 0.0,
+        "right": 1.0,
+        "bottom": 1.0,
+    }
+    interaction = first["interactions"][0]
+    assert "window_rect" not in interaction["before"]
+    assert "target_handle" not in interaction["before"]
+    assert interaction["before"]["windows"] == [{"title": "Example"}]
+    assert interaction["changed_regions"][0] == {
+        "left": 0.1,
+        "top": 0.1,
+        "right": 0.4,
+        "bottom": 0.3,
+    }
+    assert second["interactions"][0]["changed_regions"] == interaction["changed_regions"]

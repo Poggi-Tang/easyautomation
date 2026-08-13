@@ -95,6 +95,52 @@ def test_completion_reader_accepts_json_and_sse() -> None:
     assert scanner._read_completion_content(sse_response) == '{"ok":true}'
 
 
+def test_location_resolution_reuses_shared_xpath_prefixes() -> None:
+    save = FakeControl("Save", "ButtonControl", (20, 20, 80, 50))
+    open_control = FakeControl("Open", "ButtonControl", (90, 20, 150, 50))
+    toolbar = FakeControl(
+        "Toolbar",
+        "GroupControl",
+        (0, 0, 200, 80),
+        [save, open_control],
+    )
+    window = FakeControl("Example", "WindowControl", (0, 0, 400, 300), [toolbar])
+    calls = {"window": 0}
+    original = window.GetChildren
+
+    def counted_children():
+        calls["window"] += 1
+        return original()
+
+    window.GetChildren = counted_children
+    cache = {}
+    common = [
+        {"ControlType": "WindowControl", "Name": "Example"},
+        {"ControlType": "GroupControl", "Name": "Toolbar"},
+    ]
+
+    first = scanner.resolve_location(
+        {
+            "WindowName": "Example",
+            "Xpath": [*common, {"ControlType": "ButtonControl", "Name": "Save"}],
+        },
+        window,
+        cache,
+    )
+    second = scanner.resolve_location(
+        {
+            "WindowName": "Example",
+            "Xpath": [*common, {"ControlType": "ButtonControl", "Name": "Open"}],
+        },
+        window,
+        cache,
+    )
+
+    assert first is save
+    assert second is open_control
+    assert calls["window"] == 1
+
+
 def _semantic_result(
     candidates: list[dict],
     confidence: float = 0.96,
@@ -265,7 +311,7 @@ def test_scan_writes_images_markdown_and_verified_command(monkeypatch, tmp_path)
     monkeypatch.setattr(
         scanner,
         "_verify_location",
-        lambda _location, rect: (True, rect, "bounds IoU=1.000"),
+        lambda _location, rect, *_args: (True, rect, "bounds IoU=1.000"),
     )
     monkeypatch.setattr(
         scanner,
@@ -296,7 +342,27 @@ def test_scan_writes_images_markdown_and_verified_command(monkeypatch, tmp_path)
     assert button_record["intent"] == "save-document"
     assert button_record["semantic_confidence"] == 0.96
     assert button_record["function_verification"]["status"] == "inferred"
+    assert "rect" not in button_record
+    assert button_record["normalized_rect"] == {
+        "left": 0.1,
+        "top": 0.1,
+        "right": 0.4,
+        "bottom": 0.3,
+    }
+    assert button_record["geometry_role"] == "visual-hint-only"
+    index = knowledge.load_index(directory)
+    assert "rect" not in index["pages"][0]
+    assert "rect" not in index["regions"][0]
+    assert index["regions"][0]["normalized_rect"] == {
+        "left": 0.0,
+        "top": 0.0,
+        "right": 1.0,
+        "bottom": 1.0,
+    }
     assert list((directory / "images" / "controls").glob("*.png"))
+    assert (directory / "images" / "pages" / "main.annotated.png").is_file()
+    assert result["annotated_controls"] == 3
+    assert result["annotated_page_image"].endswith("main.annotated.png")
     assert (directory / "operations" / "UI-CLI.md").is_file()
 
 
@@ -366,7 +432,7 @@ def test_visual_first_scan_skips_full_tree_and_second_ai_request(monkeypatch, tm
     monkeypatch.setattr(
         scanner,
         "_verify_location",
-        lambda _location, rect: (True, rect, "bounds IoU=1.000"),
+        lambda _location, rect, *_args: (True, rect, "bounds IoU=1.000"),
     )
     directory = knowledge.initialize_app("example-app", "Example", tmp_path)
     knowledge.save_control(
@@ -421,7 +487,7 @@ def test_failed_actionable_control_is_quarantined(monkeypatch, tmp_path) -> None
     monkeypatch.setattr(
         scanner,
         "_verify_location",
-        lambda _location, _rect: (False, {}, "LOCATION did not resolve"),
+        lambda _location, _rect, *_args: (False, {}, "LOCATION did not resolve"),
     )
     monkeypatch.setattr(
         scanner,
@@ -479,7 +545,7 @@ def test_low_confidence_semantics_are_quarantined(monkeypatch, tmp_path) -> None
     monkeypatch.setattr(
         scanner,
         "_verify_location",
-        lambda _location, rect: (True, rect, "bounds IoU=1.000"),
+        lambda _location, rect, *_args: (True, rect, "bounds IoU=1.000"),
     )
 
     result = scanner.scan_window(

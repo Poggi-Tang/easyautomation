@@ -33,10 +33,14 @@
   UIA 控件；默认不遍历完整控件树。
 - 🧭 **软件 UI CLI**：把验证通过的控件转换成可搜索的软件命令，执行任务时
   不必重新猜坐标。
+- 🖼️ **控件框选反馈**：使用一个点击穿透覆盖层为整页控件编号，保存页面标注图，
+  并在执行命令前突出实际目标。
 - 🧪 **操作响应学习**：比较操作前后截图，检查变化区域、UIA 属性和新窗口，
   保存有证据支撑的成功条件。
 - 🗂️ **可维护知识库**：页面、控件、截图、交互和隔离记录都使用
   Markdown/YAML/PNG，可直接用 Obsidian 或 Git 管理。
+- 📐 **稳定记录**：持久化结构化 `LOCATION` 和窗口内归一化视觉提示，不保存
+  PID、窗口句柄或桌面绝对坐标。
 - 🛟 **分层定位兜底**：依次使用 `LOCATION`、多状态控件图、本地 OCR，最后才
   使用显式开启的远程视觉定位。
 
@@ -187,11 +191,19 @@ python -m easy_uiauto.mcp.service --port 9876
 easy_uiauto_ui scan "窗口标题"
 easy_uiauto_ui apps
 easy_uiauto_ui commands <app-id>
+easy_uiauto_ui show <app-id>
 ```
 
 默认的 `visual-first` 策略会把目标窗口截图发送到已配置的视觉接口，找出关键区域和控件，
 再把坐标映射到本地 UIA 控件。最终保存稳定 `LOCATION`、控件图、功能含义、同义词、
-风险和生成的命令。支持位于副屏上的窗口。
+风险和生成的命令。支持位于副屏上的窗口。扫描还会保存 `<页面-id>.annotated.png`，
+并在当前窗口短暂绘制相同编号的控件框；不需要实时框选时可传入 `--no-overlay`。
+
+通过 MCP 学习时，每 5 秒会报告任务 ID、当前阶段、已耗时和控件验证进度。如果客户端
+停止等待，应先调用 `get_ui_learning_status`；状态为 `running` 表示原扫描仍在 MCP 进程中
+继续执行，不能重复启动扫描。只有 `failed` 才表示学习失败。
+普通“学习/扫描”请求到基础扫描结束即完成；只有明确要求“深度学习”或“自主交互探索”时，
+才会执行 `explore_ui_workflows`。
 
 视觉定位不适用或需要诊断完整 UIA 覆盖时，可使用 `--strategy full-uia`。该模式会遍历
 可见 UIA 树并额外执行语义分析，因此更慢，产生的记录也更多。
@@ -222,6 +234,7 @@ easy_uiauto_ui interactions <app-id>
 
 ```bash
 easy_uiauto_ui search <app-id> "检索词"
+easy_uiauto_ui show <app-id> --include executable
 easy_uiauto_ui run <app-id> <页面.区域.控件.动作> --text "可选文本"
 easy_uiauto_ui batch <app-id> '["main.keypad.enter-digit-6.click", "main.keypad.enter-addition-operation.click"]'
 easy_uiauto_ui learn-effect <app-id> <command> --recover
@@ -230,7 +243,9 @@ easy_uiauto_ui teach <app-id> <control-id> "控件含义" intent "功能说明"
 
 运行时依次使用 `LOCATION` → 多状态控件图 → 本地 OCR → 显式开启的远程视觉。
 最后一级需要传入 `--allow-vision-fallback` 或 `allow_vision_fallback=true`。
-控件失效、缺失或匹配不唯一时会进入隔离区，不会继续点击。
+控件失效、缺失或匹配不唯一时会进入隔离区，不会继续点击。单条和批量命令默认会用
+红框预览实际解析出的目标；可通过 `--no-highlight` 或 `highlight=false` 关闭约 100 ms
+的可视预览等待。
 
 批量执行只适用于同一个稳定页面，发生页面跳转后应拆成下一批。涉及外部影响或破坏性的
 命令必须传入 `--confirm` 或 `confirm=true`。
@@ -254,17 +269,25 @@ applications/<app-id>/
 `.easy_uiauto/index.json` 只是可删除的检索缓存。手工修改 Markdown 后，使用
 `easy_uiauto_ui reindex <app-id>` 重建即可。
 
+控件和区域只保存窗口内的 `normalized_rect`，并明确标记
+`geometry_role: visual-hint-only`。它只用于页面标注和视觉对比，不能作为控件身份，
+也不能直接用于点击。实时框选和操作会先重新解析当前 `LOCATION`，失败后才使用唯一
+图片模板或本地 OCR 兜底。0.6 版重建旧知识库索引时，会自动清除历史绝对坐标、PID
+和窗口句柄。
+
 ### 🔐 隐私与安全
 
 - 轻度扫描会把选中的目标窗口截图发送到已配置的视觉接口。
 - 操作响应学习会发送目标窗口的前后图，以及与操作相关的新窗口裁剪图；完整桌面快照
   只保存在本地知识库。
 - API Key 从环境变量读取，不会写入知识库。
+- PID、原生窗口句柄和桌面绝对坐标只作为本次运行观测，不会写成长期软件知识。
 - 推断出的控件含义、定位验证和实际操作响应分别记录，不会混为“已经验证”。可以使用
   `teach` 修正含义，但人工修正不能绕过失败的定位检查。
 - 视觉优先重扫偶尔漏掉控件时，已有可靠控件不会被直接删除。
 
-对应 MCP 工具包括 `get_ui_learning_readiness`、`scan_window_knowledge`、
+对应 MCP 工具包括 `get_ui_learning_readiness`、`get_ui_learning_status`、
+`scan_window_knowledge`、`show_ui_controls`、
 `list_ui_knowledge_apps`、
 `search_ui_knowledge`、`list_ui_commands`、`run_ui_command`、`run_ui_commands`、
 `learn_ui_command_effect`、`explore_ui_workflows`、`list_ui_interactions`、

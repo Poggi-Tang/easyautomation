@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 
 KNOWLEDGE_DIR = "EASY_UIAUTO_KNOWLEDGE_DIR"
-INDEX_VERSION = 2
+INDEX_VERSION = 3
 SEARCHABLE_STATUSES = {"verified", "observed", "suspect"}
 EXECUTABLE_STATUSES = {"verified"}
 
@@ -40,6 +40,122 @@ def stable_id(prefix: str, *parts: Any) -> str:
 
 def utc_now() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds")
+
+
+def normalized_rect(rectangle: dict, reference: dict, relative: bool = False) -> dict:
+    """Convert volatile pixels to a window-relative visual hint in the 0..1 range."""
+    reference_width = reference.get("width")
+    if reference_width is None:
+        reference_width = reference["right"] - reference["left"]
+    reference_height = reference.get("height")
+    if reference_height is None:
+        reference_height = reference["bottom"] - reference["top"]
+    width = max(1, int(reference_width))
+    height = max(1, int(reference_height))
+    origin_left = 0 if relative else int(reference.get("left", 0))
+    origin_top = 0 if relative else int(reference.get("top", 0))
+    return {
+        "left": round((int(rectangle["left"]) - origin_left) / width, 6),
+        "top": round((int(rectangle["top"]) - origin_top) / height, 6),
+        "right": round((int(rectangle["right"]) - origin_left) / width, 6),
+        "bottom": round((int(rectangle["bottom"]) - origin_top) / height, 6),
+    }
+
+
+def _public_window_observation(item: dict) -> dict:
+    return {
+        key: item.get(key)
+        for key in ("title", "class_name", "control_type", "foreground")
+        if key in item
+    }
+
+
+def sanitize_interaction_geometry(record: dict) -> dict:
+    """Remove process-local handles, PIDs, and absolute desktop positions before persistence."""
+    record = dict(record)
+    observed_size = None
+    for snapshot_name in ("before", "after"):
+        snapshot = dict(record.get(snapshot_name, {}))
+        rectangle = snapshot.pop("window_rect", None)
+        if isinstance(rectangle, dict):
+            size = {
+                "width": rectangle.get("width", 0),
+                "height": rectangle.get("height", 0),
+            }
+            snapshot["observed_window_size"] = size
+            observed_size = observed_size or size
+        for key in ("target_handle", "desktop_origin"):
+            snapshot.pop(key, None)
+        snapshot["windows"] = [
+            _public_window_observation(item)
+            for item in snapshot.get("windows", [])
+            if isinstance(item, dict)
+        ]
+        action_control = dict(snapshot.get("action_control", {}))
+        action_control.pop("rect", None)
+        snapshot["action_control"] = action_control
+        record[snapshot_name] = snapshot
+
+    changes = dict(record.get("window_changes", {}))
+    for key in ("added", "removed"):
+        changes[key] = [
+            _public_window_observation(item)
+            for item in changes.get(key, [])
+            if isinstance(item, dict)
+        ]
+    changes["changed"] = [
+        {
+            "before": _public_window_observation(item.get("before", {})),
+            "after": _public_window_observation(item.get("after", {})),
+        }
+        for item in changes.get("changed", [])
+        if isinstance(item, dict)
+    ]
+    record["window_changes"] = changes
+    record["transient_windows"] = [
+        _public_window_observation(item)
+        for item in record.get("transient_windows", [])
+        if isinstance(item, dict)
+    ]
+    for key in ("changed_controls", "popup_controls"):
+        values = []
+        for item in record.get(key, []):
+            if not isinstance(item, dict):
+                continue
+            cleaned = dict(item)
+            cleaned.pop("rect", None)
+            cleaned.pop("process_id", None)
+            cleaned.pop("handle", None)
+            values.append(cleaned)
+        record[key] = values
+    if observed_size and record.get("changed_region_geometry_role") != "visual-hint-only":
+        for key in ("changed_regions",):
+            record[key] = [
+                normalized_rect(item, observed_size, relative=True)
+                for item in record.get(key, [])
+                if isinstance(item, dict)
+            ]
+        record["changed_region_geometry_role"] = "visual-hint-only"
+    action_changes = dict(record.get("action_property_changes", {}))
+    if "rect" in action_changes:
+        action_changes["geometry_changed"] = True
+        action_changes.pop("rect", None)
+    record["action_property_changes"] = action_changes
+    stability = dict(record.get("stability", {}))
+    if observed_size and stability.get("dynamic_region_geometry_role") != "visual-hint-only":
+        stability["dynamic_regions"] = [
+            normalized_rect(item, observed_size, relative=True)
+            for item in stability.get("dynamic_regions", [])
+            if isinstance(item, dict)
+        ]
+        stability["dynamic_region_geometry_role"] = "visual-hint-only"
+    stability["observed_windows"] = [
+        _public_window_observation(item)
+        for item in stability.get("observed_windows", [])
+        if isinstance(item, dict)
+    ]
+    record["stability"] = stability
+    return record
 
 
 def app_dir(app_id: str, root: Path | None = None) -> Path:
@@ -137,6 +253,8 @@ def _control_body(record: dict) -> str:
 
 
 def save_control(directory: Path, record: dict) -> Path:
+    record = dict(record)
+    record.pop("rect", None)
     existing = find_control_record(directory, record["id"], include_quarantine=True)
     if existing:
         old_path, old_record = existing
@@ -181,12 +299,9 @@ def teach_control(
     risk = risk.strip().lower()
     if risk not in {"safe", "state-changing", "external", "destructive", "unknown"}:
         raise ValueError(f"Unsupported risk: {risk}")
-    positioning_ok = (
-        record.get("verification", {}).get("image") == "passed"
-        and (
-            record.get("verification", {}).get("location") == "passed"
-            or record.get("visual_fallback_ready") is True
-        )
+    positioning_ok = record.get("verification", {}).get("image") == "passed" and (
+        record.get("verification", {}).get("location") == "passed"
+        or record.get("visual_fallback_ready") is True
     )
     record.update(
         {
@@ -226,9 +341,7 @@ def teach_control(
         for _item_path, item in iter_records(directory, "control")
         if item.get("id") != control_id
     }
-    record["command"] = (
-        f"{command}-{slugify(control_id)[-6:]}" if command in occupied else command
-    )
+    record["command"] = f"{command}-{slugify(control_id)[-6:]}" if command in occupied else command
     record["tags"] = list(
         dict.fromkeys(
             [
@@ -246,6 +359,7 @@ def teach_control(
 
 def save_page(directory: Path, record: dict) -> Path:
     record = {**record, "kind": "page", "updated_at": utc_now()}
+    record.pop("rect", None)
     title = record.get("name") or record["id"]
     body = f"# {title}\n\n{record.get('description', '')}\n"
     path = directory / "pages" / f"{slugify(record['id'])}.md"
@@ -255,6 +369,7 @@ def save_page(directory: Path, record: dict) -> Path:
 
 def save_region(directory: Path, record: dict) -> Path:
     record = {**record, "kind": "region", "updated_at": utc_now()}
+    record.pop("rect", None)
     title = record.get("name") or record["id"]
     body = f"# {title}\n\n{record.get('description', '')}\n"
     path = directory / "regions" / f"{slugify(record['id'])}.md"
@@ -264,14 +379,19 @@ def save_region(directory: Path, record: dict) -> Path:
 
 def save_interaction(directory: Path, record: dict) -> Path:
     """Persist one before/after operation effect as Markdown source of truth."""
-    record = {**record, "kind": "interaction", "updated_at": utc_now()}
+    record = sanitize_interaction_geometry(
+        {**record, "kind": "interaction", "updated_at": utc_now()}
+    )
     title = record.get("semantic_name") or record.get("command") or record["id"]
     effects = record.get("effects", [])
-    effect_lines = "\n".join(
-        f"- `{item.get('type', 'change')}`: {item.get('description', '')}"
-        for item in effects
-        if isinstance(item, dict)
-    ) or "- No confirmed effect"
+    effect_lines = (
+        "\n".join(
+            f"- `{item.get('type', 'change')}`: {item.get('description', '')}"
+            for item in effects
+            if isinstance(item, dict)
+        )
+        or "- No confirmed effect"
+    )
     body = (
         f"# {title}\n\n"
         f"Command: `{record.get('command', '')}`  \n"
@@ -325,7 +445,59 @@ def find_control_record(
     return None
 
 
+def migrate_legacy_volatile_geometry(directory: Path) -> int:
+    """Upgrade v2 absolute geometry and process-local interaction fields in place."""
+    changed = 0
+    page_rectangles = {}
+    page_records = iter_records(directory, "page")
+    for _path, page in page_records:
+        if isinstance(page.get("rect"), dict):
+            page_rectangles[page.get("id")] = page["rect"]
+
+    for path, record in iter_records(directory, "control"):
+        rectangle = record.get("rect")
+        reference = page_rectangles.get(record.get("page_id"))
+        if not isinstance(rectangle, dict) or not isinstance(reference, dict):
+            continue
+        _metadata, body = read_markdown(path)
+        record["normalized_rect"] = normalized_rect(rectangle, reference)
+        record["geometry_role"] = "visual-hint-only"
+        record.pop("rect", None)
+        write_markdown(path, record, body)
+        changed += 1
+
+    for path, record in iter_records(directory, "region"):
+        rectangle = record.get("rect")
+        reference = page_rectangles.get(record.get("page_id"))
+        if not isinstance(rectangle, dict) or not isinstance(reference, dict):
+            continue
+        _metadata, body = read_markdown(path)
+        record["normalized_rect"] = normalized_rect(rectangle, reference, relative=True)
+        record["geometry_role"] = "visual-hint-only"
+        record.pop("rect", None)
+        write_markdown(path, record, body)
+        changed += 1
+
+    for path, record in page_records:
+        if "rect" not in record:
+            continue
+        _metadata, body = read_markdown(path)
+        record.pop("rect", None)
+        write_markdown(path, record, body)
+        changed += 1
+
+    for path, record in iter_records(directory, "interaction"):
+        cleaned = sanitize_interaction_geometry(record)
+        if cleaned == record:
+            continue
+        _metadata, body = read_markdown(path)
+        write_markdown(path, cleaned, body)
+        changed += 1
+    return changed
+
+
 def rebuild_index(directory: Path) -> dict:
+    migrate_legacy_volatile_geometry(directory)
     app_record = {}
     app_path = directory / "app.md"
     if app_path.is_file():
@@ -385,8 +557,7 @@ def list_apps(root: Path | None = None) -> list[dict]:
                     control.get("status") == "verified" for control in index.get("controls", [])
                 ),
                 "quarantined": sum(
-                    control.get("status") == "quarantined"
-                    for control in index.get("controls", [])
+                    control.get("status") == "quarantined" for control in index.get("controls", [])
                 ),
                 "semantic_verified": sum(
                     control.get("semantic_status") in {"verified", "manual"}

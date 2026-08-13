@@ -10,7 +10,7 @@ from urllib import request as urlrequest
 
 import pyautogui
 
-from . import configuration, knowledge
+from . import configuration, knowledge, visualization
 from .scanner import (
     _crop_control,
     _find_window,
@@ -329,12 +329,40 @@ def _record_execution(record: dict, count: int = 1) -> None:
     }
 
 
+def _show_execution_preview(
+    records: list[dict],
+    rectangles: dict[str, dict],
+    duration_ms: int,
+    wait_ms: int,
+) -> dict:
+    markers = []
+    for record in records:
+        rectangle = rectangles.get(record["id"])
+        if not rectangle:
+            continue
+        markers.append(
+            {
+                "index": len(markers) + 1,
+                "control_id": record["id"],
+                "label": record.get("semantic_name") or record.get("name") or record["id"],
+                "rect": rectangle,
+                "status": record.get("status", "verified"),
+                "color": visualization.STATUS_COLORS["verified"],
+                "target": True,
+            }
+        )
+    return visualization.show_markers(markers, duration_ms, wait_ms)
+
+
 def execute(
     directory: Path,
     command: str,
     text: str = "",
     confirm: bool = False,
     allow_vision_fallback: bool = False,
+    highlight: bool = False,
+    highlight_duration_ms: int = 900,
+    highlight_wait_ms: int = 100,
 ) -> dict:
     """Execute one verified UI CLI command and quarantine stale knowledge."""
     record, action = knowledge.resolve_command(directory, command)
@@ -357,6 +385,14 @@ def execute(
             "Rescan the current page before retrying."
         ) from error
 
+    overlay = {"shown": False, "controls": 0, "detail": "disabled"}
+    if highlight:
+        overlay = _show_execution_preview(
+            [record],
+            {record["id"]: rectangle},
+            highlight_duration_ms,
+            highlight_wait_ms,
+        )
     _perform_action(action, text, control, rectangle)
     _record_execution(record)
     knowledge.save_control(directory, record)
@@ -370,6 +406,7 @@ def execute(
         "image_similarity": similarity,
         "resolved_by": resolved_by,
         "location": record["location"],
+        "overlay": overlay,
     }
 
 
@@ -379,9 +416,21 @@ def execute_json(
     text: str = "",
     confirm: bool = False,
     allow_vision_fallback: bool = False,
+    highlight: bool = False,
+    highlight_duration_ms: int = 900,
+    highlight_wait_ms: int = 100,
 ) -> str:
     return json.dumps(
-        execute(directory, command, text, confirm, allow_vision_fallback),
+        execute(
+            directory,
+            command,
+            text,
+            confirm,
+            allow_vision_fallback,
+            highlight,
+            highlight_duration_ms,
+            highlight_wait_ms,
+        ),
         ensure_ascii=False,
         indent=2,
     )
@@ -414,6 +463,9 @@ def execute_many(
     steps: list[str | dict],
     confirm: bool = False,
     allow_vision_fallback: bool = False,
+    highlight: bool = False,
+    highlight_duration_ms: int = 1200,
+    highlight_wait_ms: int = 100,
 ) -> dict:
     """Preflight and execute a same-page command sequence in one process."""
     started = perf_counter()
@@ -479,6 +531,15 @@ def execute_many(
             ) from error
     preflight_finished = perf_counter()
 
+    overlay = {"shown": False, "controls": 0, "detail": "disabled"}
+    if highlight:
+        overlay = _show_execution_preview(
+            list(records.values()),
+            {control_id: value[2] for control_id, value in resolved.items()},
+            highlight_duration_ms,
+            highlight_wait_ms,
+        )
+
     results = []
     execution_counts: dict[str, int] = {}
     failed_step = None
@@ -527,6 +588,7 @@ def execute_many(
         "elapsed_seconds": round(finished - started, 3),
         "steps": results,
         "failed_step": failed_step,
+        "overlay": overlay,
     }
 
 
@@ -535,9 +597,20 @@ def execute_many_json(
     steps: list[str | dict],
     confirm: bool = False,
     allow_vision_fallback: bool = False,
+    highlight: bool = False,
+    highlight_duration_ms: int = 1200,
+    highlight_wait_ms: int = 100,
 ) -> str:
     return json.dumps(
-        execute_many(directory, steps, confirm, allow_vision_fallback),
+        execute_many(
+            directory,
+            steps,
+            confirm,
+            allow_vision_fallback,
+            highlight,
+            highlight_duration_ms,
+            highlight_wait_ms,
+        ),
         ensure_ascii=False,
         indent=2,
     )
