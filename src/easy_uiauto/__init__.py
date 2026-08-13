@@ -42,12 +42,15 @@ from .utils import (
 )
 
 from .draw import ScreenControlOverlay, ScreenLineBox, show_control_overlay
+from .visual import segment_image, segment_screen_rect
 
 __all__ = [
     "Controller",
     "ScreenControlOverlay",
     "ScreenLineBox",
     "show_control_overlay",
+    "segment_image",
+    "segment_screen_rect",
     "left_click",
     "right_click",
     "double_click",

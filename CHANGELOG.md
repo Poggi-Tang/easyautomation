@@ -12,6 +12,8 @@ The format is based on Keep a Changelog and is maintained automatically by Seman
   and the `Name`/`ClassName`/`ControlType` property combination third.
 - AutomationId lookup searches the complete current window instead of trusting a recorded
   XPath depth or dynamic `foundIndex`.
+- Added the public `easy_uiauto.visual.segment_screen_rect` and `segment_image` Python APIs
+  so local rectangle segmentation does not require MCP setup or imports.
 
 ### Fixed
 

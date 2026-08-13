@@ -109,6 +109,27 @@ data (for example `eng` or `chi_sim`). The MCP tools are
 `find_control_by_image`, `click_by_image`, `find_text_on_screen`, and
 `click_text_on_screen`.
 
+For ordinary Python code, install only the local vision extra and call the
+rectangle segmenter directly. It does not start MCP, call OCR, or upload data:
+
+```bash
+pip install "easy-uiauto[vision]"
+```
+
+```python
+from easy_uiauto.visual import segment_screen_rect
+
+result = segment_screen_rect(
+    {"left": 100, "top": 200, "right": 900, "bottom": 800},
+    min_width=6,
+    min_height=6,
+    save_annotated=True,
+)
+for box in result["boxes"]:
+    print(box["rect"], box["parent_id"])
+print(result["relations"], result["groups"])
+```
+
 For a coarse UIA canvas whose internal elements have no UIA nodes, pass the
 control result or its bounds directly to the local rectangle detector:
 

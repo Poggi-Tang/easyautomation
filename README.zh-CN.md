@@ -99,6 +99,27 @@ Tesseract 可执行文件及相应语言数据，例如 `eng` 或 `chi_sim`。�
 `find_control_by_image`、`click_by_image`、`find_text_on_screen`、
 `click_text_on_screen`。
 
+普通 Python 代码只需安装本地视觉依赖并直接调用矩形分割器，不会启动 MCP、调用 OCR
+或上传数据：
+
+```bash
+pip install "easy-uiauto[vision]"
+```
+
+```python
+from easy_uiauto.visual import segment_screen_rect
+
+result = segment_screen_rect(
+    {"left": 100, "top": 200, "right": 900, "bottom": 800},
+    min_width=6,
+    min_height=6,
+    save_annotated=True,
+)
+for box in result["boxes"]:
+    print(box["rect"], box["parent_id"])
+print(result["relations"], result["groups"])
+```
+
 如果 UIA 只暴露一个大画布、内部元素没有 UIA 节点，可把控件返回结果或其中的矩形
 直接交给本地矩形检测器：
 
