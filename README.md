@@ -119,8 +119,12 @@ detect_visual_elements(rect=<the returned control object>)
 
 `detect_visual_elements` captures only the supplied rectangle and returns numbered
 class-agnostic boxes, absolute screen rectangles, input-relative normalized rectangles,
-containment relationships, confidence, timing, and an annotated preview path. It does
-not traverse UIA, run OCR, infer semantics, download a model, or call a remote API.
+containment relationships, confidence, timing, and an annotated preview path. Its local
+layout graph adds `right-of`, `below`, alignment, overlap, and adaptive-gap relations, then
+builds variable-size union groups. Group signatures intentionally exclude element width,
+height, and observed content, so changing name lengths and multiline content remain the same
+structure. Repeated vertical items and table rows remain separate. The tool does not traverse
+UIA, run OCR, infer semantics, download a model, or call a remote API.
 
 Remote visual location does not run a local model or require a vendor SDK. Set
 an OpenAI-compatible vision endpoint and credentials, then use

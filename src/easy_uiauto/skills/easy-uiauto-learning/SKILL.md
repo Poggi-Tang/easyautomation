@@ -74,6 +74,10 @@ Build reusable UI knowledge through the `easy_uiauto` MCP tools.
   returned rectangles and containment tree as local geometry candidates. This tool is local,
   class-agnostic, and non-semantic; do not run it over native child controls already exposed by
   UIA, and do not mistake a rectangle candidate for a verified action.
+- Use its `relations`, `groups`, and `layout_signature` for self-drawn composite structures.
+  Treat every group's `size_policy=variable` literally: current width, height, and text content
+  are observations, not identity. Match repeated structures by relation topology and parent
+  anchor, and keep separate rows or vertically repeated items as separate instances.
 - Never probe sending, publishing, deleting, purchasing, closing without saving, or other
   externally visible/destructive controls during unattended learning.
 - Preserve quarantined records as diagnostics. Do not delete them merely to improve pass rates.

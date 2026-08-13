@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import time
+from collections import defaultdict
+from heapq import heappop, heappush
 from pathlib import Path
 from tempfile import gettempdir
 from uuid import uuid4
@@ -255,9 +257,269 @@ def _assign_hierarchy(boxes: list[dict]) -> None:
     for item in boxes:
         item["child_count"] = child_counts[item["id"]]
         item["kind"] = "container" if item["child_count"] else "element"
+        item["size_policy"] = "variable"
         source_score = min(0.32, 0.08 * len(item["sources"]))
         fill_score = 0.06 if float(item.get("fill_ratio", 0)) >= 0.1 else 0.0
         item["confidence"] = round(min(0.99, 0.55 + source_score + fill_score), 3)
+
+
+def _overlap(first_start: int, first_end: int, second_start: int, second_end: int) -> int:
+    return max(0, min(first_end, second_end) - max(first_start, second_start))
+
+
+def _axis_overlap_ratio(first: dict, second: dict, axis: str) -> float:
+    if axis == "x":
+        overlap = _overlap(first["left"], first["right"], second["left"], second["right"])
+        denominator = min(first["width"], second["width"])
+    else:
+        overlap = _overlap(first["top"], first["bottom"], second["top"], second["bottom"])
+        denominator = min(first["height"], second["height"])
+    return overlap / max(1, denominator)
+
+
+def _center(item: dict, axis: str) -> float:
+    if axis == "x":
+        return item["left"] + item["width"] / 2
+    return item["top"] + item["height"] / 2
+
+
+def _horizontal_alignment_tolerance(first: dict, second: dict) -> int:
+    return max(3, round(min(first["height"], second["height"]) * 0.35))
+
+
+def _vertical_alignment_tolerance(first: dict, second: dict) -> int:
+    return max(4, round(min(first["width"], second["width"]) * 0.2))
+
+
+def _relation(first: dict, second: dict) -> dict | None:
+    """Describe a nearby spatial relation without using equal width or height."""
+    x_overlap = _axis_overlap_ratio(first, second, "x")
+    y_overlap = _axis_overlap_ratio(first, second, "y")
+    horizontal_tolerance = _horizontal_alignment_tolerance(first, second)
+    vertical_tolerance = _vertical_alignment_tolerance(first, second)
+    horizontal_gap = max(first["left"], second["left"]) - min(first["right"], second["right"])
+    vertical_gap = max(first["top"], second["top"]) - min(first["bottom"], second["bottom"])
+    horizontal_gap = max(0, horizontal_gap)
+    vertical_gap = max(0, vertical_gap)
+    near_x = horizontal_gap <= max(12, round(min(first["height"], second["height"]) * 1.5))
+    near_y = vertical_gap <= max(12, round(min(first["height"], second["height"]) * 1.5))
+    horizontal_alignment = [
+        edge
+        for edge in ("top", "bottom")
+        if abs(first[edge] - second[edge]) <= horizontal_tolerance
+    ]
+    vertical_alignment = [
+        edge
+        for edge in ("left", "right")
+        if abs(first[edge] - second[edge]) <= vertical_tolerance
+    ]
+    if y_overlap >= 0.45 and near_x and horizontal_alignment:
+        left, right = (
+            (first, second)
+            if _center(first, "x") <= _center(second, "x")
+            else (second, first)
+        )
+        return {
+            "type": "right-of",
+            "source_id": left["id"],
+            "target_id": right["id"],
+            "gap": horizontal_gap,
+            "overlap": round(y_overlap, 4),
+            "aligned": horizontal_alignment,
+        }
+    if x_overlap >= 0.45 and near_y and vertical_alignment:
+        top, bottom = (
+            (first, second)
+            if _center(first, "y") <= _center(second, "y")
+            else (second, first)
+        )
+        return {
+            "type": "below",
+            "source_id": top["id"],
+            "target_id": bottom["id"],
+            "gap": vertical_gap,
+            "overlap": round(x_overlap, 4),
+            "aligned": vertical_alignment,
+        }
+    return None
+
+
+def _layout_graph(boxes: list[dict]) -> list[dict]:
+    """Build local sibling relations; nested boxes are represented by parent_id instead."""
+    siblings = defaultdict(list)
+    for item in boxes:
+        siblings[item.get("parent_id")].append(item)
+    relations = []
+    for items in siblings.values():
+        for index, first in enumerate(items):
+            for second in items[index + 1 :]:
+                relation = _relation(first, second)
+                if relation:
+                    relations.append(relation)
+    for item in boxes:
+        item["relation_ids"] = [
+            index
+            for index, relation in enumerate(relations, start=1)
+            if item["id"] in {relation["source_id"], relation["target_id"]}
+        ]
+    return [{"id": index, **relation} for index, relation in enumerate(relations, start=1)]
+
+
+def _components(node_ids: list[int], relations: list[dict]) -> list[list[int]]:
+    adjacency = {node_id: set() for node_id in node_ids}
+    for relation in relations:
+        source = relation["source_id"]
+        target = relation["target_id"]
+        if source in adjacency and target in adjacency:
+            adjacency[source].add(target)
+            adjacency[target].add(source)
+    groups = []
+    unseen = set(node_ids)
+    while unseen:
+        start = unseen.pop()
+        stack = [start]
+        group = [start]
+        while stack:
+            current = stack.pop()
+            for neighbor in adjacency[current] & unseen:
+                unseen.remove(neighbor)
+                stack.append(neighbor)
+                group.append(neighbor)
+        if len(group) > 1:
+            groups.append(sorted(group))
+    return groups
+
+
+def _group_signature(member_ids: list[int], relations: list[dict]) -> str:
+    member_set = set(member_ids)
+    relation_types = sorted(
+        relation["type"]
+        for relation in relations
+        if {relation["source_id"], relation["target_id"]} <= member_set
+    )
+    return f"members:{len(member_ids)}|relations:{','.join(relation_types)}"
+
+
+def _attach_vertical_singletons(
+    node_ids: list[int],
+    horizontal_groups: list[list[int]],
+    relations: list[dict],
+) -> list[list[int]]:
+    """Attach vertical singleton content to its nearest horizontal row seed."""
+    allowed = set(node_ids)
+    adjacency = defaultdict(list)
+    for relation in relations:
+        if relation["type"] != "below":
+            continue
+        source = relation["source_id"]
+        target = relation["target_id"]
+        if source not in allowed or target not in allowed:
+            continue
+        weight = max(1, int(relation.get("gap", 0)) + 1)
+        adjacency[source].append((target, weight))
+        adjacency[target].append((source, weight))
+
+    owner = {}
+    distance = {}
+    queue = []
+    seeds = set()
+    for group_index, members in enumerate(horizontal_groups):
+        for member_id in members:
+            seeds.add(member_id)
+            owner[member_id] = group_index
+            distance[member_id] = 0
+            heappush(queue, (0, group_index, member_id))
+
+    while queue:
+        current_distance, group_index, current = heappop(queue)
+        if distance.get(current) != current_distance or owner.get(current) != group_index:
+            continue
+        for neighbor, weight in adjacency[current]:
+            if neighbor in seeds:
+                continue
+            candidate_distance = current_distance + weight
+            existing_distance = distance.get(neighbor)
+            if existing_distance is not None and candidate_distance >= existing_distance:
+                continue
+            distance[neighbor] = candidate_distance
+            owner[neighbor] = group_index
+            heappush(queue, (candidate_distance, group_index, neighbor))
+
+    attached = [set(members) for members in horizontal_groups]
+    for node_id, group_index in owner.items():
+        attached[group_index].add(node_id)
+    return [sorted(members) for members in attached]
+
+
+def _layout_groups(
+    boxes: list[dict],
+    relations: list[dict],
+    image_size: tuple[int, int],
+    padding: int = 4,
+) -> list[dict]:
+    """Create size-independent groups without joining adjacent repeated rows."""
+    by_id = {item["id"]: item for item in boxes}
+    sibling_ids = defaultdict(list)
+    for item in boxes:
+        sibling_ids[item.get("parent_id")].append(item["id"])
+    groups = []
+    image_width, image_height = image_size
+    for parent_id, node_ids in sibling_ids.items():
+        horizontal_relations = [
+            relation for relation in relations if relation["type"] == "right-of"
+        ]
+        horizontal_groups = _components(node_ids, horizontal_relations)
+        attached_groups = _attach_vertical_singletons(
+            node_ids, horizontal_groups, relations
+        )
+        for members in attached_groups:
+            items = [by_id[member_id] for member_id in members]
+            left = max(0, min(item["left"] for item in items) - padding)
+            top = max(0, min(item["top"] for item in items) - padding)
+            right = min(image_width, max(item["right"] for item in items) + padding)
+            bottom = min(image_height, max(item["bottom"] for item in items) + padding)
+            groups.append(
+                {
+                    "id": len(groups) + 1,
+                    "parent_id": parent_id,
+                    "member_ids": members,
+                    "rect_in_input": {
+                        "left": left,
+                        "top": top,
+                        "right": right,
+                        "bottom": bottom,
+                        "width": right - left,
+                        "height": bottom - top,
+                    },
+                    "layout_signature": _group_signature(members, relations),
+                    "size_policy": "variable",
+                }
+            )
+    return groups
+
+
+def _group_with_coordinates(group: dict, screen_rect: dict) -> dict:
+    rectangle = group["rect_in_input"]
+    return {
+        **group,
+        "rect": {
+            **rectangle,
+            "left": screen_rect["left"] + rectangle["left"],
+            "top": screen_rect["top"] + rectangle["top"],
+            "right": screen_rect["left"] + rectangle["right"],
+            "bottom": screen_rect["top"] + rectangle["bottom"],
+        },
+        "rect_relative_to_input": {
+            key: round(
+                rectangle[key]
+                / screen_rect[
+                    "width" if key in {"left", "right", "width"} else "height"
+                ],
+                6,
+            )
+            for key in ("left", "top", "right", "bottom", "width", "height")
+        },
+    }
 
 
 def _with_coordinates(box: dict, screen_rect: dict) -> dict:
@@ -298,11 +560,33 @@ def _with_coordinates(box: dict, screen_rect: dict) -> dict:
     }
 
 
-def _annotate(image, boxes: list[dict], destination: Path) -> None:
+def _annotate(
+    image,
+    boxes: list[dict],
+    destination: Path,
+    groups: list[dict] | None = None,
+) -> None:
     from PIL import ImageDraw
 
     annotated = image.convert("RGB").copy()
     draw = ImageDraw.Draw(annotated)
+    for group in groups or []:
+        rectangle = group["rect_in_input"]
+        draw.rectangle(
+            (
+                rectangle["left"],
+                rectangle["top"],
+                rectangle["right"],
+                rectangle["bottom"],
+            ),
+            outline="#00a152",
+            width=2,
+        )
+        draw.text(
+            (rectangle["left"] + 2, max(0, rectangle["top"] - 12)),
+            f"G{group['id']}",
+            fill="#00a152",
+        )
     for item in boxes:
         color = "#e53935" if item.get("parent_id") is None else "#1976d2"
         draw.rectangle(
@@ -355,13 +639,20 @@ def detect_rectangles(
         boxes = boxes[:max_boxes]
     boxes.sort(key=lambda value: (value["top"], value["left"], -value["area_ratio"]))
     _assign_hierarchy(boxes)
+    relations = _layout_graph(boxes)
+    groups = _layout_groups(boxes, relations, image.size)
     return {
         "ok": True,
         "input_rect": normalized,
         "boxes": [_with_coordinates(box, normalized) for box in boxes],
         "box_count": len(boxes),
+        "relations": relations,
+        "relation_count": len(relations),
+        "groups": [_group_with_coordinates(group, normalized) for group in groups],
+        "group_count": len(groups),
         "truncated": truncated,
-        "detector": "local-class-agnostic-rectangles-v1",
+        "detector": "local-class-agnostic-rectangles-v2",
+        "layout_model": "size-independent-spatial-relations-v1",
         "semantic_analysis": False,
         "timing_ms": round((time.perf_counter() - started) * 1000, 2),
     }
@@ -391,6 +682,6 @@ def detect_screen_rectangles(
             }
             for item in result["boxes"]
         ]
-        _annotate(image, local_boxes, destination)
+        _annotate(image, local_boxes, destination, result["groups"])
         result["annotated_image"] = str(destination)
     return result

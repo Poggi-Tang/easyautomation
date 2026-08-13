@@ -25,7 +25,7 @@ def _run_module(module: str, option: str) -> str:
 
 def test_mcp_server_version() -> None:
     output = _run_module("easy_uiauto.mcp.server", "--version")
-    assert output.strip() == "easy_uiauto 0.7.0"
+    assert output.strip() == "easy_uiauto 0.7.1"
 
 
 def test_mcp_service_help() -> None:

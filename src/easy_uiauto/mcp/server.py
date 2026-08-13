@@ -2123,8 +2123,9 @@ def detect_visual_elements(
     a ``{"bounds": ...}`` result from ``find_control`` or
     ``get_control_at_position``, or a ``{"rect": ...}`` wrapper. The detector
     captures only that region and returns class-agnostic absolute and normalized
-    rectangles with containment relationships. It does not traverse UIA, call OCR,
-    upload a screenshot, or infer element meaning.
+    rectangles with containment and size-independent sibling relationships. Variable-size
+    layout groups are recomputed from current members instead of matching fixed width or
+    height. It does not traverse UIA, call OCR, upload a screenshot, or infer meaning.
 
     Args:
         rect: Screen rectangle or a control result containing ``bounds``/``rect``.

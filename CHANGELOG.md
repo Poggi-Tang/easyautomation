@@ -4,6 +4,22 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog and is maintained automatically by Semantic Release.
 
+## [0.7.1] - 2026-08-13
+
+### Added
+
+- Added a size-independent layout graph to `detect_visual_elements`, including sibling
+  `right-of` and `below` relations, edge alignment, projection overlap, and adaptive gaps.
+- Added variable-size composite groups whose bounds are recomputed from current members and
+  whose layout signatures exclude element width, height, and observed content.
+
+### Fixed
+
+- Variable-width names and variable-height multiline content no longer need fixed geometry to
+  belong to the same visual structure.
+- Vertically repeated list items and adjacent table rows are kept separate instead of being
+  merged into one oversized visual group.
+
 ## [0.7.0] - 2026-08-13
 
 ### Added
