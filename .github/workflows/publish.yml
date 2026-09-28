@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   publish:
-    if: github.event_name == 'push' && github.event.head_commit.message == 'chore(release): publish v0.7.5'
+    if: "github.event_name == 'push' && github.event.head_commit.message == 'chore(release): publish v0.7.5'"
     runs-on: ubuntu-latest
     environment:
       name: pypi
