@@ -4,17 +4,12 @@ on:
   push:
     tags:
       - "v*"
-    branches:
-      - main
-    paths:
-      - ".github/workflows/publish.yml"
 
 permissions:
   id-token: write
 
 jobs:
   publish:
-    if: "${{ github.ref == 'refs/heads/main' && github.event.head_commit.message == 'chore(release): publish v0.7.4' }}"
     runs-on: ubuntu-latest
     environment:
       name: pypi
@@ -22,8 +17,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: 854b61e167fd20df12f6d14f36414a08c838cf77
 
       - uses: actions/setup-python@v5
         with:
