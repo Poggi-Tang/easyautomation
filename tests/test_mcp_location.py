@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 from easy_uiauto import utils
 from easy_uiauto.mcp import server
@@ -30,6 +31,43 @@ XPATH = [
         "searchDepth": 3,
     },
 ]
+
+
+def test_set_top_window_restores_and_activates_native_handle(monkeypatch) -> None:
+    state = {"foreground": 7, "restored": []}
+    user32 = SimpleNamespace(
+        GetForegroundWindow=lambda: state["foreground"],
+        IsIconic=lambda hwnd: hwnd == 42,
+        ShowWindow=lambda hwnd, action: state["restored"].append((hwnd, action)),
+        SetForegroundWindow=lambda hwnd: state.update(foreground=hwnd),
+    )
+    monkeypatch.setattr(utils, "_get_user32", lambda: user32)
+    monkeypatch.setattr(utils, "_find_visible_window_handle", lambda title: 42 if title == "微信" else None)
+
+    assert utils.set_top_window("微信") is True
+    assert state["restored"] == [(42, 9)]
+    assert utils.set_top_window("不存在") is False
+
+
+def test_find_visible_window_handle_uses_exact_visible_title(monkeypatch) -> None:
+    visited = []
+
+    def enum_windows(callback, _):
+        for hwnd in (1, 2, 3):
+            visited.append(hwnd)
+            if not callback(hwnd, None):
+                break
+
+    user32 = SimpleNamespace(
+        GetForegroundWindow=lambda: 0,
+        IsWindowVisible=lambda hwnd: hwnd != 1,
+        EnumWindows=Mock(side_effect=enum_windows),
+    )
+    monkeypatch.setattr(utils, "_get_user32", lambda: user32)
+    monkeypatch.setattr(utils, "get_window_title_by_handle", lambda hwnd: {2: "微信", 3: "其他"}[hwnd])
+
+    assert utils._find_visible_window_handle("微信") == 2
+    assert visited == [1, 2]
 
 
 def _fake_control():

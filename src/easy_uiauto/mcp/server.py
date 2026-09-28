@@ -690,14 +690,15 @@ def list_windows() -> str:
 
 @mcp.tool()
 def activate_window(title: str) -> str:
-    """Bring a window to the front and maximize it.
+    """Bring a visible top-level window to the foreground.
 
     Args:
         title: The window title (or partial title match).
     """
     try:
-        set_top_window(title)
-        return f"Activated window: {title}"
+        if set_top_window(title):
+            return f"Activated window: {title}"
+        return f"Window not found or could not be activated: {title}"
     except Exception as e:
         return f"Error activating window: {e}"
 

@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog and is maintained automatically by Semantic Release.
 
+## [0.7.4] - 2026-09-28
+
+### Changed
+
+- All UIAutomation control clicks and cursor moves now pass `simulateMove=False`
+  by default, including text and keyboard focus actions and the MCP UI CLI.
+- Window activation now locates visible top-level windows through Win32 enumeration
+  and restores minimized windows before bringing them to the foreground.
+
 ## [0.7.3] - 2026-09-28
 
 ### Changed

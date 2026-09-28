@@ -340,7 +340,7 @@ def _paste_text_with_clipboard(text: str, control, rectangle: dict, fast: bool) 
         if fast:
             control.Click(simulateMove=False, waitTime=0)
         else:
-            control.Click()
+            control.Click(simulateMove=False)
     else:
         pyautogui.click(
             rectangle["left"] + rectangle["width"] // 2,
@@ -407,7 +407,7 @@ def _perform_action(
             if fast:
                 control.Click(simulateMove=False, waitTime=0)
             else:
-                control.Click()
+                control.Click(simulateMove=False)
         else:
             pyautogui.click(
                 rectangle["left"] + rectangle["width"] // 2,

@@ -12,7 +12,7 @@ import pyperclip
 import uiautomation
 
 from .draw import ScreenLineBox
-from .utils import find_control, package_location, get_control_coordinates, correct_ctrl_position, push_message
+from .utils import find_control, package_location, get_control_coordinates, correct_ctrl_position, push_message, set_top_window
 
 
 def _show_thread(control_obj, show_time):
@@ -158,9 +158,9 @@ class Controller:
             if control.ControlTypeName in {'ButtonControl', 'MenuItemControl', 'CheckBoxControl'}:
                 if not control.IsEnabled:
                     raise Exception('控件不可点击')
-                control.Click(x, y)
+                control.Click(x, y, simulateMove=False)
             else:
-                control.Click(x, y)
+                control.Click(x, y, simulateMove=False)
 
             MESSAGE = f"步骤：{ActionTitle} 控件【{Name}】 执行动作 点击 成功！"
 
@@ -229,7 +229,7 @@ class Controller:
             control = find_control(LOCATION)
             if control:
                 x, y = get_pos(control, PARAMETERS)
-                control.RightClick(x, y)
+                control.RightClick(x, y, simulateMove=False)
             else:
                 raise Exception("未找到控件！")
             MESSAGE = f"步骤：{ActionTitle} 控件【{Name}】 执行动作 右键点击 成功！"
@@ -297,7 +297,7 @@ class Controller:
             control = find_control(LOCATION)
             if control:
                 x, y = get_pos(control, PARAMETERS)
-                control.MiddleClick(x, y)
+                control.MiddleClick(x, y, simulateMove=False)
             else:
                 raise Exception("未找到控件！")
             MESSAGE = f"步骤：{ActionTitle} 控件【{Name}】 执行动作 中键点击 成功！"
@@ -320,7 +320,7 @@ class Controller:
             control = find_control(LOCATION)
             if control:
                 x, y = get_pos(control, PARAMETERS)
-                control.DoubleClick(x, y)
+                control.DoubleClick(x, y, simulateMove=False)
             else:
                 raise Exception("未找到控件！")
 
@@ -358,7 +358,7 @@ class Controller:
             control = find_control(LOCATION)
             if control:
                 x, y = get_pos(control, PARAMETERS)
-                control.MoveCursorToInnerPos(x, y)
+                control.MoveCursorToInnerPos(x, y, simulateMove=False)
             else:
                 raise Exception("未找到控件！")
             MESSAGE = f"步骤：{ActionTitle} 控件【{Name}】 执行动作 移动鼠标到坐标位置 成功！"
@@ -448,7 +448,7 @@ class Controller:
             if WindowName:
                 control = find_control(LOCATION)
                 if control:
-                    control.Click(waitTime=0)
+                    control.Click(simulateMove=False, waitTime=0)
             pyperclip.copy(PARAMETERS['输入文本'])
             pyautogui.hotkey('ctrl', 'v', interval=0)
             MESSAGE = f"步骤：{ActionTitle}执行动作 输入 成功"
@@ -470,7 +470,7 @@ class Controller:
             if WindowName:
                 control = find_control(LOCATION)
                 if control:
-                    control.Click(waitTime=0)
+                    control.Click(simulateMove=False, waitTime=0)
             pyautogui.press(PARAMETERS['键盘按键'])
             MESSAGE = f"步骤：{ActionTitle}执行动作 键盘操作 成功"
         except Exception as e:
@@ -491,7 +491,7 @@ class Controller:
             if WindowName:
                 control = find_control(LOCATION)
                 if control:
-                    control.Click(waitTime=0)
+                    control.Click(simulateMove=False, waitTime=0)
             pyautogui.keyDown(PARAMETERS['键盘按键'])
             MESSAGE = f"步骤：{ActionTitle}执行动作 键盘按下 成功"
         except Exception as e:
@@ -512,7 +512,7 @@ class Controller:
             if WindowName:
                 control = find_control(LOCATION)
                 if control:
-                    control.Click(waitTime=0)
+                    control.Click(simulateMove=False, waitTime=0)
             pyautogui.keyUp(PARAMETERS['键盘按键'])
             MESSAGE = f"步骤：{ActionTitle}执行动作 键盘释放 成功"
         except Exception as e:
@@ -541,7 +541,7 @@ class Controller:
             if WindowName:
                 control = find_control(LOCATION)
                 if control:
-                    control.Click(waitTime=0)
+                    control.Click(simulateMove=False, waitTime=0)
             raw_keys = PARAMETERS['组合键'].lower().split('+')
             mapped_keys = [key_mapping.get(k.strip(), k.strip()) for k in raw_keys]
             pyautogui.hotkey(*mapped_keys)
@@ -555,12 +555,7 @@ class Controller:
 
     @classmethod
     def activate_window(cls, WindowTitle):
-        if pyautogui.getActiveWindowTitle() != WindowTitle:
-            windows = pyautogui.getAllWindows()
-            for window in windows:
-                if window.title == WindowTitle:
-                    window.activate()
-                    window.maximize()
+        return set_top_window(WindowTitle)
 
 
 # ==============================鼠标动作==============================

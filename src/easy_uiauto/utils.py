@@ -11,7 +11,6 @@ from datetime import datetime
 from functools import wraps
 
 import pyautogui
-import pygetwindow as gw
 import uiautomation
 from comtypes import CoUninitialize, CoInitialize
 
@@ -292,62 +291,64 @@ def get_window_title_by_handle(hwnd):
     return buffer.value
 
 
+def _get_user32():
+    """Configure pointer-sized HWND arguments for 64-bit Windows."""
+    user32 = ctypes.windll.user32
+    user32.GetForegroundWindow.restype = ctypes.c_void_p
+    for name in ('IsWindowVisible', 'IsIconic', 'SetForegroundWindow'):
+        getattr(user32, name).argtypes = (ctypes.c_void_p,)
+    user32.ShowWindow.argtypes = (ctypes.c_void_p, ctypes.c_int)
+    user32.GetWindowTextLengthW.argtypes = (ctypes.c_void_p,)
+    user32.GetWindowTextW.argtypes = (ctypes.c_void_p, ctypes.c_wchar_p, ctypes.c_int)
+    return user32
+
+
+def _find_visible_window_handle(window_title):
+    """Enumerate top-level Win32 windows and stop at the first exact title match."""
+    user32 = _get_user32()
+    current = user32.GetForegroundWindow()
+    if current and user32.IsWindowVisible(current) and get_window_title_by_handle(current) == window_title:
+        return current
+
+    match = None
+
+    callback_type = ctypes.WINFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p)
+
+    @callback_type
+    def check_window(hwnd, _):
+        nonlocal match
+        if user32.IsWindowVisible(hwnd) and get_window_title_by_handle(hwnd) == window_title:
+            match = hwnd
+            return False
+        return True
+
+    user32.EnumWindows.argtypes = (callback_type, ctypes.c_void_p)
+    user32.EnumWindows(check_window, None)
+    return match
+
+
 @timeit
 def set_top_window(window_title):
-    """
-    激活窗口
-    :param window_title:
-    :return: 激活结果 通过True 失败False
-    """
-    try:
-        # 使用uiautomation检查
-        window = uiautomation.WindowControl(Name=window_title, searchDepth=1)
-        if window.Exists(0):
-            window_title = get_window_title_by_handle(window.NativeWindowHandle)
-            if window.FrameworkId == 'Win32':
-                windows = gw.getWindowsWithTitle(window_title)
-                if windows:
-                    for window in windows:
-                        if window.title == window_title:
-                            window.activate()
-                            # time.sleep(0.2)
-                            active_window = gw.getActiveWindow()
-                            if active_window and active_window.title == window_title:
-                                push_message(f"使用pygetwindow激活成功")
-                                return True
-                push_message(f"未找到窗口")
-                return False
-            elif 'dialog' in window.Name or window.ClassName == 'Window':
-                push_message("对话框不支持激活")
-                return False
-            elif 'Menu' in window.Name or 'Menu' in window.ClassName:
-                push_message("菜单不支持激活")
-                return False
-            elif window.GetTopLevelControl() != window:
-                push_message("非主窗口不支持激活")
-                return False
-            window.SetActive()
-            # time.sleep(0.2)
-            active_window = gw.getActiveWindow()
-            if active_window and active_window.title in window_title:
-                push_message(f"使用uiautomation激活成功")
-                return True
-            push_message(f"激活失败，尝试通过pygetwindow激活")
-        windows = gw.getWindowsWithTitle(window_title)
-        if windows:
-            for window in windows:
-                if window.title == window_title:
-                    window.activate()
-                    time.sleep(0.2)
-                    active_window = gw.getActiveWindow()
-                    if active_window and active_window.title == window_title:
-                        push_message(f"使用pygetwindow激活成功")
-                        return True
-        push_message(f"未找到窗口")
+    """Restore and activate a visible top-level window by its exact title."""
+    if not window_title:
         return False
+    try:
+        user32 = _get_user32()
+        hwnd = _find_visible_window_handle(window_title)
+        if not hwnd:
+            push_message(f"未找到窗口：{window_title}")
+            return False
+        if user32.GetForegroundWindow() == hwnd:
+            return True
+        if user32.IsIconic(hwnd):
+            user32.ShowWindow(hwnd, 9)  # SW_RESTORE
+        user32.SetForegroundWindow(hwnd)
+        activated = user32.GetForegroundWindow() == hwnd
+        if not activated:
+            push_message(f"窗口激活失败：{window_title}")
+        return activated
     except Exception as e:
-        if "无效的窗口句柄" not in e:
-            push_message(f"激活异常{e}")
+        push_message(f"激活异常：{e}")
         return False
 
 
