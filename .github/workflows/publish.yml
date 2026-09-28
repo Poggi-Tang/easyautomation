@@ -30,11 +30,6 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Tag the tested commit
-        run: |
-          git tag v0.7.3 ad95d9c95a965a27b3d0784628abcc14e722ea6c
-          git push origin v0.7.3
-
       - name: Install build tool
         run: python -m pip install --upgrade pip build
 
