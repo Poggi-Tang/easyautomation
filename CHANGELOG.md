@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog and is maintained automatically by Semantic Release.
 
+## [0.7.3] - 2026-09-28
+
+### Changed
+
+- Top-level window lookup now checks `ClassName` and `Name` with `WindowControl`
+  first, then retries by `Name` before returning `False`.
+- AutomationId lookup verifies that the selector is unique within the window;
+  duplicate IDs fall through to XPath, and ambiguous property fallbacks are rejected.
+
 ## [0.7.2] - 2026-08-13
 
 ### Changed

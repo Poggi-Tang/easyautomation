@@ -898,29 +898,46 @@ def strategy_xpath(name, class_name, control_type, Xpath,debug=False):
 
 
 def _find_window_scope(window_name, xpath=None):
-    """Find a top-level UIA window without relying on a timed descendant query."""
-    root = uiautomation.GetRootControl()
     if not window_name:
-        return root
+        return uiautomation.GetRootControl()
+
     first_step = xpath[0] if xpath else {}
     expected_class = first_step.get('ClassName', '')
-    partial_matches = []
-    try:
-        children = root.GetChildren()
-    except Exception:
-        children = []
-    for child in children:
-        name = (getattr(child, 'Name', '') or '').strip()
-        class_name = getattr(child, 'ClassName', '') or ''
-        if expected_class and class_name != expected_class:
-            continue
-        if name == window_name:
-            return child
-        if window_name.casefold() in name.casefold():
-            partial_matches.append(child)
-    if partial_matches:
-        return partial_matches[0]
+
+    # 优先用原生搜索，由 C++ 层完成遍历
+    if expected_class:
+        win = uiautomation.WindowControl(
+            ClassName=expected_class,
+            Name=window_name,
+            searchDepth=1,
+        )
+        if win.Exists(1, 0.1):
+            return win
+
+    # 模糊匹配退回到手动遍历
+    win = uiautomation.WindowControl(Name=window_name, searchDepth=1)
+    if win.Exists(1, 0.1):
+        return win
+
     return False
+
+
+def _has_second_match(window, selector):
+    """Check whether a window-scoped selector matches more than one control."""
+    conditions = {
+        key: selector[key]
+        for key in ('Name', 'ClassName', 'AutomationId')
+        if selector.get(key)
+    }
+    control_type = selector.get('ControlType')
+    if control_type:
+        conditions['ControlType'] = CONTROL_TYPE_IDS[control_type]
+    try:
+        second = window.Control(foundIndex=2, **conditions)
+        return bool(second.Refind(maxSearchSeconds=0, raiseException=False))
+    except Exception:
+        # If uniqueness cannot be checked, do not trust the first match.
+        return True
 
 
 @timeit
@@ -980,6 +997,7 @@ def find_control(LOCATION,debug= False):
 
     # 1. AutomationId is normally the most stable and cheapest selector. Dynamic
     # Name and foundIndex values must not prevent an otherwise exact ID match.
+    duplicate_automation_id = False
     if AutomationId and window:
         automation_selector = {
             'ControlType': ControlTypeName,
@@ -988,11 +1006,14 @@ def find_control(LOCATION,debug= False):
         }
         control = strategy_dictionary(automation_selector, window)
         if control:
-            current_time_ms = int(datetime.now().timestamp() * 1000)
-            push_message(
-                f"[计时] AutomationId 定位耗时: {current_time_ms - start_time}ms"
-            )
-            return control
+            duplicate_automation_id = _has_second_match(window, automation_selector)
+            if not duplicate_automation_id:
+                current_time_ms = int(datetime.now().timestamp() * 1000)
+                push_message(
+                    f"[计时] AutomationId 定位耗时: {current_time_ms - start_time}ms"
+                )
+                return control
+            push_message("AutomationId 在当前窗口内不唯一，改用 XPath 定位")
 
     # 2. Preserve the recorded hierarchy when AutomationId is absent, duplicated,
     # or stale. Never call the XPath strategy with an empty path: historically that
@@ -1003,7 +1024,7 @@ def find_control(LOCATION,debug= False):
             current_time_ms = int(datetime.now().timestamp() * 1000)
             push_message(f"[计时] XPath 定位耗时: {current_time_ms - start_time}ms")
             return control
-        xpath_window = strategy_dictionary(xpath[0])
+        xpath_window = strategy_dictionary(xpath[0]) if not duplicate_automation_id else False
         if xpath_window:
             control = strategy_dictionary(xpath[-1], xpath_window)
             if control:
@@ -1013,8 +1034,8 @@ def find_control(LOCATION,debug= False):
                 )
                 return control
 
-    # 3. Fall back to the legacy property combination. AutomationId is omitted
-    # here because the dedicated first strategy already proved it unavailable.
+    # 3. Fall back to the legacy property combination. Check uniqueness when
+    # the AutomationId matched multiple controls so this fallback stays safe.
     if window:
         combination_selector = {
             'ControlType': ControlTypeName,
@@ -1022,7 +1043,8 @@ def find_control(LOCATION,debug= False):
             'ClassName': ClassName,
         }
         control = strategy_dictionary(combination_selector, window)
-        if control:
+        if control and (not duplicate_automation_id or
+                        not _has_second_match(window, combination_selector)):
             current_time_ms = int(datetime.now().timestamp() * 1000)
             push_message(
                 f"[计时] 组合属性定位耗时: {current_time_ms - start_time}ms"

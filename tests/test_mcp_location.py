@@ -45,6 +45,51 @@ def _fake_control():
     )
 
 
+def test_find_window_scope_without_name_uses_desktop_root(monkeypatch) -> None:
+    root = object()
+    monkeypatch.setattr(utils.uiautomation, "GetRootControl", lambda: root)
+    monkeypatch.setattr(
+        utils.uiautomation,
+        "WindowControl",
+        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("WindowControl should not run")),
+    )
+
+    assert utils._find_window_scope("") is root
+
+
+def test_find_window_scope_prefers_class_and_name(monkeypatch) -> None:
+    calls = []
+    window = SimpleNamespace(Exists=lambda *args: calls.append(args) or True)
+
+    def fake_window_control(**kwargs):
+        calls.append(kwargs)
+        return window
+
+    monkeypatch.setattr(utils.uiautomation, "WindowControl", fake_window_control)
+
+    assert utils._find_window_scope("Example", XPATH) is window
+    assert calls == [
+        {"ClassName": "WindowClass", "Name": "Example", "searchDepth": 1},
+        (1, 0.1),
+    ]
+
+
+def test_find_window_scope_retries_name_and_returns_false(monkeypatch) -> None:
+    calls = []
+
+    def fake_window_control(**kwargs):
+        calls.append(kwargs)
+        return SimpleNamespace(Exists=lambda *args: False)
+
+    monkeypatch.setattr(utils.uiautomation, "WindowControl", fake_window_control)
+
+    assert utils._find_window_scope("Example", XPATH) is False
+    assert calls == [
+        {"ClassName": "WindowClass", "Name": "Example", "searchDepth": 1},
+        {"Name": "Example", "searchDepth": 1},
+    ]
+
+
 def test_location_from_xpath_matches_recorded_location_shape() -> None:
     location = location_from_xpath(XPATH, parameters={"x": -1, "y": -1})
 
@@ -151,6 +196,7 @@ def test_core_find_control_keeps_legacy_empty_xpath_fallback(monkeypatch) -> Non
 
     monkeypatch.setattr(utils, "CURRENT_APP_NAME", "Example")
     monkeypatch.setattr(utils, "_find_window_scope", lambda *_args: window)
+    monkeypatch.setattr(utils, "_has_second_match", lambda *_args: False)
     monkeypatch.setattr(utils, "strategy_xpath", lambda *_args, **_kwargs: False)
     monkeypatch.setattr(utils, "strategy_dictionary", fake_strategy_dictionary)
     location = build_location(
@@ -180,6 +226,7 @@ def test_core_find_control_prefers_automation_id_before_xpath(monkeypatch) -> No
 
     monkeypatch.setattr(utils, "CURRENT_APP_NAME", "Example")
     monkeypatch.setattr(utils, "_find_window_scope", lambda *_args: window)
+    monkeypatch.setattr(utils, "_has_second_match", lambda *_args: False)
     monkeypatch.setattr(utils, "strategy_dictionary", fake_strategy_dictionary)
     monkeypatch.setattr(
         utils,
@@ -195,6 +242,62 @@ def test_core_find_control_prefers_automation_id_before_xpath(monkeypatch) -> No
         "ClassName": "ButtonClass",
         "AutomationId": "saveButton",
     }
+
+
+def test_core_find_control_uses_xpath_when_automation_id_is_duplicated(monkeypatch) -> None:
+    wrong = object()
+    correct = object()
+    window = SimpleNamespace()
+    selectors = []
+
+    def fake_strategy_dictionary(selector, parent=None):
+        selectors.append(selector)
+        return wrong if selector.get("AutomationId") == "saveButton" else False
+
+    monkeypatch.setattr(utils, "CURRENT_APP_NAME", "Example")
+    monkeypatch.setattr(utils, "_find_window_scope", lambda *_args: window)
+    monkeypatch.setattr(utils, "_has_second_match", lambda *_args: True)
+    monkeypatch.setattr(utils, "strategy_dictionary", fake_strategy_dictionary)
+    monkeypatch.setattr(utils, "strategy_xpath", lambda *_args, **_kwargs: correct)
+
+    assert utils.find_control(location_from_xpath(XPATH)) is correct
+    assert len(selectors) == 1
+
+
+def test_core_find_control_rejects_ambiguous_fallback(monkeypatch) -> None:
+    window = SimpleNamespace()
+    selectors = []
+
+    def fake_strategy_dictionary(selector, parent=None):
+        selectors.append(selector)
+        return object()
+
+    monkeypatch.setattr(utils, "CURRENT_APP_NAME", "Example")
+    monkeypatch.setattr(utils, "_find_window_scope", lambda *_args: window)
+    monkeypatch.setattr(utils, "_has_second_match", lambda *_args: True)
+    monkeypatch.setattr(utils, "strategy_dictionary", fake_strategy_dictionary)
+    monkeypatch.setattr(utils, "strategy_xpath", lambda *_args, **_kwargs: False)
+
+    assert utils.find_control(location_from_xpath(XPATH)) is False
+    assert len(selectors) == 2  # ID match and final property combination only.
+
+
+def test_has_second_match_uses_second_matching_control(monkeypatch) -> None:
+    seen = []
+    window = SimpleNamespace(
+        Control=lambda **kwargs: seen.append(kwargs) or SimpleNamespace(
+            Refind=lambda **kwargs: True
+        )
+    )
+    monkeypatch.setitem(utils.CONTROL_TYPE_IDS, "ButtonControl", 50000)
+
+    assert utils._has_second_match(window, {
+        "ControlType": "ButtonControl", "ClassName": "ButtonClass", "AutomationId": "saveButton"
+    })
+    assert seen == [{
+        "ClassName": "ButtonClass", "AutomationId": "saveButton",
+        "ControlType": 50000, "foundIndex": 2,
+    }]
 
 
 def test_core_find_control_does_not_call_xpath_when_path_is_empty(monkeypatch) -> None:
