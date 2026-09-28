@@ -44,7 +44,7 @@ def test_execute_clicks_verified_control(monkeypatch, tmp_path) -> None:
     knowledge.save_control(directory, record)
     knowledge.rebuild_index(directory)
     clicks: list[bool] = []
-    control = SimpleNamespace(Click=lambda: clicks.append(True))
+    control = SimpleNamespace(Click=lambda **kwargs: clicks.append(kwargs["simulateMove"] is False))
     monkeypatch.setattr(
         ui_cli,
         "_resolve_verified_control",
@@ -65,7 +65,7 @@ def test_execute_highlights_resolved_target_before_action(monkeypatch, tmp_path)
     knowledge.rebuild_index(directory)
     events = []
     rectangle = {"left": 20, "top": 40, "right": 120, "bottom": 80, "width": 100, "height": 40}
-    control = SimpleNamespace(Click=lambda: events.append("click"))
+    control = SimpleNamespace(Click=lambda **_kwargs: events.append("click"))
     monkeypatch.setattr(
         ui_cli,
         "_resolve_verified_control",
@@ -344,7 +344,7 @@ def test_dangerous_command_requires_explicit_confirmation(monkeypatch, tmp_path)
         raise AssertionError("dangerous batch executed without confirmation")
 
     clicks: list[bool] = []
-    control = SimpleNamespace(Click=lambda: clicks.append(True))
+    control = SimpleNamespace(Click=lambda **kwargs: clicks.append(kwargs["simulateMove"] is False))
     monkeypatch.setattr(
         ui_cli,
         "_resolve_verified_control",
