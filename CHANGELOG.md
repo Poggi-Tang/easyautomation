@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog and is maintained automatically by Semantic Release.
 
+## [0.7.5] - 2026-09-28
+
+### Changed
+
+- UIAutomation mouse and keyboard actions now pass zero operation wait time.
+- Explicit mouse movements and drag actions skip gradual cursor movement, and
+  text input uses zero inter-key interval.
+- MCP UI clicks use zero operation wait time in both regular and fast modes.
+
 ## [0.7.4] - 2026-09-28
 
 ### Changed

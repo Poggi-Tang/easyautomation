@@ -158,9 +158,9 @@ class Controller:
             if control.ControlTypeName in {'ButtonControl', 'MenuItemControl', 'CheckBoxControl'}:
                 if not control.IsEnabled:
                     raise Exception('控件不可点击')
-                control.Click(x, y, simulateMove=False)
+                control.Click(x, y, simulateMove=False, waitTime=0)
             else:
-                control.Click(x, y, simulateMove=False)
+                control.Click(x, y, simulateMove=False, waitTime=0)
 
             MESSAGE = f"步骤：{ActionTitle} 控件【{Name}】 执行动作 点击 成功！"
 
@@ -184,7 +184,7 @@ class Controller:
             control = find_control(LOCATION)
             if control:
                 x, y = get_pos(control, PARAMETERS)
-                uiautomation.PressMouse(x, y)
+                uiautomation.PressMouse(x, y, waitTime=0)
             else:
                 raise Exception("未找到控件！")
             MESSAGE = f"步骤：{ActionTitle} 控件【{Name}】 执行动作 鼠标左键按下 成功！"
@@ -206,7 +206,7 @@ class Controller:
 
             result = cls.mouse_move_control(ActionTitle, **LOCATION)
             if result[0] == _MESSAGE.INFO:
-                uiautomation.ReleaseMouse()
+                uiautomation.ReleaseMouse(waitTime=0)
                 MESSAGE = f"步骤：{ActionTitle} 控件【{Name}】 执行动作 鼠标左键释放 成功！"
             else:
                 raise Exception("未找到控件！")
@@ -229,7 +229,7 @@ class Controller:
             control = find_control(LOCATION)
             if control:
                 x, y = get_pos(control, PARAMETERS)
-                control.RightClick(x, y, simulateMove=False)
+                control.RightClick(x, y, simulateMove=False, waitTime=0)
             else:
                 raise Exception("未找到控件！")
             MESSAGE = f"步骤：{ActionTitle} 控件【{Name}】 执行动作 右键点击 成功！"
@@ -252,7 +252,7 @@ class Controller:
             control = find_control(LOCATION)
             if control:
                 x, y = get_pos(control, PARAMETERS)
-                uiautomation.RightPressMouse(x, y)
+                uiautomation.RightPressMouse(x, y, waitTime=0)
             else:
                 raise Exception("未找到控件！")
             MESSAGE = f"步骤：{ActionTitle} 控件【{Name}】 执行动作 鼠标右键按下 成功！"
@@ -274,7 +274,7 @@ class Controller:
 
             result = cls.mouse_move_control(ActionTitle, **LOCATION)
             if result[0] == _MESSAGE.INFO:
-                uiautomation.RightReleaseMouse()
+                uiautomation.RightReleaseMouse(waitTime=0)
                 MESSAGE = f"步骤：{ActionTitle} 控件【{Name}】 执行动作 鼠标右键释放 成功！"
             else:
                 raise Exception("未找到控件！")
@@ -297,7 +297,7 @@ class Controller:
             control = find_control(LOCATION)
             if control:
                 x, y = get_pos(control, PARAMETERS)
-                control.MiddleClick(x, y, simulateMove=False)
+                control.MiddleClick(x, y, simulateMove=False, waitTime=0)
             else:
                 raise Exception("未找到控件！")
             MESSAGE = f"步骤：{ActionTitle} 控件【{Name}】 执行动作 中键点击 成功！"
@@ -320,7 +320,7 @@ class Controller:
             control = find_control(LOCATION)
             if control:
                 x, y = get_pos(control, PARAMETERS)
-                control.DoubleClick(x, y, simulateMove=False)
+                control.DoubleClick(x, y, simulateMove=False, waitTime=0)
             else:
                 raise Exception("未找到控件！")
 
@@ -337,7 +337,7 @@ class Controller:
         _MESSAGE_TYPE = _MESSAGE.INFO
         MESSAGE = ""
         try:
-            uiautomation.MoveTo(x, y)
+            uiautomation.MoveTo(x, y, moveSpeed=0, waitTime=0)
             MESSAGE = f"步骤：{ActionTitle} 位置【{x}{y}】 执行动作 移动鼠标到坐标位置 成功！"
         except Exception as e:
             _MESSAGE_TYPE = _MESSAGE.ERROR
@@ -377,7 +377,7 @@ class Controller:
         current_coord_y = (current_coord[1] + current_coord[3]) // 2
         target_coord_x = (target_coord[0] + target_coord[2]) // 2
         target_coord_y = (target_coord[1] + target_coord[3]) // 2
-        uiautomation.DragDrop(current_coord_x, current_coord_y, target_coord_x, target_coord_y)
+        uiautomation.DragDrop(current_coord_x, current_coord_y, target_coord_x, target_coord_y, moveSpeed=0, waitTime=0)
 
     @classmethod
     def drag_control(cls, ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
@@ -428,7 +428,7 @@ class Controller:
             control = find_control(LOCATION)
             if control:
                 correct_ctrl_position(control)
-            control.SendKeys(PARAMETERS["设置文本"])
+            control.SendKeys(PARAMETERS["设置文本"], interval=0, waitTime=0)
             MESSAGE = f"步骤：{ActionTitle} 控件【{Name}】 执行动作 设置文本 成功！"
         except Exception as e:
             _MESSAGE_TYPE = _MESSAGE.ERROR
