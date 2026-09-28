@@ -15,7 +15,7 @@ permissions:
 
 jobs:
   publish:
-    if: github.ref == 'refs/heads/main' && github.event.head_commit.message == 'chore(release): publish v0.7.3'
+    if: "${{ github.ref == 'refs/heads/main' && github.event.head_commit.message == 'chore(release): publish v0.7.3' }}"
     runs-on: ubuntu-latest
     environment:
       name: pypi
