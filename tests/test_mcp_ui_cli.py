@@ -43,8 +43,8 @@ def test_execute_clicks_verified_control(monkeypatch, tmp_path) -> None:
     record = _record()
     knowledge.save_control(directory, record)
     knowledge.rebuild_index(directory)
-    clicks: list[bool] = []
-    control = SimpleNamespace(Click=lambda **kwargs: clicks.append(kwargs["simulateMove"] is False))
+    clicks: list[dict] = []
+    control = SimpleNamespace(Click=lambda **kwargs: clicks.append(kwargs))
     monkeypatch.setattr(
         ui_cli,
         "_resolve_verified_control",
@@ -54,7 +54,7 @@ def test_execute_clicks_verified_control(monkeypatch, tmp_path) -> None:
     result = ui_cli.execute(directory, "main.toolbar.save.click")
 
     assert result["ok"] is True
-    assert clicks == [True]
+    assert clicks == [{"simulateMove": False, "waitTime": 0}]
     assert result["resolved_by"] == "location"
 
 
