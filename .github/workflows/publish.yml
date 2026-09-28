@@ -4,12 +4,15 @@ on:
   push:
     tags:
       - "v*"
+    branches:
+      - main
 
 permissions:
   id-token: write
 
 jobs:
   publish:
+    if: github.event_name == 'push' && github.event.head_commit.message == 'chore(release): publish v0.7.5'
     runs-on: ubuntu-latest
     environment:
       name: pypi
@@ -17,6 +20,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: eaec137218a07970005e1e411a577d69268ce2d6
 
       - uses: actions/setup-python@v5
         with:
