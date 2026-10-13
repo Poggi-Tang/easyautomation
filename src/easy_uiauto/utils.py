@@ -7,6 +7,8 @@ import ctypes
 import sys
 import threading
 import time
+from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import datetime
 from functools import wraps
 
@@ -941,8 +943,167 @@ def _has_second_match(window, selector):
         return True
 
 
+_STRICT_CONTROL_RESOLUTION = ContextVar("strict_control_resolution", default=False)
+_ACTIVATE_RESOLVED_WINDOW = ContextVar("activate_resolved_window", default=False)
+
+
+@contextmanager
+def strict_control_resolution(*, activate=False):
+    """Use typed lookup; only mutation scopes may activate a resolved window."""
+    token = _STRICT_CONTROL_RESOLUTION.set(True)
+    activation_token = _ACTIVATE_RESOLVED_WINDOW.set(activate)
+    try:
+        yield
+    finally:
+        _ACTIVATE_RESOLVED_WINDOW.reset(activation_token)
+        _STRICT_CONTROL_RESOLUTION.reset(token)
+
+
+def _observe_match(parent, selector, *, search_depth=0xFFFFFFFF, absent_code="control_not_found"):
+    """Resolve one selector without UIA's implicit polling or first-match fallback."""
+    from .mcp.results import ActionError
+
+    conditions = {
+        key: selector[key]
+        for key in ("Name", "ClassName", "AutomationId")
+        if selector.get(key) not in (None, "")
+    }
+    control_type = selector.get("ControlType")
+    if control_type:
+        if control_type not in CONTROL_TYPE_IDS:
+            raise ActionError("invalid_argument", f"Unknown ControlType: {control_type}")
+        conditions["ControlType"] = CONTROL_TYPE_IDS[control_type]
+    if not conditions:
+        raise ActionError("invalid_argument", "A control selector must include a name, class, type, or AutomationId")
+    raw_index = selector.get("foundIndex")
+    try:
+        index = int(raw_index) if raw_index not in (None, "") else 0
+    except (TypeError, ValueError) as error:
+        raise ActionError("invalid_argument", "foundIndex must be an integer") from error
+    if index < 0:
+        raise ActionError("invalid_argument", "foundIndex must be zero or a positive 1-based index")
+    conditions["searchDepth"] = search_depth
+
+    def lookup(found_index):
+        try:
+            candidate = parent.Control(foundIndex=found_index, **conditions)
+            if candidate.Refind(maxSearchSeconds=0, raiseException=False):
+                return candidate
+            return None
+        except ActionError:
+            raise
+        except Exception as error:
+            # A COM/backend failure cannot establish that a control disappeared.
+            raise ActionError("action_failed", f"UIA lookup failed: {error}") from error
+
+    control = lookup(index or 1)
+    if control is None:
+        message = "Window not found or no longer available" if absent_code == "window_invalid" else "Control not found"
+        raise ActionError(absent_code, message, retryable=True)
+    if not index and lookup(2) is not None:
+        raise ActionError(
+            "ambiguous_match",
+            "Multiple controls match; add a unique selector, XPath, or explicit foundIndex",
+        )
+    return control
+
+
+def observe_control(location):
+    """Read one current control without activating windows, scrolling, or caching.
+
+    A zero/omitted foundIndex requires uniqueness. Positive indices are explicit
+    1-based choices. Only confirmed absence raises control_not_found; backend
+    errors remain action_failed so disappearance waits cannot report false success.
+    """
+    from .mcp.protocol import normalize_location
+    from .mcp.results import ActionError
+
+    try:
+        normalized = normalize_location(location)
+    except (TypeError, ValueError, AttributeError) as error:
+        raise ActionError("invalid_argument", str(error)) from error
+    xpath = normalized.get("Xpath", [])
+    first_step = xpath[0] if xpath else {}
+    window_name = normalized.get("WindowName", "")
+    try:
+        root = uiautomation.GetRootControl()
+        if root is None:
+            raise RuntimeError("UIA returned no desktop root")
+    except Exception as error:
+        raise ActionError("action_failed", f"UIA desktop lookup failed: {error}") from error
+    window = root
+    window_step = first_step.get("ControlType") == "WindowControl"
+    if window_name or window_step:
+        selector = {"ControlType": "WindowControl", "Name": window_name}
+        if window_step:
+            selector.update({key: first_step[key] for key in ("ClassName", "AutomationId", "foundIndex") if first_step.get(key) not in (None, "")})
+        window = _observe_match(root, selector, search_depth=1, absent_code="window_invalid")
+
+    failures = []
+
+    def attempt(parent, selector, search_depth=0xFFFFFFFF):
+        try:
+            return _observe_match(parent, selector, search_depth=search_depth)
+        except ActionError as error:
+            if error.code not in ("control_not_found", "ambiguous_match"):
+                raise
+            failures.append(error)
+            return None
+
+    if normalized.get("AutomationId"):
+        stable_selector = {
+            key: normalized.get(key)
+            for key in ("AutomationId", "ControlType", "ClassName")
+        }
+        control = attempt(window, stable_selector)
+        if control is not None:
+            return control
+
+    if xpath:
+        steps = xpath[1:] if window_step or first_step.get("ControlType") == "DesktopControl" else xpath
+        current = window
+        try:
+            previous_depth = int(first_step.get("searchDepth", 1) or 1) if window_step else 0
+        except (TypeError, ValueError) as error:
+            raise ActionError("invalid_argument", "searchDepth must be an integer") from error
+        for step in steps:
+            try:
+                depth = int(step.get("searchDepth", previous_depth + 1) or 1)
+            except (TypeError, ValueError) as error:
+                raise ActionError("invalid_argument", "searchDepth must be an integer") from error
+            # Recorded searchDepth is absolute; UIA searches relative to parent.
+            relative_depth = max(1, depth - previous_depth)
+            selector = dict(step)
+            if selector.get("AutomationId"):
+                selector.pop("Name", None)
+            current = attempt(current, selector, relative_depth)
+            if current is None:
+                break
+            previous_depth = depth
+        if current is not None:
+            return current
+
+    target_selector = {
+        key: normalized.get(key)
+        for key in ("Name", "ClassName", "ControlType", "foundIndex")
+    }
+    if any(target_selector.get(key) for key in ("Name", "ClassName", "ControlType")):
+        control = attempt(window, target_selector)
+        if control is not None:
+            return control
+    elif not normalized.get("AutomationId") and not xpath:
+        if window_name:
+            return window
+        raise ActionError("invalid_argument", "A location must identify a window or a control")
+
+    ambiguous = next((error for error in failures if error.code == "ambiguous_match"), None)
+    if ambiguous:
+        raise ambiguous
+    raise ActionError("control_not_found", "Control not found", retryable=True)
+
+
 @timeit
-def find_control(LOCATION,debug= False):
+def find_control(LOCATION, debug=False, strict=False):
     """
     根据配置列表获取控件
     此版本支持Name、ClassName、Type、Xpath、foundIndex、AutomationId
@@ -957,6 +1118,17 @@ def find_control(LOCATION,debug= False):
             - foundIndex: 索引位置
     :return: 控件对象或None
     """
+    if strict or _STRICT_CONTROL_RESOLUTION.get():
+        control = observe_control(LOCATION)
+        if _ACTIVATE_RESOLVED_WINDOW.get():
+            from .mcp.protocol import normalize_location
+            from .mcp.results import ActionError
+
+            window_name = normalize_location(LOCATION).get("WindowName", "")
+            if window_name and not set_top_window(window_name):
+                raise ActionError("window_invalid", "Resolved window could not be activated")
+        return control
+
     global CURRENT_APP_NAME
 
     WindowName, Name, ClassName, ControlTypeName, AutomationId, searchDepth, foundIndex = \

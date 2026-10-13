@@ -210,6 +210,17 @@ easy_uiauto_service --help
 python -m easy_uiauto.mcp.service --port 9876
 ```
 
+
+### 动作结果与等待验证
+
+桌面动作现在返回包含 `ok`、`code`、`verified` 的统一 JSON；旧文本位于 `message`。
+`ok=true` 表示动作执行成功，后续用 `wait_for_control`、`wait_for_text`、
+`get_window_state` / `wait_for_window` 验证预期效果。新增 `get_capability_readiness`
+分别检查 UIA、OCR、图片匹配和远程视觉配置。滚动优先使用 `scroll`，
+`mouse_scroll` 是相同参数的兼容别名。
+
+参数示例、错误代码和迁移说明见 [MCP 动作结果与等待](docs/mcp-results-and-waits.md)。
+
 ## 🧭 学习一个软件
 
 安装包中包含两个 Codex Skill：

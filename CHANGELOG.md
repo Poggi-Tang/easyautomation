@@ -4,6 +4,31 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog and is maintained automatically by Semantic Release.
 
+## [0.8.0] - 2026-10-13
+
+### Added
+
+- Read-only MCP tools to wait for control presence, absence and enabled state,
+  verify accessible text, and observe window changes from an explicit baseline.
+- Separate readiness reports for UIA, OCR, image matching and remote vision.
+- Typed strict control resolution and portable regression tests.
+
+### Changed
+
+- MCP desktop actions and locator tools return a consistent JSON outcome with
+  `ok`, `code`, `message`, `verified`, `retryable` and `data`. Existing plain-text
+  responses move to `message`; existing JSON payload fields remain available.
+- Distinguish action execution from verified effects. Ambiguous default selectors
+  require additional context or an explicit index instead of choosing the first match.
+- `mouse_scroll` is a compatibility alias for `scroll`, including coordinates.
+
+### Fixed
+
+- Correct reversed scroll direction and propagate scrolling failures.
+- Stop action batches on structured failures and preserve completed-step evidence.
+- Do not send keyboard input when the requested window cannot be activated.
+- Restore tag-based PyPI publishing of the tagged commit, gated by Windows tests.
+
 ## [0.7.5] - 2026-09-28
 
 ### Changed

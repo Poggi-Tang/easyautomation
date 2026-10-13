@@ -49,6 +49,8 @@ def locate_and_prepare(LOCATION, PARAMETERS, timeout=3.0, interval=0.2):
     timeout: 最大等待秒数
     interval: 重试间隔秒数
     """
+    from .mcp.results import ActionError
+
     start = time.time()
     last_exc = None
     while time.time() - start <= timeout:
@@ -65,6 +67,8 @@ def locate_and_prepare(LOCATION, PARAMETERS, timeout=3.0, interval=0.2):
                 x = correct_x if x == -1 else x
                 y = correct_y if y == -1 else y
                 return control, x, y
+        except ActionError:
+            raise
         except Exception as e:
             last_exc = e
         time.sleep(interval)

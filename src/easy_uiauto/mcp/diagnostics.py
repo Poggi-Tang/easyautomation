@@ -6,18 +6,218 @@ import base64
 import importlib.util
 import io
 import json
+import math
 import os
 import re
 import shutil
 import subprocess
 import sys
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from urllib import error as urlerror
 from urllib import request as urlrequest
+from urllib.parse import urlsplit
 
 TESSERACT_PACKAGE_ID = "UB-Mannheim.TesseractOCR"
+
+_VISION_SETTINGS = (
+    "EASY_UIAUTO_VISION_API_URL",
+    "EASY_UIAUTO_VISION_API_KEY",
+    "EASY_UIAUTO_VISION_MODEL",
+)
+
+# These probes never capture the screen, send input, install packages, or use the
+# network. Run native imports and UIA calls out of process so a broken provider
+# cannot hang the MCP server. Only the exit status is exposed to callers.
+_READINESS_PROBES = {
+    "uia": """
+import uiautomation
+root = uiautomation.GetRootControl()
+assert root is not None
+root.GetChildren()
+""",
+    "image_matching": """
+import cv2
+import numpy
+from PIL import Image
+template = numpy.array([[0, 20], [90, 255]], dtype=numpy.uint8)
+canvas = numpy.zeros((6, 6), dtype=numpy.uint8)
+canvas[2:4, 3:5] = template
+matches = cv2.matchTemplate(canvas, template, cv2.TM_SQDIFF)
+assert cv2.minMaxLoc(matches)[2] == (3, 2)
+Image.fromarray(canvas)
+""",
+    "ocr": """
+import pytesseract
+from PIL import Image
+Image.new('RGB', (1, 1))
+""",
+}
+
+
+def _modules_missing(modules: tuple[str, ...]) -> list[str]:
+    missing = []
+    for module in modules:
+        try:
+            found = importlib.util.find_spec(module) is not None
+        except (ImportError, ValueError):
+            found = False
+        if not found:
+            missing.append(module)
+    return missing
+
+
+def _readiness_probe(name: str, timeout: float) -> str | None:
+    """Return a stable error code, never native stderr or configuration values."""
+    try:
+        result = subprocess.run(
+            [sys.executable, "-c", _READINESS_PROBES[name]],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=timeout,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return "probe_timeout"
+    except OSError:
+        return "probe_start_failed"
+    return None if result.returncode == 0 else "local_probe_failed"
+
+
+def _ocr_languages(timeout: float) -> tuple[set[str], str | None]:
+    """Use the same command as pytesseract, without changing PATH or its config."""
+    loaded = sys.modules.get("pytesseract.pytesseract")
+    command = getattr(loaded, "tesseract_cmd", "tesseract")
+    if not shutil.which(command):
+        return set(), "tesseract_executable_missing"
+    try:
+        result = subprocess.run(
+            [command, "--list-langs"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return set(), "probe_timeout"
+    except OSError:
+        return set(), "tesseract_start_failed"
+    if result.returncode != 0:
+        return set(), "tesseract_probe_failed"
+    # Tesseract versions differ in whether --list-langs writes to stdout or
+    # stderr. Only language identifiers may enter the public report.
+    languages = {
+        line.strip()
+        for line in (result.stdout + "\n" + result.stderr).splitlines()
+        if re.fullmatch(r"[A-Za-z0-9_]+(?:/[A-Za-z0-9_]+)*", line.strip())
+    }
+    return languages, None
+
+
+def get_capability_readiness(
+    language: str = "eng",
+    probe_timeout: float = 3.0,
+    *,
+    vision_settings: Mapping[str, str] | None = None,
+) -> dict:
+    """Report local prerequisites separately from complete tool verification.
+
+    ``available`` describes each capability's stated ``scope``. OCR and image
+    matching checks cover local engines, not desktop capture. Remote vision is
+    ``available=None`` when configured because connectivity and authentication
+    are deliberately not tested. No screen contents or secret values are read
+    into the report. Each subprocess is bounded by ``probe_timeout`` seconds.
+
+    MCP callers should supply vision settings from configuration's dynamic
+    resolver, which also understands Windows user and existing Codex bindings.
+    Standalone callers default to the current process environment.
+    """
+    if not math.isfinite(probe_timeout) or not 0 < probe_timeout <= 30:
+        raise ValueError("probe_timeout must be greater than 0 and no greater than 30")
+    language_pattern = r"[A-Za-z0-9_]+(?:/[A-Za-z0-9_]+)*(?:\+[A-Za-z0-9_]+(?:/[A-Za-z0-9_]+)*)*"
+    if not re.fullmatch(language_pattern, language):
+        raise ValueError("language must contain Tesseract language codes, e.g. eng+chi_sim")
+
+    capabilities = {}
+    requirements = {
+        "uia": ("uiautomation",),
+        "ocr": ("pytesseract", "PIL"),
+        "image_matching": ("cv2", "numpy", "PIL"),
+    }
+    scopes = {
+        "uia": "Desktop root access; individual controls and actions are not tested.",
+        "ocr": (
+            "OCR imports, executable and requested languages; "
+            "recognition and screen capture are not tested."
+        ),
+        "image_matching": "Synthetic local image matching; screen capture is not tested.",
+    }
+    for name, modules in requirements.items():
+        missing = _modules_missing(modules)
+        if name == "uia" and sys.platform != "win32":
+            missing.append("Windows")
+        status = {
+            "configured": not missing,
+            "available": False,
+            "runtime_verified": False,
+            "missing": missing,
+            "issues": [],
+            "scope": scopes[name],
+        }
+        if not missing:
+            issue = _readiness_probe(name, probe_timeout)
+            if issue:
+                status["issues"].append(issue)
+            else:
+                status["available"] = True
+                status["runtime_verified"] = name == "uia"
+        if name == "ocr":
+            languages, issue = _ocr_languages(probe_timeout)
+            status["requested_languages"] = sorted(set(language.split("+")))
+            status["installed_languages"] = sorted(languages)
+            if issue:
+                status["issues"].append(issue)
+                status["available"] = False
+                status["configured"] = False
+            else:
+                missing_languages = sorted(set(language.split("+")) - languages)
+                status["missing"].extend(f"language:{item}" for item in missing_languages)
+                if missing_languages:
+                    status["configured"] = status["available"] = False
+        status["status"] = "ready" if status["available"] else "unavailable"
+        capabilities[name] = status
+
+    settings = os.environ if vision_settings is None else vision_settings
+    missing_settings = [name for name in _VISION_SETTINGS if not settings.get(name, "").strip()]
+    remote_issues = []
+    api_url = settings.get(_VISION_SETTINGS[0], "").strip()
+    if api_url:
+        try:
+            parsed_url = urlsplit(api_url)
+            valid_url = parsed_url.scheme in {"http", "https"} and bool(parsed_url.hostname)
+        except ValueError:
+            valid_url = False
+        if not valid_url:
+            remote_issues.append("invalid_api_url")
+    configured = not missing_settings and not remote_issues
+    capabilities["remote_vision"] = {
+        "configured": configured,
+        "available": None if configured else False,
+        "runtime_verified": False,
+        "status": "unverified" if configured else "unavailable",
+        "missing": missing_settings,
+        "issues": remote_issues,
+        "scope": "Configuration presence and URL syntax only; no network request is made.",
+    }
+    return {
+        "platform": sys.platform,
+        "network_checked": False,
+        "screen_capture_checked": False,
+        "capabilities": capabilities,
+    }
 
 
 def _timed_step(name: str, operation: Callable[[], str]) -> dict:

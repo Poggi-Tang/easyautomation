@@ -228,6 +228,20 @@ easy_uiauto_service --help
 python -m easy_uiauto.mcp.service --port 9876
 ```
 
+
+### Action outcomes and condition checks
+
+Desktop actions now return JSON with `ok`, `code`, `verified`, `retryable`,
+`message`, and `data`; legacy text moves to `message`. Execution success does
+not prove the intended effect. Use `wait_for_control`, `wait_for_text`, and
+`get_window_state` / `wait_for_window` to verify conditions without repeating
+actions. `get_capability_readiness` checks UIA, OCR, image matching and remote
+vision prerequisites separately. Prefer `scroll`; `mouse_scroll` is a compatible
+alias with identical parameters. Positive tick counts plus `up`/`down` now have
+consistent direction in both tools.
+
+See [outcome codes, migration notes and examples (Chinese)](docs/mcp-results-and-waits.md).
+
 ## 🧭 Learn an Application
 
 The package includes two Codex skills:

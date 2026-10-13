@@ -12,6 +12,7 @@ import subprocess
 import sys
 import time
 from datetime import datetime
+from functools import wraps
 from typing import Optional
 from urllib import error as urlerror
 from urllib import request as urlrequest
@@ -24,7 +25,8 @@ from mcp.server.fastmcp import Image as MCPImage
 # easy-uiauto imports
 from easy_uiauto.ctrl import Controller, run_action as _run_action_easy
 from easy_uiauto.utils import (
-    auto_scroll,
+    observe_control,
+    strict_control_resolution,
     find_control as _find_control,
     get_control_info,
     get_control_xpath,
@@ -34,6 +36,8 @@ from easy_uiauto.utils import (
 from .. import __version__
 from . import (
     configuration,
+    diagnostics,
+    waiting,
     interaction_learning,
     knowledge,
     learning_progress,
@@ -44,6 +48,7 @@ from . import (
     visualization,
 )
 from .protocol import location_from_xpath, normalize_location
+from .results import ActionError, normalize_result, result as action_result
 
 # Disable pyautogui failsafe for automation (moving mouse to corner won't crash)
 pyautogui.FAILSAFE = False
@@ -58,7 +63,12 @@ mcp = FastMCP(
         "Use these tools to inspect and interact with desktop applications. "
         "Start with list_windows to see open windows, "
         "then get_control_tree to explore a window's UI hierarchy, "
-        "then use click/type_text/etc to interact with controls."
+        "then use click/type_text/etc to interact with controls. "
+        "Actions return JSON with ok, code, message, verified, retryable and data. "
+        "ok means execution completed; only verified=true confirms a checked condition. "
+        "Use wait_for_control, wait_for_text, and wait_for_window to check effects. "
+        "Use scroll for scrolling; mouse_scroll is a compatibility alias. "
+        "Call get_capability_readiness to inspect optional dependencies."
     ),
 )
 
@@ -76,13 +86,33 @@ MUTATING_RECORDED_ACTIONS = {
 }
 MUTATING_METHODS = {
     "click", "click_at_position", "drag_control", "type_text", "set_text",
-    "press_key", "hotkey", "run_action", "scroll", "mouse_scroll",
+    "press_key", "hotkey", "run_action", "scroll", "mouse_scroll", "move_mouse", "activate_window",
 }
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def _action_result(*, observation: bool = False):
+    """Normalize MCP actions while preserving signatures and original JSON fields."""
+    def decorate(function):
+        @wraps(function)
+        def wrapped(*args, **kwargs):
+            try:
+                with strict_control_resolution(activate=not observation):
+                    value = function(*args, **kwargs)
+            except Exception as error:
+                value = error
+            return json.dumps(normalize_result(value, observation=observation), ensure_ascii=False)
+        wrapped.__doc__ = (function.__doc__ or "") + (
+            "\n\nReturns JSON: ok, code, message, verified, retryable, data. "
+            "ok alone does not verify the application's intended effect. "
+            "Never repeat a mutating operation merely because verified is false."
+        )
+        return wrapped
+    return decorate
+
 
 def _build_location(
     window_name: str = "",
@@ -401,7 +431,7 @@ def _ensure_learning_console() -> None:
 
 
 def _result_ok(result) -> bool:
-    return not _is_error_result(str(result))
+    return not _is_error_result(result)
 
 
 def _auto_learn_location(action_title: str, location: dict, notes: str = "") -> None:
@@ -592,12 +622,8 @@ def _safe_call(func, *args, **kwargs) -> str:
 
 
 def _is_error_result(result) -> bool:
-    """Best-effort detection for handlers that report failures as strings."""
-    return isinstance(result, str) and (
-        result.lower().startswith("error")
-        or "异常" in result
-        or "未找到" in result
-    )
+    """Understand structured, JSON, and legacy failures consistently."""
+    return not normalize_result(result)["ok"]
 
 
 def _normalize_batch_step(step: dict) -> tuple[str, dict]:
@@ -632,6 +658,145 @@ def _normalize_batch_step(step: dict) -> tuple[str, dict]:
         "screenshot": "take_screenshot",
     }
     return aliases.get(str(method), str(method)), params
+
+
+def _validate_click(button: str, click_type: str) -> None:
+    if button not in {"left", "right", "middle"}:
+        raise ActionError("invalid_argument", "button must be left, right, or middle")
+    if click_type not in {"single", "double"}:
+        raise ActionError("invalid_argument", "click_type must be single or double")
+    if click_type == "double" and button != "left":
+        raise ActionError("invalid_argument", "double click supports the left button only")
+
+
+def _require_active_window(title: str) -> None:
+    if not title or not set_top_window(title):
+        raise ActionError("window_invalid", "Window is missing or could not be activated")
+
+
+def _observe_control(location: dict, *, read_text: bool = False) -> dict:
+    control = observe_control(location)
+    observation = {"exists": True, "enabled": bool(control.IsEnabled)}
+    if read_text:
+        readable, text = ui_cli._read_control_text(control)
+        if readable:
+            observation["text"] = text
+    return observation
+
+
+def _observe_window(window_name: str, handle: int = 0) -> dict:
+    if not window_name.strip():
+        raise ActionError("invalid_argument", "window_name must be a non-empty exact title")
+    try:
+        windows = uiautomation.GetRootControl().GetChildren()
+        matches = [window for window in windows if (
+            int(window.NativeWindowHandle) == handle if handle else window.Name == window_name
+        )]
+        if not matches:
+            return {"exists": False}
+        if len(matches) > 1:
+            raise ActionError("ambiguous_match", "More than one window matches; use a unique title")
+        window = matches[0]
+        return {
+            "exists": True, "handle": int(window.NativeWindowHandle),
+            "title": window.Name, "class_name": window.ClassName,
+            "process_id": int(window.ProcessId), "enabled": bool(window.IsEnabled),
+            "visible": not bool(window.IsOffscreen),
+            "bounds": _rect_to_dict(window.BoundingRectangle),
+        }
+    except ActionError:
+        raise
+    except Exception as error:
+        raise ActionError("window_invalid", "Could not read the window state") from error
+
+
+@mcp.tool()
+def get_capability_readiness(language: str = "eng") -> str:
+    """Check UIA, OCR, image matching and remote vision prerequisites separately.
+
+    Local probes are bounded and do not click, capture/upload screenshots, install
+    packages or contact a remote API. Remote configured does not mean verified.
+    Credential values are never returned. Call before selecting a visual fallback.
+    """
+    try:
+        settings = {
+            name: configuration._existing_vision_value(name)
+            for name in (configuration.VISION_API_URL, configuration.VISION_API_KEY,
+                         configuration.VISION_MODEL)
+        }
+        return json.dumps(diagnostics.get_capability_readiness(
+            language=language, vision_settings=settings,
+        ), ensure_ascii=False)
+    except Exception as error:
+        return json.dumps(normalize_result(error), ensure_ascii=False)
+
+
+@mcp.tool()
+def wait_for_control(location: dict, state: str = "exists", timeout_seconds: float = 10.0,
+                     interval_seconds: float = 0.2) -> str:
+    """Observe a LOCATION until it exists, is absent, or is enabled; never click.
+
+    state is exists, absent, or enabled. Missing window, ambiguous selectors and
+    backend errors are not evidence of disappearance. timeout_seconds=0 checks
+    once. Successful predicates return verified=true; timeout=result_unconfirmed.
+    A native UIA call may overrun the polling deadline while it is in progress.
+    """
+    return json.dumps(waiting.wait_for_control(
+        lambda: _observe_control(location), state=state,
+        timeout_seconds=timeout_seconds, interval_seconds=interval_seconds,
+    ), ensure_ascii=False)
+
+
+@mcp.tool()
+def wait_for_text(location: dict, expected_text: str = "", match: str = "exact",
+                  baseline_text: Optional[str] = None, timeout_seconds: float = 10.0,
+                  interval_seconds: float = 0.2) -> str:
+    """Verify accessible text by exact match, contains, or change from baseline.
+
+    match=changed requires baseline_text from before the action. Reads UIA value
+    or text patterns without copying, focusing, or typing. Unreadable text cannot
+    confirm success. Set timeout_seconds=0 for one immediate verification.
+    """
+    return json.dumps(waiting.wait_for_text(
+        lambda: _observe_control(location, read_text=True), expected_text=expected_text,
+        match=match, baseline_text=baseline_text, timeout_seconds=timeout_seconds,
+        interval_seconds=interval_seconds,
+    ), ensure_ascii=False)
+
+
+@mcp.tool()
+def get_window_state(window_name: str) -> str:
+    """Read an exact-title window snapshot without activating it.
+
+    Use data.observation as the baseline for wait_for_window(state='changed').
+    Native handles and process IDs are transient observations, not saved locators.
+    """
+    try:
+        snapshot = _observe_window(window_name)
+        value = action_result(True, "verified", "Window state observed", verified=True,
+                              data={"observation": snapshot})
+    except Exception as error:
+        value = normalize_result(error)
+    return json.dumps(value, ensure_ascii=False)
+
+
+@mcp.tool()
+def wait_for_window(window_name: str, state: str = "exists", baseline: Optional[dict] = None,
+                    timeout_seconds: float = 10.0, interval_seconds: float = 0.2) -> str:
+    """Wait for an exact-title window to exist, be absent, or change from baseline.
+
+    Capture baseline with get_window_state before acting. For changed, the baseline
+    handle tracks that same window across title changes. Changes refer only to the
+    supplied window properties, not arbitrary content changes inside the window.
+    No window is activated; timeouts never repeat the preceding action.
+    """
+    def observe():
+        handle = baseline.get("handle", 0) if state == "changed" and isinstance(baseline, dict) else 0
+        return _observe_window(window_name, handle=handle)
+    return json.dumps(waiting.wait_for_window(
+        observe, state=state, baseline=baseline,
+        timeout_seconds=timeout_seconds, interval_seconds=interval_seconds,
+    ), ensure_ascii=False)
 
 
 # ---------------------------------------------------------------------------
@@ -689,6 +854,7 @@ def list_windows() -> str:
 
 
 @mcp.tool()
+@_action_result()
 def activate_window(title: str) -> str:
     """Bring a visible top-level window to the foreground.
 
@@ -696,11 +862,13 @@ def activate_window(title: str) -> str:
         title: The window title (or partial title match).
     """
     try:
-        if set_top_window(title):
-            return f"Activated window: {title}"
-        return f"Window not found or could not be activated: {title}"
+        blocked = _mode_blocks_operation()
+        if blocked:
+            return blocked
+        _require_active_window(title)
+        return f"Activated window: {title}"
     except Exception as e:
-        return f"Error activating window: {e}"
+        return json.dumps(normalize_result(e), ensure_ascii=False)
 
 
 # ---------------------------------------------------------------------------
@@ -782,6 +950,7 @@ def get_control_tree(
 
 
 @mcp.tool()
+@_action_result(observation=True)
 def find_control(
     location: Optional[dict] = None,
     window_name: str = "",
@@ -807,7 +976,7 @@ def find_control(
         class_name: Control class name.
         control_type: Control type (e.g., "ButtonControl", "EditControl").
         automation_id: UIA AutomationId.
-        found_index: 1-based index when multiple controls match (0 = first).
+        found_index: Explicit 1-based duplicate index (0 requires a unique match).
         xpath: JSON string of XPath path list, e.g. '[{"ControlType":"WindowControl","Name":"Notepad"}]'.
     """
     try:
@@ -852,7 +1021,7 @@ def find_control(
         return json.dumps(result, ensure_ascii=False, indent=2)
 
     except Exception as e:
-        return f"Error finding control: {e}"
+        return json.dumps(normalize_result(e), ensure_ascii=False)
 
 
 @mcp.tool()
@@ -1271,6 +1440,7 @@ def show_ui_controls(
 
 
 @mcp.tool()
+@_action_result()
 def run_ui_command(
     app_id: str,
     command: str,
@@ -1304,10 +1474,11 @@ def run_ui_command(
             100,
         )
     except Exception as error:
-        return f"Error running UI command: {error}"
+        return json.dumps(normalize_result(error), ensure_ascii=False)
 
 
 @mcp.tool()
+@_action_result()
 def run_ui_commands(
     app_id: str,
     steps: list[dict | str],
@@ -1344,7 +1515,7 @@ def run_ui_commands(
             100,
         )
     except Exception as error:
-        return f"Error running UI command batch: {error}"
+        return json.dumps(normalize_result(error), ensure_ascii=False)
 
 
 @mcp.tool()
@@ -1545,6 +1716,7 @@ def rebuild_ui_knowledge_index(app_id: str) -> str:
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
+@_action_result()
 def click(
     window_name: str = "",
     name: str = "",
@@ -1569,7 +1741,7 @@ def click(
         class_name: Control class name.
         control_type: Control type (e.g., "ButtonControl").
         automation_id: UIA AutomationId.
-        found_index: 1-based index for duplicate controls (0 = first).
+        found_index: Explicit 1-based duplicate index (0 requires a unique match).
         xpath: JSON XPath path string.
         button: Mouse button - "left", "right", or "middle".
         click_type: Click type - "single", "double".
@@ -1580,6 +1752,7 @@ def click(
         blocked = _mode_blocks_operation()
         if blocked:
             return blocked
+        _validate_click(button, click_type)
         action_title = f"Click {name or control_type or 'control'}"
         params = json.dumps({"x": x_offset, "y": y_offset})
         location = _build_location(
@@ -1610,10 +1783,11 @@ def click(
         return str(result)
 
     except Exception as e:
-        return f"Error clicking: {e}"
+        return json.dumps(normalize_result(e), ensure_ascii=False)
 
 
 @mcp.tool()
+@_action_result()
 def click_at_position(
     x: int,
     y: int,
@@ -1632,6 +1806,7 @@ def click_at_position(
         blocked = _mode_blocks_operation()
         if blocked:
             return blocked
+        _validate_click(button, click_type)
         if click_type == "double":
             pyautogui.doubleClick(x, y, button=button)
         else:
@@ -1639,10 +1814,11 @@ def click_at_position(
         _auto_learn_point(f"Click at ({x}, {y})", x, y)
         return f"Clicked ({button}/{click_type}) at ({x}, {y})"
     except Exception as e:
-        return f"Error clicking at position: {e}"
+        return json.dumps(normalize_result(e), ensure_ascii=False)
 
 
 @mcp.tool()
+@_action_result()
 def move_mouse(x: int, y: int) -> str:
     """Move the mouse cursor to the given screen coordinates.
 
@@ -1657,10 +1833,11 @@ def move_mouse(x: int, y: int) -> str:
         pyautogui.moveTo(x, y)
         return f"Mouse moved to ({x}, {y})"
     except Exception as e:
-        return f"Error moving mouse: {e}"
+        return json.dumps(normalize_result(e), ensure_ascii=False)
 
 
 @mcp.tool()
+@_action_result()
 def drag_control(
     source_window: str,
     source_name: str = "",
@@ -1729,17 +1906,22 @@ def drag_control(
             _auto_learn_location(f"Drag {source_name}", source_location)
         return str(result)
     except Exception as e:
-        return f"Error dragging: {e}"
+        return json.dumps(normalize_result(e), ensure_ascii=False)
 
 
 @mcp.tool()
+@_action_result()
 def scroll(
     amount: int = 3,
     direction: str = "down",
     x: int = -1,
     y: int = -1,
 ) -> str:
-    """Scroll the mouse wheel.
+    """Preferred scrolling tool; positive amount and explicit up/down direction.
+
+    Up sends positive wheel ticks; down sends negative ticks. Optional coordinates
+    select the scroll target and support monitors with negative coordinates.
+    Omit both coordinates (both -1) to use the current cursor position.
 
     Args:
         amount: Number of scroll ticks (default 3).
@@ -1751,12 +1933,18 @@ def scroll(
         blocked = _mode_blocks_operation()
         if blocked:
             return blocked
-        if x >= 0 and y >= 0:
+        if isinstance(amount, bool) or not isinstance(amount, int) or amount <= 0:
+            raise ActionError("invalid_argument", "amount must be a positive integer")
+        if direction not in {"up", "down"}:
+            raise ActionError("invalid_argument", "direction must be 'up' or 'down'")
+        if (x == -1) != (y == -1):
+            raise ActionError("invalid_argument", "Supply both x and y, or leave both at -1")
+        if x != -1 or y != -1:
             pyautogui.moveTo(x, y)
-        auto_scroll(amount, direction=direction)
+        pyautogui.scroll(amount if direction == "up" else -amount)
         return f"Scrolled {direction} {amount} ticks"
     except Exception as e:
-        return f"Error scrolling: {e}"
+        return json.dumps(normalize_result(e), ensure_ascii=False)
 
 
 # ---------------------------------------------------------------------------
@@ -1764,6 +1952,7 @@ def scroll(
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
+@_action_result()
 def type_text(
     text: str,
     window_name: str = "",
@@ -1835,10 +2024,11 @@ def type_text(
             _auto_learn_location(f"Type text into {name or control_type or 'control'}", location)
         return str(result)
     except Exception as e:
-        return f"Error typing text: {e}"
+        return json.dumps(normalize_result(e), ensure_ascii=False)
 
 
 @mcp.tool()
+@_action_result()
 def set_text(
     text: str,
     window_name: str = "",
@@ -1889,10 +2079,11 @@ def set_text(
             _auto_learn_location(f"Set text on {name or control_type}", location)
         return str(result)
     except Exception as e:
-        return f"Error setting text: {e}"
+        return json.dumps(normalize_result(e), ensure_ascii=False)
 
 
 @mcp.tool()
+@_action_result()
 def press_key(
     key: str,
     window_name: str = "",
@@ -1910,7 +2101,7 @@ def press_key(
         if blocked:
             return blocked
         if window_name:
-            set_top_window(window_name)
+            _require_active_window(window_name)
 
         result = Controller.key_click(
             ActionTitle=f"Press {key}",
@@ -1926,10 +2117,11 @@ def press_key(
         )
         return str(result)
     except Exception as e:
-        return f"Error pressing key: {e}"
+        return json.dumps(normalize_result(e), ensure_ascii=False)
 
 
 @mcp.tool()
+@_action_result()
 def hotkey(
     keys: str,
     window_name: str = "",
@@ -1947,7 +2139,7 @@ def hotkey(
         if blocked:
             return blocked
         if window_name:
-            set_top_window(window_name)
+            _require_active_window(window_name)
 
         result = Controller.key_group(
             ActionTitle=f"Hotkey {keys}",
@@ -1963,7 +2155,7 @@ def hotkey(
         )
         return str(result)
     except Exception as e:
-        return f"Error sending hotkey: {e}"
+        return json.dumps(normalize_result(e), ensure_ascii=False)
 
 
 # ---------------------------------------------------------------------------
@@ -1971,6 +2163,7 @@ def hotkey(
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
+@_action_result()
 def run_action(action_json: str) -> str:
     """Execute one easy-uiauto recorded action.
 
@@ -1981,7 +2174,7 @@ def run_action(action_json: str) -> str:
     try:
         action = json.loads(action_json)
         if not isinstance(action, dict):
-            return "Error: action_json must be a JSON object"
+            raise ActionError("invalid_argument", "action_json must be a JSON object")
         if CURRENT_MODE == "learn" and _recorded_action_is_mutating(action):
             return "Error: Current mode is learn; mutating recorded actions are blocked"
         result = _run_action_easy(action)
@@ -1989,10 +2182,11 @@ def run_action(action_json: str) -> str:
             _auto_learn_recorded_action(action)
         return str(result)
     except Exception as e:
-        return f"Error running action: {e}"
+        return json.dumps(normalize_result(e), ensure_ascii=False)
 
 
 @mcp.tool()
+@_action_result()
 def run_actions(
     actions_json: str,
     stop_on_error: bool = True,
@@ -2013,12 +2207,18 @@ def run_actions(
     try:
         actions = json.loads(actions_json)
     except Exception as e:
-        return f"Error: actions_json is not valid JSON: {e}"
+        raise ActionError("invalid_argument", "actions_json is not valid JSON") from e
 
-    if not isinstance(actions, list):
-        return "Error: actions_json must be a JSON array"
+    if not isinstance(actions, list) or not actions or len(actions) > 500:
+        raise ActionError("invalid_argument", "actions_json must be a non-empty array of at most 500 steps")
+    if isinstance(delay_ms, bool) or not isinstance(delay_ms, int) or not 0 <= delay_ms <= 60000:
+        raise ActionError("invalid_argument", "delay_ms must be an integer from 0 to 60000")
 
     handlers = {
+        "wait_for_control": wait_for_control,
+        "wait_for_text": wait_for_text,
+        "wait_for_window": wait_for_window,
+        "get_window_state": get_window_state,
         "get_mode": get_mode,
         "set_mode": set_mode,
         "activate_window": activate_window,
@@ -2045,13 +2245,13 @@ def run_actions(
             method, params = _normalize_batch_step(step)
             if CURRENT_MODE == "learn" and (
                 method in MUTATING_METHODS
-                or (method == "run_action" and _recorded_action_is_mutating(params["action"]))
+                or (method == "run_action" and _recorded_action_is_mutating(params.get("action", {})))
             ):
                 elapsed = round((time.perf_counter() - t0) * 1000, 1)
                 results.append({
                     "index": index,
                     "method": method,
-                    "ok": False,
+                    **action_result(False, "operation_blocked", "Current mode is learn; mutating UI operations are blocked"),
                     "result": "Error: Current mode is learn; mutating UI operations are blocked",
                     "timing_ms": elapsed,
                 })
@@ -2059,7 +2259,10 @@ def run_actions(
                     break
                 continue
             if method == "run_action":
-                result = _run_action_easy(params["action"])
+                recorded = params.get("action")
+                if recorded is None:
+                    recorded = json.loads(params.get("action_json", "{}"))
+                result = run_action(json.dumps(recorded, ensure_ascii=False))
             else:
                 handler = handlers.get(method)
                 if handler is None:
@@ -2067,8 +2270,10 @@ def run_actions(
                 result = handler(**params)
 
             elapsed = round((time.perf_counter() - t0) * 1000, 1)
-            ok = not _is_error_result(result)
+            normalized = normalize_result(result)
+            ok = normalized["ok"]
             item = {
+                **normalized,
                 "index": index,
                 "method": method,
                 "ok": ok,
@@ -2076,9 +2281,6 @@ def run_actions(
                 "timing_ms": elapsed,
             }
             results.append(item)
-
-            if method == "run_action" and ok:
-                _auto_learn_recorded_action(params["action"])
 
             if delay_ms > 0 and index < len(actions):
                 time.sleep(delay_ms / 1000)
@@ -2088,7 +2290,8 @@ def run_actions(
             elapsed = round((time.perf_counter() - t0) * 1000, 1)
             results.append({
                 "index": index,
-                "method": step.get("method") or step.get("action") or step.get("ACTION", ""),
+                **normalize_result(e),
+                "method": (step.get("method") or step.get("action") or step.get("ACTION", "")) if isinstance(step, dict) else "",
                 "ok": False,
                 "error": f"{type(e).__name__}: {e}",
                 "timing_ms": elapsed,
@@ -2100,6 +2303,9 @@ def run_actions(
         "ok": all(item.get("ok", False) for item in results) and len(results) == len(actions),
         "total": len(actions),
         "executed": len(results),
+        "error": next((item.get("message", "Action failed") for item in results if not item["ok"]), ""),
+        "code": next((item.get("code", "action_failed") for item in results if not item["ok"]), "action_executed"),
+        "verified": bool(results) and all(item.get("verified", False) for item in results),
         "results": results,
     }
     return json.dumps(summary, ensure_ascii=False, indent=2)
@@ -2187,6 +2393,7 @@ def take_screenshot(
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
+@_action_result(observation=True)
 def find_control_by_image(
     image_path: str,
     confidence: float = 0.85,
@@ -2207,10 +2414,11 @@ def find_control_by_image(
         match = _locate_image(image_path, confidence, grayscale, region)
         return json.dumps({"found": match is not None, "match": match}, ensure_ascii=False)
     except Exception as error:
-        return f"Error finding image: {error}"
+        return json.dumps(normalize_result(error), ensure_ascii=False)
 
 
 @mcp.tool()
+@_action_result()
 def click_by_image(
     image_path: str,
     confidence: float = 0.85,
@@ -2231,6 +2439,7 @@ def click_by_image(
         blocked = _mode_blocks_operation()
         if blocked:
             return blocked
+        _validate_click(button, click_type)
         region = _screen_region(region_x, region_y, region_width, region_height)
         match = _locate_image(image_path, confidence, grayscale, region)
         if match is None:
@@ -2242,10 +2451,11 @@ def click_by_image(
         _auto_learn_point("Click image template", match["center_x"], match["center_y"])
         return json.dumps({"ok": True, "match": match}, ensure_ascii=False)
     except Exception as error:
-        return f"Error clicking image: {error}"
+        return json.dumps(normalize_result(error), ensure_ascii=False)
 
 
 @mcp.tool()
+@_action_result(observation=True)
 def find_text_on_screen(
     text: str,
     language: str = "eng",
@@ -2267,10 +2477,11 @@ def find_text_on_screen(
         match = _find_text_on_screen(text, language, match_mode, min_confidence, region)
         return json.dumps({"found": match is not None, "match": match}, ensure_ascii=False)
     except Exception as error:
-        return f"Error finding text with OCR: {error}"
+        return json.dumps(normalize_result(error), ensure_ascii=False)
 
 
 @mcp.tool()
+@_action_result()
 def click_text_on_screen(
     text: str,
     language: str = "eng",
@@ -2291,6 +2502,7 @@ def click_text_on_screen(
         blocked = _mode_blocks_operation()
         if blocked:
             return blocked
+        _validate_click(button, click_type)
         region = _screen_region(region_x, region_y, region_width, region_height)
         match = _find_text_on_screen(text, language, match_mode, min_confidence, region)
         if match is None:
@@ -2302,10 +2514,11 @@ def click_text_on_screen(
         _auto_learn_point("Click OCR text", match["center_x"], match["center_y"])
         return json.dumps({"ok": True, "match": match}, ensure_ascii=False)
     except Exception as error:
-        return f"Error clicking OCR text: {error}"
+        return json.dumps(normalize_result(error), ensure_ascii=False)
 
 
 @mcp.tool()
+@_action_result(observation=True)
 def find_control_by_vision(
     description: str,
     model: str = "",
@@ -2326,10 +2539,11 @@ def find_control_by_vision(
         region = _screen_region(region_x, region_y, region_width, region_height)
         return json.dumps(_find_control_by_vision(description, model, region), ensure_ascii=False)
     except Exception as error:
-        return f"Error finding control with vision API: {error}"
+        return json.dumps(normalize_result(error), ensure_ascii=False)
 
 
 @mcp.tool()
+@_action_result()
 def click_by_vision(
     description: str,
     model: str = "",
@@ -2349,6 +2563,7 @@ def click_by_vision(
         blocked = _mode_blocks_operation()
         if blocked:
             return blocked
+        _validate_click(button, click_type)
         region = _screen_region(region_x, region_y, region_width, region_height)
         match = _find_control_by_vision(description, model, region)
         if not match["found"]:
@@ -2360,7 +2575,7 @@ def click_by_vision(
         _auto_learn_point("Click vision API match", match["center_x"], match["center_y"])
         return json.dumps({"ok": True, "match": match}, ensure_ascii=False)
     except Exception as error:
-        return f"Error clicking control with vision API: {error}"
+        return json.dumps(normalize_result(error), ensure_ascii=False)
 
 
 # ---------------------------------------------------------------------------
@@ -2368,24 +2583,14 @@ def click_by_vision(
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
-def mouse_scroll(amount: int = 3, direction: str = "down") -> str:
-    """Scroll the mouse wheel at the current cursor position.
+@_action_result()
+def mouse_scroll(amount: int = 3, direction: str = "down", x: int = -1, y: int = -1) -> str:
+    """Compatibility alias for scroll, with identical parameters and behavior.
 
-    Args:
-        amount: Number of scroll ticks (default 3).
-        direction: "up" or "down".
+    Prefer scroll for new workflows. amount is a positive tick count; direction
+    is up or down. Supply both x/y or omit both for the current cursor position.
     """
-    try:
-        blocked = _mode_blocks_operation()
-        if blocked:
-            return blocked
-        if direction == "up":
-            pyautogui.scroll(amount)
-        else:
-            pyautogui.scroll(-amount)
-        return f"Scrolled {direction} {amount} ticks"
-    except Exception as e:
-        return f"Error scrolling: {e}"
+    return scroll(amount=amount, direction=direction, x=x, y=y)
 
 
 # ---------------------------------------------------------------------------

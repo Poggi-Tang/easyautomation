@@ -4,34 +4,61 @@ on:
   push:
     tags:
       - "v*"
-    branches:
-      - main
 
 permissions:
-  id-token: write
+  contents: read
 
 jobs:
+  test:
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install project
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .[dev,mcp,vision]
+      - name: Run tests
+        run: pytest -q
+
   publish:
-    if: "github.event_name == 'push' && github.event.head_commit.message == 'chore(release): publish v0.7.5'"
+    needs: test
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
     environment:
       name: pypi
       url: https://pypi.org/p/easy-uiauto
-
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: eaec137218a07970005e1e411a577d69268ce2d6
-
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-
-      - name: Install build tool
-        run: python -m pip install --upgrade pip build
-
-      - name: Build
-        run: python -m build
-
+      - name: Verify tag and package version
+        run: |
+          python - <<'PY'
+          import ast, os, pathlib, tomllib
+          version = tomllib.loads(pathlib.Path('pyproject.toml').read_text())['project']['version']
+          assert os.environ['GITHUB_REF_NAME'] == f'v{version}', 'Tag/version mismatch'
+          tree = ast.parse(pathlib.Path('src/easy_uiauto/__init__.py').read_text())
+          declared = next(ast.literal_eval(node.value) for node in tree.body
+                          if isinstance(node, ast.Assign)
+                          and any(isinstance(target, ast.Name) and target.id == '__version__'
+                                  for target in node.targets))
+          assert declared == version, 'Package version mismatch'
+          PY
+      - name: Install build tools
+        run: python -m pip install --upgrade build twine
+      - name: Build and validate artifacts
+        run: |
+          python -m build
+          python -m twine check dist/*
       - name: Publish
         uses: pypa/gh-action-pypi-publish@release/v1

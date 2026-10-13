@@ -13,6 +13,7 @@ import pyautogui
 import pyperclip
 
 from . import configuration, knowledge, visualization
+from .results import ActionError
 from .scanner import (
     _crop_control,
     _find_window,
@@ -388,7 +389,8 @@ def _paste_text_with_clipboard(text: str, control, rectangle: dict, fast: bool) 
             except Exception:
                 pass
     if not evidence["verified"]:
-        raise RuntimeError(
+        raise ActionError(
+            "result_unconfirmed",
             "Text paste could not be read back from the target control; "
             "the command was not recorded as successful"
         )
