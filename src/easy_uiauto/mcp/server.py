@@ -35,8 +35,10 @@ from easy_uiauto.utils import (
 
 from .. import __version__
 from . import (
+    annotation_correction,
     configuration,
     diagnostics,
+    image_analysis,
     waiting,
     interaction_learning,
     knowledge,
@@ -69,6 +71,8 @@ mcp = FastMCP(
         "Use wait_for_control, wait_for_text, and wait_for_window to check effects. "
         "Use scroll for scrolling; mouse_scroll is a compatibility alias. "
         "Call get_capability_readiness to inspect optional dependencies."
+        " For a saved UI image, call analyze_ui_image directly; it does not inspect the desktop."
+        " Use correct_ui_image_annotations to adjust saved boxes locally by element ID."
     ),
 )
 
@@ -322,6 +326,7 @@ def _find_control_by_vision(
     )
     payload = {
         "model": configured_model,
+        **configuration.vision_request_options(configured_model),
         "temperature": 0,
         "messages": [
             {"role": "system", "content": "You locate UI elements precisely and return JSON only."},
@@ -2314,6 +2319,117 @@ def run_actions(
 # ---------------------------------------------------------------------------
 # Screenshot
 # ---------------------------------------------------------------------------
+
+@mcp.tool()
+async def analyze_ui_image(
+    image_path: str,
+    ctx: Context,
+    output_dir: str = "",
+    max_elements: int = 1000,
+    model: str = "",
+    analysis_scale: float = 0,
+    box_padding: int = 2,
+    analysis_context: str = "",
+) -> str:
+    """Analyze a saved UI image and return a numbered PNG plus coordinate JSON.
+
+    Sends only the supplied image to the configured vision endpoint. No window
+    enumeration, live screenshot, UIA verification, vault update, or UI action is
+    performed. Graphic observations use blue G labels and text uses orange T
+    labels, always adjacent to their own box. Numeric element IDs remain stable;
+    annotation_label supplies the display ID. Observations are never commands.
+    Coordinates refer to the input image after honoring its EXIF orientation;
+    the annotated PNG has those same dimensions. Image attachments must first be
+    available as a local file on the MCP server's machine.
+
+    Args:
+        image_path: Local path to a single-frame image, such as PNG, JPEG or WebP.
+        output_dir: Parent output directory; each call creates a separate run folder.
+        max_elements: Maximum observations to return, 1 to 3000; truncation is reported.
+        model: Optional vision model override; empty uses the configured model.
+        analysis_scale: 0 automatically enlarges small images up to 4x; 1 disables
+            enlargement. Other values from 1 to 4 set an explicit scale. Returned
+            coordinates always map back to the displayed input image.
+        box_padding: Margin around detections, 0 to 20 original-image pixels.
+            Raw model bounds remain in detected_rect. Known attached parts are
+            included in their parent's bounds. Default is 2 pixels.
+        analysis_context: Optional scope/granularity guidance, such as identifying
+            whole circuit model components instead of their internal symbols.
+    """
+    async def report_progress(current: int, message: str) -> None:
+        try:
+            await ctx.report_progress(current, 1, message)
+        except Exception:
+            pass
+
+    try:
+        api_url, api_key, selected_model = _vision_api_settings(model)
+        await report_progress(0, "Analyzing supplied UI image")
+        result = await asyncio.to_thread(
+            image_analysis.analyze_image,
+            image_path, api_url, api_key, selected_model, __version__, output_dir, max_elements,
+            analysis_scale=analysis_scale,
+            box_padding=box_padding, analysis_context=analysis_context,
+        )
+        await report_progress(1, "Saved annotated image and coordinate JSON")
+        return json.dumps(result, ensure_ascii=False, indent=2)
+    except Exception as error:
+        return json.dumps({"ok": False, "error": f"{type(error).__name__}: {error}"},
+                          ensure_ascii=False)
+
+
+@mcp.tool()
+async def correct_ui_image_annotations(
+    coordinates_json: str,
+    refine_ids: Optional[list[int]] = None,
+    corrections: Optional[list[dict]] = None,
+    output_dir: str = "",
+    search_margin: int = 8,
+    box_padding: int = 1,
+    profile: str = "icons",
+    discover_missing: bool = False,
+) -> str:
+    """Correct numbered saved-image boxes locally and return a new PNG/JSON pair.
+
+    No API request, screenshot, desktop access or knowledge-vault update occurs.
+    Primary IDs, names, raw detected_rect evidence and the thin rendering style
+    are preserved. Old outputs are retained. Results remain unverified observations.
+
+    Args:
+        coordinates_json: elements.json returned by analyze_ui_image or this tool.
+        refine_ids: Existing IDs to fit to nearby pixels. Default icons profile
+            suits isolated icons on light, plain backgrounds. Circuit profile
+            uses connected symbol structures. Uncertain matches are skipped
+            with a reason. Geometry correction does not verify control meaning.
+        corrections: Exact original-image rectangles, for example
+            [{"id":3,"rect":{"left":110,"top":65,"right":125,"bottom":81}}].
+            right/bottom are exclusive. No padding is added to explicit bounds.
+            Composite parents still enclose their known attached badge bounds.
+        output_dir: Parent output folder; each correction creates a new subfolder.
+        search_margin: Pixel search radius around existing bounds, 1 to 64.
+        box_padding: Padding for pixel fitting, 0 to 20; default one pixel.
+        profile: icons fits isolated icons on plain light backgrounds. circuit
+            also handles connected block diagrams: whole frames, pointed tags,
+            ellipses, terminal rings and grounds. Electrical diagrams retain
+            paired circles, grounded load branches and busbars. Frame and shadow
+            edges are excluded from busbar discovery. Unmatched predictions
+            remain unchanged and are listed in correction.needs_review_ids.
+            Duplicate observations sharing one candidate retain their primary
+            ID; merged IDs and conflicting model captions remain in metadata.
+        discover_missing: With circuit profile, add unassigned geometric busbar
+            observations. No reference coordinates or model request is used.
+    """
+    try:
+        result = await asyncio.to_thread(
+            annotation_correction.correct_annotations,
+            coordinates_json, refine_ids, corrections, output_dir, search_margin, box_padding,
+            profile, discover_missing,
+        )
+        return json.dumps(result, ensure_ascii=False, indent=2)
+    except Exception as error:
+        return json.dumps({"ok": False, "error": f"{type(error).__name__}: {error}"},
+                          ensure_ascii=False)
+
 
 @mcp.tool()
 def detect_visual_elements(

@@ -1,13 +1,83 @@
 ---
 name: easy-uiauto-learning
-description: Visually scan and safely explore any visible Windows desktop application into an Obsidian-compatible easy_uiauto knowledge vault with key controls, stable UIA locations, control images, semantic commands, and learned operation effects. Use when the user asks to learn, scan, deeply explore, map, catalog, or repair an application's interface or generate a UI CLI.
+description: Scan and explore Windows applications into an easy_uiauto UI knowledge vault, or analyze a supplied UI image into numbered annotations and element coordinates. Use for application learning, interface mapping, UI CLI generation, or UI screenshot annotation.
 ---
 
 # easy_uiauto Learning
 
 Build reusable UI knowledge through the `easy_uiauto` MCP tools.
 
-## Workflow
+## Supplied UI Images
+
+For standalone local YOLO + OCR exports from CMD, use the checkout's
+`annotate-image.cmd "input-image" "output-parent"` or installed
+`easy_uiauto_image "input-image" "output-parent"`. This creates an independent run
+folder with `text.png`, `controls.png`, `combined.png`, coordinates, raw detections,
+logs and `index.html`. Default profile is `block-diagram`; use `--profile circuit`
+for electrical symbols or `--profile ui` for general UI proposals. Inference is
+local CPU with cached models; it does not use the configured remote vision API.
+The CMD pipeline automatically checks missed small text inside closed frames,
+using cached detection proposals and agreeing original/enlarged recognition.
+Review `ocr-recovery.json` and source `rapidocr-small-text-recovery`; recovered
+observations are appended while baseline text and display IDs remain stable.
+`--no-small-text-recovery` disables that pass for comparison.
+
+For an attached or saved screenshot, call `analyze_ui_image(image_path=..., output_dir=...)`
+with its local file path on the MCP server's machine. This path uses the configured vision
+endpoint directly; window enumeration and live-desktop readiness checks are unnecessary.
+Return `annotated_image`, `coordinates_json`, and the matching numbered `elements`.
+Coordinates are pixels relative to the EXIF-oriented image's top-left corner, with
+exclusive right/bottom bounds. Honor `truncated`; all detections remain observations.
+Saved-image graphics use blue boxes and `G1…` labels, text uses orange boxes and
+`T1…` labels. Keep each label two pixels outside its own box, sliding only along
+the four edges for collision avoidance. `annotation_label` maps the display label
+to the original numeric `id` used by correction tools. Preserve labels across layers.
+If image-edge labels need canvas margins, `annotation_layout.image_origin` records
+the input-image offset; element coordinates remain relative to the original input.
+Small images are enlarged automatically; returned coordinates still refer to the original
+displayed image. Use `analysis_scale=1` only when enlargement is unwanted.
+Display `annotated_preview_image` when present; its strokes are drawn at one pixel
+after enlargement. `rect`/`bbox` include `box_padding` (default two original pixels)
+and known attached components; `detected_rect` preserves the raw prediction. Use
+`analysis_context` for the user's requested scope and component granularity.
+Inferred names, functions, and suggested actions have no UIA or execution verification.
+This operation does not update the application vault or generate commands.
+Visible text is also a control: include independent captions, titles, numeric
+values and pin/port labels unless the user explicitly asks for graphics only.
+Use a separate ID and `entity_type=text-label`, with literal content in
+`observed_value`; default to one independent label or text line per box. Associate
+it with its graphic using `text-of`/`label-of`, not `attached-to`, so an external
+caption does not enlarge the graphic's bounds. Text and graphic boxes can overlap
+without being duplicates. Circuit-outline fitting does not validate text bounds;
+its `text_control_ids` remain observations needing a text detector/OCR or review.
+
+To repair existing boxes, call `correct_ui_image_annotations(coordinates_json=...,`
+`refine_ids=[...])` for local pixel fitting of selected isolated icons on light,
+plain backgrounds. This uses the saved original image and makes no API request.
+For exact corrections, pass `corrections=[{"id":3,"rect":{"left":110,"top":65,`
+`"right":125,"bottom":81}}]` instead; right/bottom are exclusive original-image
+coordinates and receive no extra padding. Preserve IDs and semantic content.
+Return the new PNG/JSON pair and review `correction.updates` for skipped targets.
+For connected circuit diagrams, set `profile="circuit"` and pass the original
+model output as `coordinates_json`. It detects rectangular frames, paired circles,
+grounded load branches, and thick busbars in the original pixels. Selected
+observations sharing one geometry candidate are merged under their primary ID;
+merged IDs and conflicting captions stay in metadata. Set `discover_missing=true`
+only when geometric busbar additions are wanted. Other missing component kinds
+are not added. Inspect candidate counts, merged/added IDs, skipped targets and the
+new annotation. A correction test must not substitute previous reviewed geometry
+for the original model output. Originals and `detected_rect` remain available;
+correction does not establish UIA or functional verification. Unsupported symbols
+or ambiguous backgrounds may still require explicit bounds.
+The circuit profile also fits connected control block diagrams using complete
+frames, pointed tags, machine/meter ellipses, terminal rings and grounds. Review
+`diagram_family`, `needs_review_ids` and each skipped update: unsupported model
+boxes remain unchanged. Do not count them as successful corrections. Coverage
+includes tile bounds and raw/merged observation counts; conflicting tile evidence
+is retained in `tile_observations`. Model confidence is not a calibrated geometry
+score, so a high score alone does not establish accurate bounds.
+
+## Live Application Workflow
 
 1. Call `get_ui_learning_readiness` before listing or scanning windows. If `ready` is false,
    stop immediately and return its setup instruction. Do not attempt either scan strategy.

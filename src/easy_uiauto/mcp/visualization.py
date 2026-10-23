@@ -15,6 +15,10 @@ STATUS_COLORS = {
     "quarantined": "#ff6d00",
 }
 PAGE_MATCH_THRESHOLD = 0.82
+IMAGE_ANNOTATION_STYLES = {
+    "graphic": {"prefix": "G", "color": "#1565c0"},
+    "text": {"prefix": "T", "color": "#c65d00"},
+}
 
 
 def _rect_size(rectangle: dict) -> tuple[int, int]:
@@ -67,11 +71,31 @@ def control_markers(
     source_window_rect: dict | None,
     destination_window_rect: dict,
     target_ids: set[str] | None = None,
+    *,
+    include_components: bool = True,
 ) -> list[dict]:
     """Build markers from stable normalized hints, with legacy-pixel compatibility."""
     target_ids = target_ids or set()
+    expanded = list(records)
+    if include_components:
+        for record in records:
+            for index, component in enumerate(record.get("visual_components", []), start=1):
+                if not isinstance(component, dict) or not isinstance(
+                    component.get("normalized_rect"), dict
+                ):
+                    continue
+                if (component["normalized_rect"] == record.get("normalized_rect")
+                        and component.get("intent") == record.get("intent")):
+                    continue
+                expanded.append({
+                    **component,
+                    "id": knowledge.stable_id("component", record.get("id"), index),
+                    "parent_control_id": record.get("id"),
+                    "status": "observed", "actions": [],
+                    "geometry_role": "visual-hint-only",
+                })
     sorted_records = sorted(
-        records,
+        expanded,
         key=lambda item: (
             item.get("normalized_rect", item.get("rect", {})).get("top", 0),
             item.get("normalized_rect", item.get("rect", {})).get("left", 0),
@@ -103,30 +127,132 @@ def control_markers(
                 "status": record.get("status", "observed"),
                 "color": STATUS_COLORS.get(record.get("status", ""), "#00b8d4"),
                 "target": record.get("id") in target_ids,
+                "parent_control_id": record.get("parent_control_id", ""),
             }
         )
     return markers
 
 
-def annotate_screenshot(screenshot, markers: list[dict]):
-    """Return a numbered page image matching the live overlay legend."""
-    from PIL import ImageDraw
+def _annotation_label_rects(markers: list[dict], image_size: tuple[int, int], *,
+                            compact: bool = False) -> list[tuple]:
+    """Keep every label two pixels outside an edge of its own rectangle.
 
-    annotated = screenshot.convert("RGB").copy()
-    draw = ImageDraw.Draw(annotated)
+    Crowding affects which edge/position wins, never the distance from the box.
+    If no edge fits inside the image, the renderer adds a small canvas margin.
+    """
+    width, height = image_size
+    placed = []
+    if compact:
+        from PIL import ImageFont
+        font = ImageFont.load_default()
+
+    def overlap_area(a, b):
+        return max(0, min(a[2], b[2]) - max(a[0], b[0])) * max(
+            0, min(a[3], b[3]) - max(a[1], b[1]))
+
+    targets = [(m["rect"]["left"], m["rect"]["top"],
+                m["rect"]["right"], m["rect"]["bottom"]) for m in markers]
     for marker in markers:
+        rect = marker["rect"]
+        text_control = marker.get("text_control", False)
+        # A text control's number may sit inside its owning graphic. Treating
+        # that entire graphic as an obstacle sends every interior text label
+        # above the module, far away from its actual coordinates.
+        own = (rect["left"], rect["top"], rect["right"], rect["bottom"])
+        blocked = []
+        for other, target in zip(markers, targets, strict=True):
+            containing_graphic = (not other.get("text_control")
+                                  and target[0] <= own[0] and target[1] <= own[1]
+                                  and target[2] >= own[2] and target[3] >= own[3])
+            owner = other["index"] == marker.get("label_parent_index")
+            if text_control and (containing_graphic or owner):
+                continue
+            blocked.append(target)
+        label = str(marker.get("annotation_label", marker["index"]))
+        if compact:
+            text_box = font.getbbox(label)
+            label_width = text_box[2] - text_box[0] + 6
+            label_height = text_box[3] - text_box[1] + 6
+        else:
+            label_width = max(18, 8 * len(label) + 8)
+            label_height = 18
+
+        def anchors(start, end, extent, axis, obstacles):
+            low, high = sorted((start, end - extent))
+            values = [start, end - extent, (start + end - extent) // 2]
+            for obstacle in obstacles:
+                values.extend((obstacle[axis] - extent - 2, obstacle[axis + 2] + 2))
+            # Include the image edge without moving away from the target edge.
+            values.extend((0, (width if axis == 0 else height) - extent))
+            return list(dict.fromkeys(max(low, min(high, value)) for value in values))
+
+        obstacles = [*placed, *blocked, (0, 0, width, height)]
+        xs = anchors(own[0], own[2], label_width, 0, obstacles)
+        ys = anchors(own[1], own[3], label_height, 1, obstacles)
+        positions = [*((x, own[1] - label_height - 2) for x in xs),
+                     *((own[2] + 2, y) for y in ys),
+                     *((own[0] - label_width - 2, y) for y in ys),
+                     *((x, own[3] + 2) for x in xs)]
+        choices = [(x, y, x + label_width, y + label_height) for x, y in positions]
+        inside = [r for r in choices if 0 <= r[0] and 0 <= r[1]
+                  and r[2] <= width and r[3] <= height]
+        # A dense layout may leave no collision-free position. Minimize overlap
+        # locally instead of moving the label to an unrelated part of the page.
+        selected = min(inside or choices, key=lambda r: (
+            sum(overlap_area(r, p) for p in placed) * 4
+            + sum(overlap_area(r, p) for p in blocked)))
+        placed.append(selected)
+    return placed
+
+
+def annotate_screenshot(screenshot, markers: list[dict], *, avoid_label_overlap: bool = False,
+                        outline_width: int = 1, compact_labels: bool = False):
+    """Return a numbered page image matching the live overlay legend."""
+    from PIL import Image, ImageDraw, ImageFont
+
+    labels = (_annotation_label_rects(markers, screenshot.size, compact=compact_labels)
+              if avoid_label_overlap or compact_labels else [])
+    offset_x = max(0, -min((r[0] for r in labels), default=0))
+    offset_y = max(0, -min((r[1] for r in labels), default=0))
+    width = offset_x + max(screenshot.width, max((r[2] for r in labels), default=0))
+    height = offset_y + max(screenshot.height, max((r[3] for r in labels), default=0))
+    annotated = Image.new("RGB", (width, height), "white")
+    annotated.paste(screenshot.convert("RGB"), (offset_x, offset_y))
+    draw = ImageDraw.Draw(annotated)
+    font = ImageFont.load_default()
+    for index, marker in enumerate(markers):
         rectangle = marker["rect"]
         color = "#ff1744" if marker.get("target") else marker["color"]
-        left = rectangle["left"]
-        top = rectangle["top"]
-        right = rectangle["right"]
-        bottom = rectangle["bottom"]
-        draw.rectangle((left, top, right, bottom), outline=color, width=3)
-        label = str(marker["index"])
+        left = rectangle["left"] + offset_x
+        top = rectangle["top"] + offset_y
+        right = rectangle["right"] + offset_x
+        bottom = rectangle["bottom"] + offset_y
+        draw.rectangle((left, top, max(left, right - 1), max(top, bottom - 1)),
+                       outline=color, width=outline_width)
+        label = str(marker.get("annotation_label", marker["index"]))
         label_top = max(0, top - 18)
         label_width = max(18, 8 * len(label) + 8)
-        draw.rectangle((left, label_top, left + label_width, label_top + 18), fill=color)
-        draw.text((left + 4, label_top + 2), label, fill="white")
+        label_rect = (tuple(value + (offset_x if axis % 2 == 0 else offset_y)
+                            for axis, value in enumerate(labels[index])) if labels
+                      else (left, label_top, left + label_width, label_top + 18))
+        if compact_labels:
+            text_box = font.getbbox(label)
+            draw.rectangle((label_rect[0], label_rect[1], label_rect[2] - 1,
+                            label_rect[3] - 1), fill="white", outline=color, width=1)
+            draw.text((label_rect[0] + 3 - text_box[0], label_rect[1] + 3 - text_box[1]),
+                      label, fill=color, font=font)
+        else:
+            draw.rectangle(label_rect, fill=color)
+            draw.text((label_rect[0] + 4, label_rect[1] + 2), label, fill="white")
+    annotated.info["annotation_layout"] = {
+        "image_origin": {"x": offset_x, "y": offset_y},
+        "rendered_size": {"width": width, "height": height},
+        "label_gap": 2,
+        "labels": [{"id": marker["index"],
+                    "annotation_label": str(marker.get("annotation_label", marker["index"])),
+                    "rect": dict(zip(("left", "top", "right", "bottom"), r, strict=True))}
+                   for marker, r in zip(markers, labels, strict=False)],
+    }
     return annotated
 
 
@@ -272,7 +398,9 @@ def _runtime_control_markers(
         runtime_record = {key: value for key, value in record.items() if key != "normalized_rect"}
         resolved.append({**runtime_record, "rect": rectangle, "resolution_method": method})
 
-    markers = control_markers(resolved, window_rect, window_rect)
+    # Saved component hints are not current runtime locators. New scans persist
+    # distinct visual entities separately, so each gets its own image/OCR check.
+    markers = control_markers(resolved, window_rect, window_rect, include_components=False)
     methods = {item.get("id"): item.get("resolution_method") for item in resolved}
     for marker in markers:
         marker["resolution_method"] = methods.get(marker["control_id"], "")

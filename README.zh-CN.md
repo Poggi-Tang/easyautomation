@@ -19,6 +19,9 @@
 适用于 Windows 自动化测试、RPA、Agent 工具和桌面软件操作知识沉淀。
 项目仅支持 Windows，目前仍处于 `0.x` 阶段。
 
+也支持在本机使用 YOLO＋OCR 标注图片：输入图片路径和输出目录，即可生成文字标注图、
+图形控件标注图、合并标注图、坐标、识别证据和本地 HTML 查看页。
+
 > ⚠️ 视觉扫描和流程探索仍在持续完善。涉及发送消息、支付、删除、上传、
 > 账号变更或其他会产生外部影响的操作前，请先检查生成的命令和风险标记。
 
@@ -37,6 +40,8 @@
   不必重新猜坐标。
 - 🖼️ **控件框选反馈**：使用一个点击穿透覆盖层为整页控件编号，保存页面标注图，
   并在执行命令前突出实际目标。
+- 🏷️ **本地图片标注**：CPU 运行 YOLO＋OCR，无需视觉 API；蓝色 G 编号表示图形、
+  橙色 T 编号表示文字，使用 1 像素边框和贴边标签，支持几何纠正及小文字自动补检。
 - 🧪 **操作响应学习**：比较操作前后截图，检查变化区域、UIA 属性和新窗口，
   保存有证据支撑的成功条件。
 - 🗂️ **可维护知识库**：页面、控件、截图、交互和隔离记录都使用
@@ -56,6 +61,7 @@
 | 动作录制与回放 | Stable | 生成可复用的结构化动作 |
 | MCP 工具与客户端配置 | Beta | 内置 Codex 和 Claude Code 安装命令 |
 | 视觉优先扫描与软件 UI CLI | Beta | 需要 OpenAI 兼容视觉接口 |
+| 本地图片标注 CLI | Experimental | CPU YOLO＋OCR，无需 API key；支持普通界面、控制框图和电气元件图 |
 | 操作前后响应学习 | Beta | 保存本地证据和成功条件 |
 | 递归流程探索 | Experimental | 仅探索可恢复操作，并限制递归深度 |
 
@@ -79,6 +85,19 @@ git clone https://github.com/Poggi-Tang/easyautomation.git
 cd easyautomation
 pip install -e .
 ```
+
+只需本地图片标注时，安装 `image` 扩展并运行：
+
+```cmd
+python -m pip install "easy-uiauto[image]"
+easy_uiauto_image "C:\images\input.bmp" "C:\images\results"
+```
+
+每次在输出目录下新建独立结果子目录，生成 `text.png`、`controls.png`、`combined.png`、
+`elements.json`、`elements.csv`、诊断记录和 `index.html`。结束后打开 `index.html`
+集中查看。模型在本机 CPU 运行，首次使用会下载并校验 YOLO 权重。默认处理控制框图，
+普通软件截图加 `--profile ui`，电气元件图加 `--profile circuit`。详见
+[CMD 本地图片标注](#cmd-本地图片标注)。
 
 ## 🔌 MCP 配置
 
@@ -245,10 +264,19 @@ easy_uiauto_ui commands <app-id>
 easy_uiauto_ui show <app-id>
 ```
 
-默认的 `visual-first` 策略会把目标窗口截图发送到已配置的视觉接口，找出关键区域和控件，
+默认的 `visual-first` 策略会把目标窗口截图发送到已配置的视觉接口，大图按原始分辨率
+分成重叠区域分析，逐项识别可见控件和有意义的状态，
 再把坐标映射到本地 UIA 控件。最终保存稳定 `LOCATION`、控件图、功能含义、同义词、
 风险和生成的命令。支持位于副屏上的窗口。扫描还会保存 `<页面-id>.annotated.png`，
 并在当前窗口短暂绘制相同编号的控件框；不需要实时框选时可传入 `--no-overlay`。
+
+桌面扫描会额外枚举 Explorer 暴露的桌面图标，补齐视觉漏识别的快捷方式和文件；返回的
+`coverage` 包含分块数、桌面项数和补充数。超过扫描上限时会明确返回 `truncated=true`。
+桌面项使用原生清单并通过屏幕命中检查排除被窗口遮挡的图标，视觉接口只分析任务栏，
+避免重复生成大量图标描述。`desktop_items_occluded` 单独报告遮挡项数量。
+共享 UIA 容器的不同视觉元素会分别保存和标注；只有取得独立且验证通过的定位后才会生成
+可执行命令。没有独立定位的元素保留为观察记录。仅凭 UIA 名称补充的桌面项不宣称已验证
+打开后的效果，并保留未知风险及确认标记。
 
 通过 MCP 学习时，每 5 秒会报告任务 ID、当前阶段、已耗时和控件验证进度。如果客户端
 停止等待，应先调用 `get_ui_learning_status`；状态为 `running` 表示原扫描仍在 MCP 进程中
@@ -258,6 +286,105 @@ easy_uiauto_ui show <app-id>
 
 视觉定位不适用或需要诊断完整 UIA 覆盖时，可使用 `--strategy full-uia`。该模式会遍历
 可见 UIA 树并额外执行语义分析，因此更慢，产生的记录也更多。
+
+### 图片文件识别与标注
+
+调用 MCP 工具 `analyze_ui_image(image_path="C:/images/screenshot.png")` 可直接分析
+PNG、JPEG、WebP 等图片，无需打开软件或操作桌面。工具使用已配置的视觉接口，返回
+`annotated_image` 标注图、`coordinates_json` 坐标文件和编号对应的 `elements`。
+每项包含名称、推测功能、置信度、`bbox`（x、y、宽、高）、`rect`（左上边界包含、右下
+边界不包含）、中心点和归一化坐标。坐标以应用 EXIF 方向后的原图左上角为原点，
+图形使用蓝色框与 `G1…` 标签，文字使用橙色框与 `T1…` 标签，均为未经 UIA 或功能执行
+验证的观察项，不写入应用知识库。`annotation_label` 对应显示编号，原始数字 `id` 供
+修正工具调用。`output_dir` 指定独立结果文件夹的父目录，`max_elements` 限制返回数量，
+超出时明确报告 `truncated`。图片附件需先在 MCP 所在机器上保存为本地文件。
+小图默认自动放大识别（最高 4 倍），区域和控件坐标均回映原图；传入 `analysis_scale=1`
+可关闭放大，1 到 4 之间的其他值可指定识别倍率。
+`box_padding` 为原图像素边距（默认 2，传 0 关闭）；`detected_rect` 保留模型原始预测，
+`rect` 和 `bbox` 包含边距，并使已知组合控件的整体框包含附属子元素。
+放大预览 `annotated_preview_image` 会单独绘制 1 像素边框和紧凑编号，避免把线宽和标签
+一起放大。标签始终放在对应框的四边外侧，间隔 2 像素，避让时只沿边调整，不移到远处。
+标注图通常保持原尺寸；若图像边缘容不下标签，会增加白色画布边距，原图坐标保持不变。
+`annotation_layout.image_origin` 记录原图在画布中的偏移，`labels` 记录各编号标签位置，
+`annotation_preview_layout` 记录预览布局。可用 `analysis_context` 指定分析范围和粒度，例如按完整电路模型元件标注，
+不把元件内部的电阻、电容等图案拆成独立控件。
+
+框选不完整时，可调用
+`correct_ui_image_annotations(coordinates_json=".../elements.json", refine_ids=[1,3,9])`
+按编号在原图上进行本地像素修正，无需再次调用视觉 API。自动修正适合浅色简单背景上的
+独立图标；连接线或背景复杂、无法可靠分离时会跳过并给出原因。也可传入
+`corrections=[{"id":3,"rect":{"left":110,"top":65,"right":125,"bottom":81}}]`
+直接指定精确边界，右下坐标不包含且不额外加边距。自动修正默认保留 1 像素边距。
+编号、语义、原始 `detected_rect` 和标注样式保持一致，新生成 PNG/JSON，不覆盖旧结果；
+`corrected_rect` 与 `correction.updates` 记录修正内容。新识别结果记录原图哈希，防止修正
+时误用已变化的图片；旧结果仅校验尺寸。修正结果仍是未经 UIA 验证的观察项。
+
+电路图可加 `profile="circuit"`：从原图像素提取矩形外框、双圆变压器、带接地符号的
+负载支路和粗线母线，匹配所选观察项的几何边界，并归并匹配到同一图形的重复结果。
+`discover_missing=true` 可额外补充未匹配的母线，不自动补充其他类型。保留主编号和模型
+原始预测；候选数量、归并及新增编号记录在 `correction` 中。该模式不读取旧标注作为
+参考坐标，不调用视觉 API；支持上述图形结构，不能保证适用所有电路符号，需检查跳过项。
+控制框图还支持完整模块、常量、Mux 外框，From/Goto 尖头标签，电机/仪表椭圆、端口圆环
+和接地符号。母线检测排除闭合外框及其阴影边缘。无法确定的预测保持原样，并列入
+`correction.needs_review_ids`，不能当作已确认元件。`coverage` 记录分块边界和原始/归并
+观察数量；跨分块去重不再要求模型输出的角色、类型完全一致，冲突证据保存在
+`tile_observations` 中。
+文字也是控件：标签、标题、数值和端口文字用独立的 `text-label` 编号，文字框与图形框
+可以重叠。用 `text-of`/`label-of` 表达所属关系，外部文字不扩大图形框。
+电路修正保留 `text_control_ids`；文字坐标需要文字检测/OCR 或复核，不能用闭合元件
+外框验证，也不能因缺少外框就认定文字是误检。
+
+### CMD 本地图片标注
+
+从仓库运行，不需要启动 Codex 或 MCP 服务：
+
+```cmd
+cd /d C:\path\to\easyautomation
+annotate-image.cmd "C:\images\input.bmp" "C:\images\results"
+```
+
+前两个参数分别是图片路径和输出父目录，支持中文和空格；路径请加双引号。
+每次在输出目录下建立独立的 `图片名-时间-随机编号` 子目录，避免覆盖旧结果。
+命令结束后打印该目录和 `index.html` 路径，双击 `index.html` 即可集中查看。
+
+| 文件 | 内容 |
+| --- | --- |
+| `text.png` | 橙色 T 编号的文字标注 |
+| `controls.png` | 蓝色 G 编号的图形控件标注 |
+| `combined.png` | 文字与图形合并标注 |
+| `original.png` | 应用 EXIF 方向、透明区域铺白后的原图 |
+| `elements.json` / `elements.csv` | 文字内容、编号、坐标、来源、所属关系和待复核信息 |
+| `raw-yolo.json` / `raw-ocr.json` | 原始检测与 OCR 输出 |
+| `ocr-recovery.json` | 小文字补检候选、过滤原因和两次识别证据 |
+| `geometry-candidates.json` | 本地几何候选与证据 |
+| `summary.json` / `run.log` | 数量、耗时、成功/失败状态与处理日志 |
+| `index.html` | 三张标注图和资源文件的本地查看页 |
+
+默认 `--profile block-diagram` 复用控制框图实测流程；电气元件图使用
+`--profile circuit`，普通软件截图使用 `--profile ui`。UI 模式保留 YOLO 图形候选，
+移除与 OCR 文字重复的候选，不强制套用控制框图外框。识别结果仍可能漏检、误检或错字，
+几何纠正只支持已实现的图形结构。
+
+默认自动补检已有闭合控件框内部遗漏的小文字：复用全图检测概率图，只在这些局部区域
+检查较低分候选；要求原尺寸裁剪与放大裁剪的识别文字一致、至少一次分数达到 0.95，
+两次均达到 0.90，并过滤重复文字、触及裁剪边缘的连线和边框。通过后追加文字项，保留
+原有识别与编号，来源标记为 `rapidocr-small-text-recovery`。补检耗时、数量和证据保存在
+`ocr-recovery.json`；可用 `--no-small-text-recovery` 关闭补检进行对照。
+
+已有 YOLO 和 OCR 实验缓存时会自动复用。其他环境先在仓库目录安装依赖：
+
+```cmd
+python -m pip install ".[image]"
+easy_uiauto_image "C:\images\input.bmp" "C:\images\results"
+```
+
+YOLO 权重首次下载约 281 MB，校验 SHA256 后缓存；后续复用。OCR 使用 RapidOCR 包
+附带的 PP-OCRv6 ONNX 模型。`--offline` 要求已有缓存，禁止下载 YOLO 权重。
+整个识别流程在本机 CPU 执行，不使用视觉 API，也不需要 API key。
+仓库的 CMD 启动器使用 PATH 中的 `python`；如需指定解释器，可先设置
+`EASY_UIAUTO_IMAGE_PYTHON`。用 `annotate-image.cmd --help` 查看全部参数。
+成功返回退出码 0，失败返回 2；进入处理阶段后的失败记录在结果目录的 `summary.json`
+和 `run.log` 中。
 
 ### 🧪 深度探索
 

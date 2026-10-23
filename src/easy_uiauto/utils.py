@@ -284,18 +284,21 @@ def push_message_run_time(func, param, count=1):
 
 def get_window_title_by_handle(hwnd):
     """通过窗口句柄获取真实标题"""
-    length = ctypes.windll.user32.GetWindowTextLengthW(hwnd)
+    user32 = _get_user32()
+    length = user32.GetWindowTextLengthW(hwnd)
     if length == 0:
         return ""
 
     buffer = ctypes.create_unicode_buffer(length + 1)
-    ctypes.windll.user32.GetWindowTextW(hwnd, buffer, length + 1)
+    user32.GetWindowTextW(hwnd, buffer, length + 1)
     return buffer.value
 
 
 def _get_user32():
     """Configure pointer-sized HWND arguments for 64-bit Windows."""
-    user32 = ctypes.windll.user32
+    # Keep ctypes signatures private: pygetwindow uses its own EnumWindows
+    # callback type on ctypes.windll.user32 in the same MCP process.
+    user32 = ctypes.WinDLL('user32', use_last_error=True)
     user32.GetForegroundWindow.restype = ctypes.c_void_p
     for name in ('IsWindowVisible', 'IsIconic', 'SetForegroundWindow'):
         getattr(user32, name).argtypes = (ctypes.c_void_p,)

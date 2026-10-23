@@ -7,9 +7,11 @@ import ctypes
 import hashlib
 import io
 import json
+import math
 import re
 import time
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from ctypes import wintypes
 from pathlib import Path
 from urllib import error as urlerror
@@ -20,7 +22,7 @@ import uiautomation
 
 from easy_uiauto.utils import get_control_xpath
 
-from . import knowledge, visualization
+from . import configuration, knowledge, visualization
 from .protocol import location_from_xpath, normalize_location, stable_location
 
 ACTIONABLE_TYPES = {
@@ -202,9 +204,9 @@ def _descendant_matches(parent, step: dict, max_depth: int) -> list:
 
 def _automation_id_step(location: dict) -> dict | None:
     xpath = location.get("Xpath", [])
-    for step in reversed(xpath):
-        if step.get("AutomationId"):
-            return step
+    # An ancestor's ID identifies a container, not the requested leaf control.
+    if xpath and xpath[-1].get("AutomationId"):
+        return xpath[-1]
     if location.get("AutomationId"):
         return {
             "AutomationId": location["AutomationId"],
@@ -256,6 +258,8 @@ def _resolve_property_combination(window, location: dict):
     candidates = _descendant_matches(window, step, 30)
     if not candidates:
         return None
+    if len(candidates) == 1:
+        return candidates[0]
     found_index = location.get("foundIndex")
     if found_index not in (None, ""):
         try:
@@ -277,6 +281,15 @@ def resolve_location(location: dict, window=None, prefix_cache: dict | None = No
         window_name = xpath[0].get("Name", "")
     if window is None:
         window = _find_window(window_name)
+    if xpath and _is_desktop_window(window) and not _matches_step(window, xpath[0]):
+        matches = {}
+        for shell in _desktop_shell_roots(window):
+            if not _matches_step(shell, xpath[0]):
+                continue
+            candidate = resolve_location(normalized, window=shell)
+            if candidate is not None and candidate is not False:
+                matches[_control_key(candidate)] = candidate
+        return next(iter(matches.values())) if len(matches) == 1 else None
     current = window
     prefix_cache = prefix_cache if prefix_cache is not None else {}
     automation_key = (
@@ -585,7 +598,10 @@ def _parse_json_object(content: str) -> dict:
     content = content.strip()
     if content.startswith("```"):
         content = re.sub(r"^```(?:json)?\s*|\s*```$", "", content, flags=re.IGNORECASE)
-    result = json.loads(content)
+    try:
+        result = json.loads(content)
+    except json.JSONDecodeError as error:
+        raise RuntimeError("Vision response did not contain a valid JSON object") from error
     if not isinstance(result, dict):
         raise RuntimeError("AI segmentation response must be a JSON object")
     return result
@@ -603,12 +619,21 @@ def _read_completion_content(response) -> str:
     raw = response.read().decode("utf-8")
     if not raw.lstrip().startswith("data:"):
         body = json.loads(raw)
-        content = body["choices"][0]["message"]["content"]
+        if body.get("error"):
+            raise RuntimeError("Vision API returned an error response")
+        choices = body.get("choices") or []
+        if not choices:
+            raise RuntimeError("Vision response did not contain a completion")
+        if choices[0].get("finish_reason") == "length":
+            raise RuntimeError("Vision completion was truncated by the provider")
+        content = choices[0].get("message", {}).get("content")
         if isinstance(content, list):
-            return "".join(
+            content = "".join(
                 item.get("text", "") for item in content if isinstance(item, dict)
             )
-        return str(content)
+        if not isinstance(content, str) or not content.strip():
+            raise RuntimeError("Vision response contained no completion content")
+        return content
     return _parse_sse_lines(raw.splitlines())
 
 
@@ -628,10 +653,14 @@ def _parse_sse_lines(lines) -> str:
         if not data or data == "[DONE]":
             continue
         chunk = json.loads(data)
+        if chunk.get("error"):
+            raise RuntimeError("Vision API returned a streaming error response")
         choices = chunk.get("choices", [])
         if not choices:
             continue
         choice = choices[0]
+        if choice.get("finish_reason") == "length":
+            raise RuntimeError("Vision completion was truncated by the provider")
         content = choice.get("delta", {}).get("content")
         if content is None:
             content = choice.get("message", {}).get("content")
@@ -646,37 +675,201 @@ def _parse_sse_lines(lines) -> str:
     return "".join(pieces)
 
 
+def _tile_origins(length: int, size: int) -> list[int]:
+    """Cover an axis with evenly spaced tiles and at least 80 pixels of overlap."""
+    if length <= size:
+        return [0]
+    count = math.ceil((length - 80) / (size - 80))
+    return [round(i * (length - size) / (count - 1)) for i in range(count)]
+
+
+def _merge_tile_target(controls: list[dict], target: dict) -> None:
+    """Fuse repeated pixel observations while retaining conflicting caption evidence."""
+    from . import diagram_geometry
+
+    def same_entity(existing):
+        if diagram_geometry.is_text(existing) != diagram_geometry.is_text(target):
+            return False
+        attachments = [any(rel.get("type") == "attached-to"
+                           for rel in item.get("relationships", []))
+                       for item in (existing, target)]
+        if any(attachments) and not all(attachments):
+            return False
+        if _same_visual_target(existing, target):
+            return True
+        if set(existing.get("source_tiles", [])) & set(target.get("source_tiles", [])):
+            return False
+        # Roles, captions and classes are model predictions, not pixel identity.
+        # In particular, ui-element/readonly often replaces subsystem/entity in
+        # a second tile. Do not let that prevent strong geometric deduplication.
+        a, b = existing["relative_rect"], target["relative_rect"]
+        if _rect_iou(a, b) >= 0.82:
+            return True
+        first_name = str(existing.get("semantic_name", "")).casefold()
+        second_name = str(target.get("semantic_name", "")).casefold()
+        if not first_name or not second_name or not (
+                first_name in second_name or second_name in first_name):
+            return False
+        if _rect_iou(a, b) >= 0.85:
+            return True
+        overlap = (max(0, min(a["right"], b["right"]) - max(a["left"], b["left"]))
+                   * max(0, min(a["bottom"], b["bottom"]) - max(a["top"], b["top"])))
+        smaller = min(a["width"] * a["height"], b["width"] * b["height"])
+        return (bool(existing.get("_tile_clipped")) != bool(target.get("_tile_clipped"))
+                and overlap / max(1, smaller) >= 0.75)
+
+    position = next((i for i, existing in enumerate(controls) if same_entity(existing)), None)
+    if position is None:
+        controls.append({**target, "id": len(controls) + 1})
+        return
+    existing = controls[position]
+    old_clipped = bool(existing.get("_tile_clipped"))
+    new_clipped = bool(target.get("_tile_clipped"))
+    prefer_new = ((old_clipped and not new_clipped)
+                  or (old_clipped == new_clipped
+                      and target.get("confidence", 0) > existing.get("confidence", 0)))
+    merged = dict(target if prefer_new else existing)
+    # Keep a real observation, rather than unioning disagreeing boxes into a
+    # larger rectangle that no tile predicted. Preserve all competing evidence.
+    observations = []
+    for item in (existing, target):
+        observations.extend(item.get("tile_observations") or [{
+            key: item.get(key) for key in ("relative_rect", "semantic_name", "entity_type",
+                                          "role", "observed_value", "confidence", "source_tiles")
+        }])
+    merged["tile_observations"] = observations
+    variants = list(dict.fromkeys(
+        value for item in (existing, target)
+        for value in [*item.get("observed_value_variants", []), item.get("observed_value", "")]
+        if value))
+    if len(variants) > 1:
+        merged["observed_value_variants"] = variants
+        merged["caption_ambiguity"] = "Conflicting tile captions refer to the same pixel target"
+    merged["source_tiles"] = sorted(set(existing.get("source_tiles", []))
+                                    | set(target.get("source_tiles", [])))
+    controls[position] = {**merged, "id": existing["id"]}
+
+
 def segment_interface(
     screenshot,
     api_url: str,
     api_key: str,
     model: str,
     version: str,
+    progress: Callable[[str], None] | None = None,
+    analysis_context: str = "",
 ) -> dict:
-    """Ask the multimodal endpoint for page, regions, and key visual controls."""
+    """Analyze overlapping native-resolution tiles instead of shrinking a desktop."""
+    width, height = screenshot.size
+    tiles = [
+        (x, y, min(width, x + 1280), min(height, y + 960))
+        for y in _tile_origins(height, 960)
+        for x in _tile_origins(width, 1280)
+    ]
+    report = progress or (lambda _message: None)
+    context_args = (analysis_context,) if analysis_context else ()
+    if len(tiles) == 1:
+        result = _segment_image(screenshot, api_url, api_key, model, version, *context_args)
+        result["coverage"] = {"visual_tiles": 1}
+        return result
+    results = {}
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        pending = {
+            pool.submit(
+                _segment_image, screenshot.crop(bounds), api_url, api_key, model, version,
+                *context_args,
+            ): index
+            for index, bounds in enumerate(tiles)
+        }
+        for future in as_completed(pending):
+            try:
+                results[pending[future]] = future.result()
+            except Exception as error:
+                for job in pending:
+                    job.cancel()
+                raise RuntimeError(
+                    f"Vision tile {pending[future] + 1}/{len(tiles)} failed: {error}"
+                ) from error
+            report(f"Segmenting interface tiles {len(results)}/{len(tiles)}")
+    regions, controls = [], []
+    for index, (x, y, tile_right, tile_bottom) in enumerate(tiles):
+        result = results[index]
+        prefix = f"tile-{index + 1}-"
+        for region in result["regions"]:
+            rect = dict(region["rect"])
+            rect.update(left=rect["left"] + x, right=rect["right"] + x,
+                        top=rect["top"] + y, bottom=rect["bottom"] + y)
+            regions.append({**region, "id": prefix + region["id"], "rect": rect})
+        for target in result["controls"]:
+            rect = dict(target["relative_rect"])
+            clipped = ((x > 0 and rect["left"] <= 2)
+                       or (y > 0 and rect["top"] <= 2)
+                       or (tile_right < width and rect["right"] >= tile_right - x - 2)
+                       or (tile_bottom < height and rect["bottom"] >= tile_bottom - y - 2))
+            rect.update(left=rect["left"] + x, right=rect["right"] + x,
+                        top=rect["top"] + y, bottom=rect["bottom"] + y)
+            translated = {**target, "region_id": prefix + target["region_id"],
+                          "relative_rect": rect, "_tile_clipped": clipped,
+                          "source_tiles": [index + 1]}
+            _merge_tile_target(controls, translated)
+    return {"page": results[0]["page"], "regions": regions, "controls": controls,
+            "coverage": {"visual_tiles": len(tiles), "tile_bounds": tiles,
+                         "raw_observations": sum(len(r["controls"]) for r in results.values()),
+                         "merged_observations": sum(len(r["controls"]) for r in results.values())
+                                                - len(controls),
+                         "edge_clipped_targets": sum(c.get("_tile_clipped", False)
+                                                     for c in controls)}}
+
+
+def _segment_image(
+    screenshot,
+    api_url: str,
+    api_key: str,
+    model: str,
+    version: str,
+    analysis_context: str = "",
+) -> dict:
+    """Ask the multimodal endpoint for every meaningful visible UI element."""
     buffer = io.BytesIO()
     screenshot.save(buffer, format="PNG")
     image_url = "data:image/png;base64," + base64.b64encode(buffer.getvalue()).decode("ascii")
     width, height = screenshot.size
     prompt = (
         f"Analyze this {width}x{height} desktop application screenshot. "
-        "Identify the current page, divide it into functional regions, and identify only controls "
-        "that a user would need to operate or read to complete tasks. Exclude decorative, "
-        "duplicate, layout-only, and inaccessible background elements. Use concise generic IDs in "
+        "Identify the current page, divide it into functional regions, and enumerate every "
+        "visible actionable item and meaningful read-only element. Do not sample representative "
+        "items: enumerate each desktop shortcut, file, list row, toolbar button and tray icon "
+        "separately, including repeated-looking items. Exclude decorative, layout-only, "
+        "inaccessible background elements and duplicate detections of the same item. Use IDs in "
         "kebab-case. Return JSON only with this shape: "
-        '{"page":{"id":"main","name":"Main","description":""},'
+        '{"page":{"id":"main","name":"Main"},'
         '"regions":[{"id":"navigation","name":"Navigation","role":"navigation",'
-        '"description":"","left":0,"top":0,"width":100,"height":100}],'
+        '"left":0,"top":0,"width":100,"height":100}],'
         '"controls":[{"id":1,"region":"navigation","semantic_name":"Open menu",'
-        '"intent":"open-navigation-menu","description":"Open the application navigation",'
-        '"role":"action","entity_type":"navigation-action","observed_value":"",'
-        '"dynamic_context":false,"current_state":"enabled","state_reason":"",'
-        '"enabling_condition":"","relationships":[],"actions":["click"],'
-        '"aliases":["menu"],"risk":"safe",'
-        '"requires_confirmation":false,"confidence":0.97,"evidence":["menu icon"],'
-        '"ambiguity":"","left":10,"top":10,"width":40,"height":40}]}. '
-        "Coordinates must use screenshot pixels. Include all major functional areas, "
-        "not each control. Control rectangles must tightly cover the visible target. Include key "
+        '"intent":"open-menu","role":"action","actions":["click"],"risk":"safe",'
+        '"confidence":0.97,"left":10,"top":10,"width":40,"height":40}]}. '
+        "Use compact JSON. Omit optional empty/default fields; do not repeat boilerplate "
+        "descriptions for every icon. Optional fields are entity_type, observed_value, "
+        "dynamic_context, current_state, state_reason, enabling_condition, relationships, "
+        "aliases, requires_confirmation, description, ambiguity and evidence. Include these "
+        "when they carry visible information; keep descriptions under twelve words. "
+        "Every control must include numeric confidence from 0 to 1. Use low confidence and "
+        "ambiguity when an icon's function cannot be established from visible evidence. "
+        "Keep a visually distinct notification badge as its own element even when attached "
+        "to another icon; use a relationship with type='attached-to' and target_intent set "
+        "to the parent icon's intent. "
+        "Visible text is also a control: enumerate standalone labels, captions, values, "
+        "titles and pin/port text as entity_type='text-label', with their literal content "
+        "in observed_value. Use one rectangle per independent label or line, not per glyph. "
+        "Text and its owning graphic have separate IDs and may legitimately overlap. "
+        "Use a relationship type='text-of' or 'label-of' for that association; do not use "
+        "attached-to for an external caption or enlarge the graphic box to include it. "
+        "Do not split intrinsic icon artwork, decorative accents or highlights into extra "
+        "UI elements. A colored detail alone is not evidence of a separate notification badge. "
+        "Coordinates must use screenshot pixels. This image may be one tile of a larger window; "
+        "report only elements visible in this tile. Never replace a group of distinct items "
+        "with one generic group rectangle. Control rectangles must tightly cover each target. "
+        "Include "
         "read-only status and result fields because they are needed to verify operation effects. "
         "Include meaningful visible entities even when they are not directly actionable: names, "
         "avatars, list-row identity, message/content areas, inputs, badges, status values, and "
@@ -692,10 +885,18 @@ def segment_interface(
         "publishing, purchasing, deleting, uploading, logging out, and closing unsaved work must "
         "require confirmation."
     )
+    if analysis_context:
+        prompt += (" Analysis scope and grouping guidance (takes precedence over generic "
+                   "UI examples and enumeration rules above): " + analysis_context[:4000])
     payload = {
         "model": model,
+        **configuration.vision_request_options(model),
         "temperature": 0,
-        "stream": True,
+        # Structured output is validated at the provider as well as locally.
+        # Some compatible gateways return empty/non-JSON streaming completions
+        # for large images even when small streaming probes work.
+        "stream": False,
+        "response_format": {"type": "json_object"},
         "messages": [
             {
                 "role": "system",
@@ -710,6 +911,8 @@ def segment_interface(
             },
         ],
     }
+    if model.lower().startswith(("gpt-5", "gpt-6", "o1", "o3", "o4")):
+        payload["reasoning_effort"] = "low"
     request = urlrequest.Request(
         api_url,
         data=json.dumps(payload).encode("utf-8"),
@@ -721,7 +924,7 @@ def segment_interface(
         method="POST",
     )
     try:
-        with urlrequest.urlopen(request, timeout=60) as response:
+        with urlrequest.urlopen(request, timeout=120) as response:
             content = _read_completion_content(response)
     except urlerror.HTTPError as error:
         raise RuntimeError(f"AI segmentation failed with HTTP {error.code}") from error
@@ -729,6 +932,10 @@ def segment_interface(
         reason = getattr(error, "reason", str(error))
         raise RuntimeError(f"AI segmentation failed: {reason}") from error
     result = _parse_json_object(str(content))
+    if (not isinstance(result.get("page"), dict)
+            or not isinstance(result.get("regions"), list)
+            or not isinstance(result.get("controls"), list)):
+        raise RuntimeError("Vision response is missing page, regions or controls")
     return _validate_segments(result, width, height)
 
 
@@ -877,6 +1084,7 @@ def _request_control_semantics(
     )
     payload = {
         "model": model,
+        **configuration.vision_request_options(model),
         "temperature": 0,
         "stream": True,
         "messages": [
@@ -1256,6 +1464,185 @@ def _control_key(control) -> tuple:
     )
 
 
+def _same_visual_target(first: dict, second: dict) -> bool:
+    """Only deduplicate overlapping detections with compatible entity identities."""
+    if _rect_iou(first["relative_rect"], second["relative_rect"]) < 0.65:
+        return False
+    for key in ("role", "entity_type", "observed_value"):
+        a, b = str(first.get(key) or "").casefold(), str(second.get(key) or "").casefold()
+        if a and b and a != b:
+            return False
+    a, b = first.get("intent"), second.get("intent")
+    same_value = bool(first.get("observed_value")) and (
+        first.get("observed_value") == second.get("observed_value")
+    )
+    return not (a and b and a != b and not same_value)
+
+
+def _is_desktop_window(window) -> bool:
+    return (getattr(window, "ClassName", "") in {"Progman", "WorkerW"}
+            or getattr(window, "Name", "") == "Program Manager")
+
+
+def _desktop_shell_roots(window) -> list:
+    """Inspect Explorer shell roots only, never other applications' UI trees."""
+    roots = {_control_key(window): window}
+    for control in uiautomation.GetRootControl().GetChildren():
+        if getattr(control, "ClassName", "") in {
+            "Progman", "WorkerW", "Shell_TrayWnd", "Shell_SecondaryTrayWnd"
+        }:
+            roots.setdefault(_control_key(control), control)
+    return list(roots.values())
+
+
+def _desktop_item_is_visible(control) -> bool:
+    """UIA IsOffscreen does not account for other windows covering an icon."""
+    rect = _rect(control)
+    expected = _control_key(control)
+    try:
+        current = uiautomation.ControlFromPoint(
+            (rect["left"] + rect["right"]) // 2,
+            (rect["top"] + rect["bottom"]) // 2,
+        )
+        for _ in range(8):
+            if not current:
+                break
+            if _control_key(current) == expected:
+                return True
+            current = current.GetParentControl()
+    except Exception:
+        pass
+    return False
+
+
+def _supplement_desktop_targets(window, window_rect: dict, segmentation: dict,
+                                max_controls: int) -> None:
+    """Retain every exposed visible desktop item even when vision omits it."""
+    targets = segmentation.setdefault("controls", [])
+    seen, icons, added, occluded = set(), 0, 0, 0
+    queue = [(shell, 0) for shell in _desktop_shell_roots(window)]
+    limited = False
+    while queue:
+        control, depth = queue.pop(0)
+        key = _control_key(control)
+        if key in seen:
+            continue
+        seen.add(key)
+        control_type = getattr(control, "ControlTypeName", "")
+        if control_type == "ListItemControl":
+            rect = _rect(control)
+            if (not _valid_rect(rect, window_rect)
+                    or bool(getattr(control, "IsOffscreen", False))):
+                continue
+            if not _desktop_item_is_visible(control):
+                occluded += 1
+                continue
+            icons += 1
+            if icons > max_controls:
+                limited = True
+                break
+            relative = _relative_rect(_clip_rect(rect, window_rect), window_rect)
+            name = str(getattr(control, "Name", "") or "").strip()
+            matched = None
+            for target in targets:
+                visual = target["relative_rect"]
+                cx, cy = ((visual["left"] + visual["right"]) / 2,
+                          (visual["top"] + visual["bottom"]) / 2)
+                if (relative["left"] <= cx <= relative["right"]
+                        and relative["top"] <= cy <= relative["bottom"]
+                        and _rect_iou(relative, visual) >= 0.2
+                        and (not target.get("observed_value")
+                             or str(target["observed_value"]).casefold() == name.casefold())
+                        and not target.get("_uia_control")):
+                    matched = target
+                    break
+            if matched is not None:
+                matched["_uia_control"] = control
+                continue
+            targets.append({
+                "id": len(targets) + 1, "region_id": "desktop-items",
+                "semantic_name": "Desktop item", "intent": "open-desktop-item",
+                "description": "Open the named desktop item; its effect has not been tested.",
+                "role": "action", "entity_type": "desktop-item", "observed_value": name,
+                "dynamic_context": True, "actions": ["double-click"], "aliases": [name],
+                "risk": "unknown", "requires_confirmation": True, "confidence": 1.0,
+                "source": "uia-desktop-item", "relative_rect": relative,
+                "_uia_control": control,
+            })
+            added += 1
+            continue
+        if depth < 4 and getattr(control, "ClassName", "") in {
+            "Progman", "WorkerW", "SHELLDLL_DefView", "SysListView32"
+        }:
+            queue.extend((child, depth + 1) for child in control.GetChildren())
+    if added:
+        segmentation["regions"].append({
+            "id": "desktop-items", "name": "Desktop items", "role": "desktop-workspace",
+            "description": "Individually enumerated Windows desktop items",
+            "rect": _relative_rect(window_rect, window_rect),
+        })
+    segmentation.setdefault("coverage", {}).update(
+        desktop_items_seen=icons, desktop_items_added=added, desktop_limit_reached=limited,
+        desktop_items_occluded=occluded,
+    )
+
+
+def _segment_desktop(screenshot, window, window_rect: dict, api_url: str, api_key: str,
+                     model: str, version: str, max_controls: int, progress) -> dict:
+    """Use exact native desktop items and visual analysis of the taskbars only."""
+    width, height = screenshot.size
+    segmentation = _validate_segments({"page": {
+        "id": "desktop", "name": "Windows Desktop",
+        "description": "Native desktop items with visually analyzed taskbars",
+    }}, width, height)
+    _supplement_desktop_targets(window, window_rect, segmentation, max_controls)
+    bars = []
+    for shell in _desktop_shell_roots(window):
+        if getattr(shell, "ClassName", "") in {"Shell_TrayWnd", "Shell_SecondaryTrayWnd"}:
+            rect = _clip_rect(_rect(shell), window_rect)
+            if _valid_rect(rect, window_rect):
+                bars.append(_relative_rect(rect, window_rect))
+    for index, rect in enumerate(bars, start=1):
+        progress(f"Segmenting desktop taskbars {index}/{len(bars)}")
+        crop = screenshot.crop((rect["left"], rect["top"], rect["right"], rect["bottom"]))
+        result = _segment_image(crop, api_url, api_key, model, version)
+        prefix = f"taskbar-{index}-"
+        for key, rectangle_key in (("regions", "rect"), ("controls", "relative_rect")):
+            for item in result[key]:
+                translated = dict(item)
+                local = dict(item[rectangle_key])
+                local.update(left=local["left"] + rect["left"],
+                             right=local["right"] + rect["left"],
+                             top=local["top"] + rect["top"],
+                             bottom=local["bottom"] + rect["top"])
+                translated[rectangle_key] = local
+                if key == "regions":
+                    translated["id"] = prefix + item["id"]
+                else:
+                    translated["id"] = len(segmentation["controls"]) + 1
+                    translated["region_id"] = prefix + item["region_id"]
+                segmentation[key].append(translated)
+    segmentation["coverage"].update(visual_tiles=len(bars),
+                                     desktop_strategy="native-items-and-visual-taskbars")
+    return segmentation
+
+
+def _candidate_fits_target(control, absolute_target: dict, window) -> bool:
+    rectangle = _rect(control)
+    if _control_key(control) == _control_key(window):
+        return False
+    target_area = max(1, absolute_target["width"] * absolute_target["height"])
+    area_ratio = rectangle["width"] * rectangle["height"] / target_area
+    generic = getattr(control, "ControlTypeName", "") in GENERIC_CONTAINER_TYPES
+    if area_ratio > (4 if generic else 16) or area_ratio < 0.1:
+        return False
+    intersection = (max(0, min(rectangle["right"], absolute_target["right"])
+                        - max(rectangle["left"], absolute_target["left"]))
+                    * max(0, min(rectangle["bottom"], absolute_target["bottom"])
+                          - max(rectangle["top"], absolute_target["top"])))
+    return intersection / target_area >= 0.5
+
+
 def _candidate_score(control, target: dict, absolute_target: dict, window) -> tuple:
     control_type = getattr(control, "ControlTypeName", "") or "Control"
     actions = _control_actions(control_type, bool(getattr(control, "IsEnabled", True)))
@@ -1311,6 +1698,9 @@ def control_from_visual_target(
         "width": relative["width"],
         "height": relative["height"],
     }
+    direct = target.get("_uia_control")
+    if direct is not None and _candidate_fits_target(direct, absolute_target, window):
+        return direct
     candidates = {}
     for x, y in _visual_sample_points(target, window_rect):
         try:
@@ -1330,10 +1720,13 @@ def control_from_visual_target(
     if not candidates:
         return None
     ranked = sorted(
-        candidates.values(),
+        (control for control in candidates.values()
+         if _candidate_fits_target(control, absolute_target, window)),
         key=lambda control: _candidate_score(control, target, absolute_target, window),
         reverse=True,
     )
+    if not ranked:
+        return None
     selected = ranked[0]
     if _candidate_score(selected, target, absolute_target, window)[0] < 0:
         return None
@@ -1350,7 +1743,7 @@ def controls_from_visual_targets(
     controls = []
     semantics = {}
     failures = []
-    seen: dict[str, int] = {}
+    seen: dict[tuple, int] = {}
     for target in targets[: max(1, max_controls)]:
         control = control_from_visual_target(window, window_rect, target)
         if control is None:
@@ -1364,7 +1757,7 @@ def controls_from_visual_targets(
             continue
         try:
             xpath = get_control_xpath(control)
-            key = json.dumps(xpath, ensure_ascii=False, sort_keys=True)
+            key = (json.dumps(xpath, ensure_ascii=False, sort_keys=True), _control_key(control))
         except Exception as error:
             failures.append(
                 {
@@ -1377,13 +1770,17 @@ def controls_from_visual_targets(
         if key in seen:
             index = seen[key]
             primary = semantics[index]
-            components = list(primary.get("visual_components", []))
+            if _same_visual_target(primary, target):
+                continue
+            # Shared UIA ownership is not evidence of a shared visual identity.
+            # Keep the distinct entity independently visible, with no executable locator.
+            visual = target
             if target.get("actions") and not primary.get("actions"):
-                components.append(primary)
-                semantics[index] = {**target, "visual_components": components}
-            else:
-                components.append(target)
-                primary["visual_components"] = components
+                visual = primary
+                semantics[index] = {**target, "visual_components": []}
+            failures.append({"visual_target": visual.get("semantic_name"),
+                             "error": "distinct visual entity shares a UIA control",
+                             "observation": visual})
             continue
         index = len(controls) + 1
         seen[key] = index
@@ -1440,13 +1837,19 @@ def scan_window(
     page_image = directory / "images" / "pages" / "latest.png"
     screenshot.save(page_image)
 
-    progress("Segmenting interface with remote AI")
-    segmentation = segment_interface(screenshot, api_url, api_key, model, version)
+    if strategy == "visual-first" and _is_desktop_window(window):
+        progress("Resolving native desktop items")
+        segmentation = _segment_desktop(
+            screenshot, window, window_rect, api_url, api_key, model, version,
+            max(1, max_controls), progress,
+        )
+    else:
+        progress("Segmenting interface with remote AI")
+        segmentation = segment_interface(screenshot, api_url, api_key, model, version, progress)
     _activate_window(window)
     refreshed_rect = _rect(window)
     if refreshed_rect != window_rect:
-        window_rect = refreshed_rect
-        screenshot = _screenshot_window(window_rect)
+        raise RuntimeError("Window moved or resized during visual analysis; scan again when stable")
     page = _reuse_page_identity(directory, screenshot, segmentation["page"])
     page_id = page["id"]
     segmentation["regions"] = _reuse_region_identities(
@@ -1573,6 +1976,7 @@ def scan_window(
     failures = list(visual_failures)
     command_counts: dict[str, int] = {}
     observed_ids = set()
+    identity_counts: dict[str, int] = {}
     previous_by_id = {record.get("id"): record for record in previous_page_records}
     semantic_counts = {"verified": 0, "uncertain": 0, "manual": 0, "not-required": 0}
     verification_interval = max(1, len(controls) // 20)
@@ -1608,6 +2012,9 @@ def scan_window(
                 "" if getattr(control, "AutomationId", "") else getattr(control, "Name", ""),
             )
             control_id = knowledge.stable_id("control", *identity)
+            identity_counts[control_id] = identity_counts.get(control_id, 0) + 1
+            if identity_counts[control_id] > 1:
+                control_id = knowledge.stable_id("control", *identity, identity_counts[control_id])
             semantic = semantics.get(index, {})
             previous = previous_by_id.get(control_id, {})
             if not previous:
@@ -1846,6 +2253,7 @@ def scan_window(
             failures.append({"index": index, "error": f"{type(error).__name__}: {error}"})
 
     visual_observations = 0
+    visual_identity_counts: dict[str, int] = {}
     for failure in visual_failures:
         target = failure.get("observation")
         if not isinstance(target, dict) or not isinstance(target.get("relative_rect"), dict):
@@ -1862,6 +2270,11 @@ def scan_window(
             intent,
             target.get("observed_value", ""),
         )
+        visual_identity_counts[control_id] = visual_identity_counts.get(control_id, 0) + 1
+        if visual_identity_counts[control_id] > 1:
+            control_id = knowledge.stable_id(
+                "visual-instance", control_id, visual_identity_counts[control_id]
+            )
         observed_ids.add(control_id)
         crop = screenshot.crop(
             (
@@ -2013,6 +2426,7 @@ def scan_window(
         "regions": len(segmentation["regions"]),
         "strategy": effective_strategy,
         "visual_targets": len(visual_targets),
+        "coverage": segmentation.get("coverage", {}),
         "visual_only_observations": visual_observations,
         "uia_controls_seen": len(controls),
         "controls_in_bounds": in_bounds,
@@ -2041,7 +2455,8 @@ def scan_window(
             else len(semantic_candidates)
         ),
         "failures": failures[:50],
-        "truncated": len(controls) >= max_controls,
+        "truncated": (len(controls) >= max_controls or len(visual_targets) > max_controls
+                      or segmentation.get("coverage", {}).get("desktop_limit_reached", False)),
         "elapsed_seconds": elapsed,
         "stage_timings": stage_timings,
     }

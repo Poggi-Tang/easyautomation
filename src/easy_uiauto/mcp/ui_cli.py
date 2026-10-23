@@ -199,6 +199,7 @@ def _locate_record_by_vision(record: dict, screenshot, window_rect: dict) -> dic
     description = record.get("description") or record.get("semantic_name") or record.get("name")
     payload = {
         "model": model,
+        **configuration.vision_request_options(model),
         "temperature": 0,
         "messages": [
             {

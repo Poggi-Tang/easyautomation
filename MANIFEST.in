@@ -1,0 +1,5 @@
+include annotate-image.cmd
+include README.zh-CN.md
+include CHANGELOG.md
+recursive-include scripts *.py
+recursive-include docs *.md

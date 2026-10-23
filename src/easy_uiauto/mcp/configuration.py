@@ -68,6 +68,13 @@ def _existing_vision_value(name: str) -> str:
     )
 
 
+def vision_request_options(model: str) -> dict:
+    """Avoid DeepSeek's default extended thinking for interactive UI requests."""
+    if model.lower().startswith("deepseek-"):
+        return {"thinking": {"type": "disabled"}}
+    return {}
+
+
 def vision_configuration_status() -> dict:
     """Return non-secret readiness details using values visible to current calls."""
     api_url = _existing_vision_value(VISION_API_URL)

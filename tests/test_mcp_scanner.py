@@ -334,7 +334,7 @@ def test_visual_target_selects_actionable_ancestor() -> None:
     assert selected is button
 
 
-def test_visual_targets_on_same_uia_control_keep_semantic_components(monkeypatch) -> None:
+def test_distinct_visual_entity_sharing_a_uia_control_is_kept_independently(monkeypatch) -> None:
     control = FakeControl("圆子", "ListItemControl", (20, 20, 180, 80), automation_id="圆子")
     window = FakeControl("微信", "WindowControl", (0, 0, 400, 300), [control])
     targets = [
@@ -383,9 +383,10 @@ def test_visual_targets_on_same_uia_control_keep_semantic_components(monkeypatch
     )
 
     assert len(controls) == 1
-    assert failures == []
+    assert len(failures) == 1
+    assert failures[0]["observation"]["entity_type"] == "contact-avatar"
     assert semantics[1]["intent"] == "open-conversation"
-    assert semantics[1]["visual_components"][0]["entity_type"] == "contact-avatar"
+    assert semantics[1]["visual_components"] == []
 
 
 def test_segment_validation_keeps_only_valid_key_targets() -> None:

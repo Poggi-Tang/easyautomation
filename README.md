@@ -22,6 +22,10 @@ The project is useful for Windows test automation, RPA, agent tooling, and
 building reusable operation knowledge for desktop software. It is Windows-only
 and currently released as a `0.x` project.
 
+It also annotates saved images locally with YOLO + OCR: provide an image path and
+an output directory to receive separate text, graphic and combined annotation
+images, coordinates, recognition evidence and a local HTML viewer.
+
 > ⚠️ Visual scanning and workflow exploration are still evolving. Review learned
 > commands before using them for messages, payments, deletion, uploads, account
 > changes, or other operations with external effects.
@@ -44,6 +48,9 @@ and currently released as a `0.x` project.
   commands instead of rediscovering coordinates for every task.
 - 🖼️ **Control overlays**: number every learned or executable control in one
   click-through overlay, save annotated page images, and preview operation targets.
+- 🏷️ **Local image annotation**: use CPU-based YOLO + OCR without a vision API;
+  export blue `G` graphics and orange `T` text with one-pixel boxes, adjacent IDs,
+  local geometry correction and automatic small-text recovery.
 - 🧪 **Effect learning**: compare before/after screenshots, inspect changed UIA
   properties and new windows, and store an evidence-backed success condition.
 - 🗂️ **Readable knowledge**: keep pages, controls, images, interactions, and
@@ -64,6 +71,7 @@ and currently released as a `0.x` project.
 | Recording and replay | Stable | Produces reusable structured actions |
 | MCP tools and client setup | Beta | Codex and Claude Code installers included |
 | Visual-first scan and generated UI CLI | Beta | Requires an OpenAI-compatible vision endpoint |
+| Local image annotation CLI | Experimental | CPU YOLO + OCR; no API key; supports UI, control-block and electrical-diagram profiles |
 | Before/after effect learning | Beta | Stores local evidence and learned success conditions |
 | Recursive workflow exploration | Experimental | Restricted to reversible commands and bounded depth |
 
@@ -88,6 +96,21 @@ git clone https://github.com/Poggi-Tang/easyautomation.git
 cd easyautomation
 pip install -e .
 ```
+
+For local image annotation, install the `image` extra and run:
+
+```cmd
+python -m pip install "easy-uiauto[image]"
+easy_uiauto_image "C:\images\input.bmp" "C:\images\results"
+```
+
+Each run creates a result subdirectory containing `text.png`, `controls.png`,
+`combined.png`, `elements.json`, `elements.csv`, diagnostics and `index.html`.
+Open `index.html` after completion to view the results. Models run on the local
+CPU; the YOLO weights are downloaded and verified on first use. The default profile
+is `block-diagram`; use `--profile ui` for ordinary software screenshots or
+`--profile circuit` for electrical symbols. See
+[local image annotation from CMD](#local-image-annotation-from-cmd) for details.
 
 ## 🔌 MCP Setup
 
@@ -267,13 +290,25 @@ easy_uiauto_ui commands <app-id>
 easy_uiauto_ui show <app-id>
 ```
 
-The default `visual-first` strategy sends one target-window screenshot to the
-configured vision endpoint, identifies useful regions and controls, and maps
+The default `visual-first` strategy sends target-window screenshots to the
+configured vision endpoint, using overlapping native-resolution tiles for large
+windows. It enumerates meaningful visible elements individually and maps
 those coordinates back to local UIA controls. It stores stable `LOCATION`
 records, control crops, meaning, aliases, risk, and generated commands. Secondary
 monitors are supported. The scan also saves `<page-id>.annotated.png` and briefly
 draws the same numbered controls over the live window. Use `--no-overlay` when
 visual feedback is not wanted.
+
+Desktop scans also enumerate Explorer's exposed desktop items to supplement
+shortcuts and files omitted by vision. For desktops, vision analyzes only the
+taskbars while visible native items are retained. A screen hit test excludes icons
+covered by other windows, which UIA's `IsOffscreen` flag alone does not detect.
+The `coverage` result reports tile, desktop-item, and occlusion counts; limits are
+reported through `truncated`. Distinct visual
+entities sharing a UIA container remain separate observations and annotations.
+Only independently verified locators produce executable commands. Desktop items
+supplemented from native names retain unknown risk and confirmation flags; their
+opening effects have not been tested.
 
 MCP scans report their task ID, stage, elapsed time, and control-verification count
 every five seconds. If a client stops waiting, call `get_ui_learning_status` before
@@ -284,6 +319,124 @@ runs only when deep or autonomous exploration is explicitly requested.
 Use `--strategy full-uia` for diagnostics when visual targeting is not suitable.
 This mode walks the visible UIA tree and performs a separate semantic pass, so it
 is slower and produces more records.
+
+### Saved UI images
+
+Call MCP tool `analyze_ui_image(image_path="C:/images/screenshot.png")` to analyze a
+saved PNG, JPEG, or WebP without opening or controlling an application. It uses the
+configured vision endpoint and returns `annotated_image`, `coordinates_json`, and
+numbered `elements` with meaning, confidence, `bbox` (`x`, `y`, `width`, `height`),
+`rect` (left/top inclusive, right/bottom exclusive), center, and normalized coordinates.
+All element coordinates refer to the displayed input image after EXIF orientation.
+Graphics use blue boxes and `G1…` labels; text uses orange boxes and `T1…` labels.
+`annotation_label` maps each display label to its original numeric `id`, which
+correction tools continue to use. These remain observations without UIA or execution
+verification, and no application knowledge is written. `output_dir` selects a parent
+directory for a unique run folder; `max_elements` limits output with explicit
+`truncated` reporting. Attachments must be accessible as local files to the server.
+Small inputs are automatically enlarged up to 4x for recognition, with all regions
+and elements mapped back to original-image coordinates. `analysis_scale=1` disables
+enlargement; values from 1 to 4 set an explicit scale.
+`box_padding` adds a margin in original pixels (default 2, set 0 to disable).
+`detected_rect` retains the model's raw mapped bounds; the returned `rect` and
+`bbox` include that margin and any known attached subcomponents. The enlarged
+`annotated_preview_image` is drawn separately with one-pixel outlines and compact
+labels, so enlarging an image does not enlarge its annotation strokes. Labels stay
+two pixels outside one of their own box's edges; collision avoidance only slides
+them along those edges. If no edge fits inside the image, a white canvas margin
+keeps the complete label visible. Element coordinates remain unchanged;
+`annotation_layout.image_origin` records the input's offset on that canvas and
+`labels` records label positions in input coordinates. `annotation_preview_layout`
+records the preview layout. Use
+`analysis_context` to specify scope and granularity, for example whole circuit
+model components rather than their internal resistor/capacitor symbols.
+
+Use `correct_ui_image_annotations(coordinates_json=".../elements.json", refine_ids=[1,3,9])`
+to fit selected existing boxes to local pixels without another API request. This
+mode suits isolated icons on light, plain backgrounds; uncertain or connected
+shapes are skipped with reasons. For exact bounds, pass
+`corrections=[{"id":3,"rect":{"left":110,"top":65,"right":125,"bottom":81}}]`.
+Explicit rectangles receive no added padding. Pixel fitting defaults to a one-pixel
+margin. IDs, semantics, raw `detected_rect`, and the annotation style are preserved.
+New PNG/JSON files retain the previous outputs; `corrected_rect` and
+`correction.updates` record changes. New analyses include a source image hash so
+correction rejects changed images. Legacy results validate dimensions only.
+
+For connected circuit symbols, add `profile="circuit"`. This uses original pixels
+to detect rectangular frames, paired circles, grounded load branches and thick
+busbars, then fits selected observations and merges shared geometry candidates.
+`discover_missing=true` additionally recovers unassigned busbars; it does not add
+other missing symbol kinds. Primary IDs and raw model evidence remain available,
+with merged/added IDs and candidate counts in `correction`. This local mode does
+not read reference annotations or make vision requests. It supports the documented
+symbol structures rather than arbitrary circuit notation; review skipped matches.
+Control block diagrams also support complete subsystem/constant/mux frames,
+pointed From/Goto tags, machine/meter ellipses, terminal rings and grounds. Closed
+outlines exclude frame and shadow edges from busbar discovery. Unsupported or
+ambiguous predictions remain unchanged in `correction.needs_review_ids`; they
+are not verified components. Tile coverage now reports bounds and raw/merged
+observation counts. Cross-tile fusion preserves conflicting predictions in
+`tile_observations`, without requiring identical model-generated roles or types.
+Visible text is also a control. Labels, captions, values and port text use their
+own `text-label` IDs; text and graphic boxes may overlap without being duplicates.
+Use `text-of`/`label-of` associations so external captions do not enlarge graphic
+bounds. `text_control_ids` are preserved by circuit correction; text geometry
+requires a text detector/OCR or review, not a closed circuit-symbol outline.
+
+### Local image annotation from CMD
+
+Run directly from the checkout without starting Codex or an MCP server:
+
+```cmd
+cd /d C:\path\to\easyautomation
+annotate-image.cmd "C:\images\input.bmp" "C:\images\results"
+```
+
+The arguments are the input image and output parent directory. Quote paths containing
+spaces. Each run creates an independent `<image>-<timestamp>-<id>` folder and prints
+its path. Open `index.html` there to view all three layers and resource links:
+
+- `text.png`: orange `T` text controls.
+- `controls.png`: blue `G` graphic controls.
+- `combined.png`: both layers with matching display IDs.
+- `original.png`: EXIF-oriented input composited against white.
+- `elements.json` / `elements.csv`: text, IDs, coordinates, provenance and relations.
+- `raw-yolo.json` / `raw-ocr.json`: original detector and OCR outputs.
+- `ocr-recovery.json`: small-text candidates, rejection reasons and recognition evidence.
+- `geometry-candidates.json`: original-pixel shape candidates and evidence.
+- `summary.json` / `run.log`: counts, timings and success/failure diagnostics.
+
+The default `--profile block-diagram` uses the tested control-diagram pipeline.
+Use `--profile circuit` for electrical symbol diagrams or `--profile ui` for ordinary
+software screenshots. UI mode retains YOLO graphic proposals while removing duplicate
+text proposals; it does not force diagram outlines onto arbitrary icons. Results can
+still contain missed regions, false positives and OCR errors. Diagram fitting supports
+the implemented outline families only.
+
+Small-text recovery is enabled by default inside existing closed control frames.
+It reuses the detector probability map, checks relaxed proposals only inside those
+frames, rejects existing text and connected wire/border strokes, and requires the
+original and enlarged crops to produce identical text. At least one recognition
+score must reach 0.95 and both must reach 0.90. Accepted observations are appended
+without replacing the original results or IDs, with source
+`rapidocr-small-text-recovery`. Inspect `ocr-recovery.json` for evidence and timing;
+use `--no-small-text-recovery` to disable the pass for comparison.
+
+On another machine, install optional dependencies from the repository first:
+
+```cmd
+python -m pip install ".[image]"
+easy_uiauto_image "C:\images\input.bmp" "C:\images\results"
+```
+
+The official OmniParser YOLOv9-E model (~281 MB) is downloaded once, SHA256-verified
+and cached. RapidOCR includes the PP-OCRv6 ONNX models. Existing local experiment
+caches are reused when available. `--offline` requires cached models and prevents
+YOLO downloads. Inference runs on the local CPU without a vision API or API key.
+The CMD launcher uses `python` from PATH; set `EASY_UIAUTO_IMAGE_PYTHON` to select
+another interpreter. Use `annotate-image.cmd --help` for options. Exit status is 0
+on success and 2 on failure; failures after processing begins are recorded in that
+run's `summary.json` and `run.log`.
 
 ### 🧪 Deep Exploration
 

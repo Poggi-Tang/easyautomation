@@ -17,7 +17,7 @@ from urllib import request as urlrequest
 import pyautogui
 import uiautomation
 
-from . import knowledge, scanner, ui_cli
+from . import configuration, knowledge, scanner, ui_cli
 
 BLOCKED_INTENT = re.compile(
     r"(send|publish|post|purchase|pay|delete|remove|upload|logout|log-out|close-window|exit)",
@@ -426,6 +426,7 @@ def _interpret_effects(
     )
     payload = {
         "model": model,
+        **configuration.vision_request_options(model),
         "temperature": 0,
         "stream": True,
         "messages": [

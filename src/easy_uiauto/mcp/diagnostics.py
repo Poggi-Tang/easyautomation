@@ -73,6 +73,9 @@ def _readiness_probe(name: str, timeout: float) -> str | None:
     try:
         result = subprocess.run(
             [sys.executable, "-c", _READINESS_PROBES[name]],
+            # Inherited MCP stdin can block Python startup on Windows while the
+            # transport reader is waiting on the same pipe.
+            stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             timeout=timeout,
@@ -94,6 +97,7 @@ def _ocr_languages(timeout: float) -> tuple[set[str], str | None]:
     try:
         result = subprocess.run(
             [command, "--list-langs"],
+            stdin=subprocess.DEVNULL,
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -449,6 +453,8 @@ def _test_remote_vision(api_url: str, api_key: str, model: str, version: str) ->
             },
         ],
     }
+    if model.lower().startswith("deepseek-"):
+        payload["thinking"] = {"type": "disabled"}
     request = urlrequest.Request(
         api_url,
         data=json.dumps(payload).encode("utf-8"),

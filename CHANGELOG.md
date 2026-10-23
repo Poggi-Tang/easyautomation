@@ -4,6 +4,52 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog and is maintained automatically by Semantic Release.
 
+## [Unreleased]
+
+## [0.9.0] - 2026-10-23
+
+### Added
+
+- Add a local `easy_uiauto_image` CLI and checkout CMD launcher, exporting text,
+  graphic and combined annotations, coordinates, raw detections, logs and an HTML
+  viewer using cached OmniParser YOLOv9-E and RapidOCR PP-OCRv6 models on CPU.
+- Add `analyze_ui_image` for saved UI screenshots, returning numbered annotations,
+  semantic observations, pixel/normalized rectangles, centers, and a JSON artifact
+  without desktop access, UIA verification, generated commands, or vault updates.
+- Add local `correct_ui_image_annotations` with selected-icon pixel fitting and
+  explicit rectangles; preserve IDs, raw model evidence, styles and old artifacts.
+- Add circuit-symbol correction from original pixels, geometry-based duplicate
+  fusion and opt-in recovery of missing busbars without reference annotations.
+
+### Fixed
+
+- Recover missed small text inside closed control frames using cached detector
+  proposals and agreeing original/enlarged recognition; preserve baseline OCR IDs,
+  reject connected strokes and export recovery evidence and timing.
+- Distinguish saved-image graphic/text boxes with blue `G` and orange `T` labels;
+  keep labels adjacent to their own edges and record canvas offsets when needed.
+- Preserve text as independent controls, including labels/values overlapping
+  graphics; keep text observations separate from circuit-outline fitting.
+- Avoid near-identical trailing image tiles; preserve cross-tile evidence while
+  deduplicating strongly overlapping geometry despite model role/type variation.
+- Fit complete block-diagram outlines, tags, ellipses, terminals and grounds;
+  exclude frame shadows from busbar discovery and report unresolved predictions.
+- Draw one-pixel image annotations and compact labels after preview enlargement,
+  retain raw model bounds, and include margins/known attached parts in full bounds.
+- Prefer complete detections over clipped duplicates at screenshot tile boundaries.
+- Analyze large screenshots in overlapping native-resolution tiles and supplement
+  desktop coverage with Explorer's exposed items, including secondary monitors.
+  Use native icon inventory and visual taskbar analysis for desktops; exclude
+  occluded icons with a screen hit test instead of relying on UIA IsOffscreen.
+- Reject oversized UIA ancestor matches; deduplicate only compatible overlapping
+  visual detections and retain distinct entities sharing a container separately.
+- Draw independent observation markers for saved visual components and preserve
+  multiple repeated visual entities without overwriting their records.
+- Resolve desktop locators across Explorer shell roots and never substitute an
+  ancestor AutomationId for the requested leaf control.
+- Isolate Win32 callback signatures from pygetwindow and detach readiness probes
+  from MCP stdin to avoid Windows enumeration failures and probe timeouts.
+
 ## [0.8.0] - 2026-10-13
 
 ### Added
