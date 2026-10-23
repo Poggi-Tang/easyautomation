@@ -409,9 +409,11 @@ def _caption_distance(graphic, text):
 
 
 def combine_detections(image, yolo, ocr, *, profile="block-diagram"):
-    """Preserve text as controls; refine graphics only with supported outlines."""
+    """Fuse independent geometry, color and YOLO evidence; keep text as controls."""
+    from . import image_geometry
     from .mcp import circuit_geometry, image_analysis
 
+    started = time.perf_counter()
     if profile not in {"block-diagram", "circuit", "ui"}:
         raise ValueError(f"Unknown image profile: {profile}")
     texts, rejected_text = [], []
@@ -432,42 +434,99 @@ def combine_detections(image, yolo, ocr, *, profile="block-diagram"):
     proposals = [(i, box, score) for i, box, score in proposals if box is not None]
     geometry = ([] if profile == "ui" else circuit_geometry.candidates(
         image, block_diagram=profile == "block-diagram"))
+    text_rects = [t["rect"] for t in texts]
+    colors = [] if profile == "ui" else image_geometry.color_candidates(image, text_rects)
+    for color in colors:
+        duplicate = next((c for c in geometry if circuit_geometry.iou(
+            color["rect"], c["rect"]) >= 0.65), None)
+        if duplicate:
+            # Keep the enclosing neutral border when it already fits the body.
+            duplicate["color_evidence"] = color
+            a, b = duplicate["rect"], color["rect"]
+            duplicate["rect"] = _rect((min(a["left"], b["left"]), min(a["top"], b["top"]),
+                                        max(a["right"], b["right"]), max(a["bottom"], b["bottom"])),
+                                       image.size)
+        else:
+            geometry.append(color)
+    if profile != "ui":
+        geometry.extend(image_geometry.solid_bars(
+            image, [c["rect"] for c in geometry] + text_rects))
+    for index, candidate in enumerate(geometry, 1):
+        candidate["candidate_id"] = index
+    busbars = [c["rect"] for c in geometry if c["kind"] == "busbar"]
     elements, accepted = [], set()
     for candidate in sorted(geometry, key=lambda c: (c["rect"]["top"], c["rect"]["left"])):
         box = candidate["rect"]
+        if candidate["kind"] == "ground" and any(
+                _overlap(box, bus) / _area(box) >= 0.5 for bus in busbars):
+            candidate.update(fusion_status="rejected", rejection_reason="Detail of a busbar")
+            continue
         supporting = [(i, score) for i, p, score in proposals
                       if circuit_geometry.iou(box, p) >= 0.25
                       or (_overlap(box, p) / _area(box) >= 0.9 and _area(p) <= _area(box) * 12)]
         inside = [t["raw_id"] for t in texts if _overlap(box, t["rect"]) / _area(t["rect"]) >= 0.8]
         captions = [t["raw_id"] for t in texts if _caption_distance(box, t["rect"]) is not None]
-        primitive = candidate["kind"] in {"busbar", "ground", "terminal"}
-        if not (supporting or inside or captions or primitive):
+        primitive = candidate["kind"] in {"busbar", "ground", "terminal", "solid-bar"}
+        color_supported = candidate["kind"] == "color-body" or "color_evidence" in candidate
+        # A wire loop can resemble a pointed tag and happen to sit above a label.
+        # A tag needs its own internal text or YOLO evidence, not just that caption.
+        if candidate["kind"] == "tag" and not (supporting or inside):
+            candidate.update(fusion_status="rejected",
+                             rejection_reason="Unconfirmed pointed outline")
             continue
+        if not (supporting or inside or captions or primitive or color_supported):
+            candidate.update(fusion_status="rejected",
+                             rejection_reason="No independent control evidence")
+            continue
+        candidate["fusion_status"] = "accepted"
         accepted.update(i for i, _score in supporting)
         score = max((score for _i, score in supporting), default=None)
+        provider = "color-geometry" if color_supported else "pixel-geometry"
         elements.append(dict(
             id=len(elements) + 1, entity_type="graphic-control", geometry_kind=candidate["kind"],
             semantic_name=f"{candidate['kind']} control", observed_value="", rect=box,
-            source="yolo-and-pixel-geometry" if supporting else "local-pixel-geometry",
+            source=f"yolo-and-{provider}" if supporting else f"local-{provider}",
             detection_confidence=score, confidence=score if score is not None else 0,
             confidence_kind="yolo-detection" if supporting else "unscored-local-geometry",
             evidence=[candidate["evidence"]], yolo_proposal_ids=[i for i, _score in supporting],
+            color_evidence=candidate.get("color_evidence", candidate if color_supported else None),
             ocr_support_ids=inside, caption_support_ids=captions,
             status="observed", uia_verified=False, executable=False, suggested_actions=[]))
-    if profile == "ui":
-        for index, box, score in proposals:
-            # Suppress YOLO's duplicate text proposals, not containers that own text.
-            if any(circuit_geometry.iou(box, t["rect"]) >= 0.5
-                   or (_overlap(box, t["rect"]) / _area(box) >= 0.8
-                       and _area(box) <= _area(t["rect"]) * 1.8) for t in texts):
+    unmatched = []
+    for index, box, score in proposals:
+        if index in accepted:
+            continue
+        if profile != "ui":
+            # Do not emit a second box for a partial prediction of an existing body.
+            duplicate = next((g for g in elements if _overlap(g["rect"], box) / min(
+                _area(g["rect"]), _area(box)) >= (
+                    0.5 if _area(g["rect"]) >= _area(box) * 2 else 0.8)
+                and _area(box) <= _area(g["rect"]) * 4), None)
+            if duplicate:
+                unmatched.append(dict(id=index, rect=box, confidence=score,
+                                      reason="Partial or enclosing duplicate of a fitted graphic",
+                                      duplicate_of_graphic_id=duplicate["id"]))
                 continue
-            accepted.add(index)
-            elements.append(dict(
-                id=len(elements) + 1, entity_type="graphic-control", geometry_kind="yolo-region",
-                semantic_name="Graphic control candidate", observed_value="", rect=box,
-                source="yolo", detection_confidence=score, confidence=score,
-                confidence_kind="yolo-detection", yolo_proposal_ids=[index],
-                status="observed", uia_verified=False, executable=False, suggested_actions=[]))
+        text_duplicate = any(circuit_geometry.iou(box, t["rect"]) >= 0.5
+                             or (_overlap(box, t["rect"]) / _area(box) >= 0.8
+                                 and _area(box) <= _area(t["rect"]) * 1.8) for t in texts)
+        if text_duplicate:
+            unmatched.append(dict(id=index, rect=box, confidence=score,
+                                  reason="Handled as an independent text control"))
+            continue
+        evidence = ({} if profile == "ui" else
+                    image_geometry.proposal_evidence(image, box, text_rects))
+        if profile != "ui" and not evidence["accepted"]:
+            unmatched.append(dict(id=index, rect=box, confidence=score, **evidence))
+            continue
+        accepted.add(index)
+        elements.append(dict(
+            id=len(elements) + 1, entity_type="graphic-control", geometry_kind="yolo-region",
+            semantic_name="Graphic control candidate", observed_value="", rect=box,
+            source="yolo", detection_confidence=score, confidence=score,
+            confidence_kind="yolo-detection", yolo_proposal_ids=[index],
+            pixel_evidence=evidence, ambiguity="YOLO region has no fitted component outline",
+            status="observed", uia_verified=False, executable=False, suggested_actions=[]))
     graphics = list(elements)
     for t in texts:
         owners = [g for g in graphics if _overlap(g["rect"], t["rect"]) / _area(t["rect"]) >= 0.65]
@@ -503,11 +562,13 @@ def combine_detections(image, yolo, ocr, *, profile="block-diagram"):
         yolo_supported_graphics=sum(bool(e["yolo_proposal_ids"]) for e in graphics),
         geometry_recovered_graphics=sum(not e["yolo_proposal_ids"] for e in graphics),
         yolo_raw_count=len(yolo["boxes"]), geometry_candidates=geometry,
+        color_candidate_count=len(colors),
+        color_supported_graphics=sum(bool(e.get("color_evidence")) for e in graphics),
+        unmatched_yolo_graphics=sum(e["geometry_kind"] == "yolo-region" for e in graphics),
+        fusion_seconds=round(time.perf_counter() - started, 3),
         ocr_base_text_count=ocr.get("base_text_count", len(texts)),
         ocr_recovery_count=ocr.get("small_text_recovery", {}).get("added_count", 0),
         ocr_recovery_seconds=ocr.get("small_text_recovery", {}).get("elapsed_seconds", 0),
         rejected_ocr_regions=rejected_text,
         needs_review_ids=[e["id"] for e in elements if e.get("ambiguity")],
-        unassigned_yolo_proposals=[dict(id=i, rect=box, confidence=score,
-                                       reason="No supported graphic match or handled as text")
-                                   for i, box, score in proposals if i not in accepted])
+        unassigned_yolo_proposals=unmatched)

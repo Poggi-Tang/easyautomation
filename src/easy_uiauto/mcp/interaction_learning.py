@@ -17,7 +17,7 @@ from urllib import request as urlrequest
 import pyautogui
 import uiautomation
 
-from . import configuration, knowledge, scanner, ui_cli
+from . import configuration, knowledge, native_windows, scanner, ui_cli
 
 BLOCKED_INTENT = re.compile(
     r"(send|publish|post|purchase|pay|delete|remove|upload|logout|log-out|close-window|exit)",
@@ -37,29 +37,15 @@ def _owner_handle(handle: int) -> int:
 
 def snapshot_top_level_windows() -> list[dict]:
     """Return a cheap desktop-level window inventory for popup detection."""
-    foreground = int(ctypes.windll.user32.GetForegroundWindow() or 0)
     windows = []
-    for z_order, control in enumerate(uiautomation.GetRootControl().GetChildren()):
-        try:
-            rectangle = scanner._rect(control)
-            handle = int(getattr(control, "NativeWindowHandle", 0) or 0)
-            if rectangle["width"] <= 1 or rectangle["height"] <= 1:
-                continue
-            windows.append(
-                {
-                    "handle": handle,
-                    "title": str(getattr(control, "Name", "") or ""),
-                    "class_name": str(getattr(control, "ClassName", "") or ""),
-                    "control_type": str(getattr(control, "ControlTypeName", "") or ""),
-                    "process_id": int(getattr(control, "ProcessId", 0) or 0),
-                    "owner_handle": _owner_handle(handle),
-                    "rect": rectangle,
-                    "z_order": z_order,
-                    "foreground": handle == foreground,
-                }
-            )
-        except Exception:
+    for entry in native_windows.enumerate_windows(visible_only=True):
+        rectangle = entry["bounds"]
+        if rectangle["width"] <= 1 or rectangle["height"] <= 1:
             continue
+        windows.append({key: entry[key] for key in (
+            "handle", "title", "class_name", "process_id", "owner_handle", "z_order",
+            "foreground")})
+        windows[-1].update(rect=rectangle, control_type="", metadata_source="win32")
     return windows
 
 
@@ -330,13 +316,15 @@ def _popup_controls(window_changes: dict, max_controls: int = 100) -> list[dict]
     added = window_changes.get("added", [])
     if not added:
         return []
-    roots = {
-        int(getattr(item, "NativeWindowHandle", 0) or 0): item
-        for item in uiautomation.GetRootControl().GetChildren()
-    }
     result = []
     for window_info in added:
-        root = roots.get(window_info.get("handle", 0))
+        handle = int(window_info.get("handle", 0) or 0)
+        if not handle:
+            continue
+        try:
+            root = uiautomation.ControlFromHandle(handle)
+        except Exception:
+            continue
         if root is None:
             continue
         controls = []

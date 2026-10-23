@@ -6,6 +6,22 @@ The format is based on Keep a Changelog and is maintained automatically by Seman
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-10-23
+
+### Fixed
+
+- Find learning targets, desktop shell roots and new popup handles with Win32
+  enumeration before binding target UIA controls. Read window-state snapshots
+  directly from Win32, avoiding desktop UIA root enumeration that can block on
+  unrelated unresponsive providers. Report window lookup as a separate stage.
+- Recover colored diagram bodies with hue-independent foreground components,
+  including multicolor symbols, polygons and adjacent closed ports. Keep OCR
+  text and neutral connecting wires separate from component bounds.
+- Suppress busbar details misread as grounds and caption-only wire-loop tags;
+  detect neutral mux bars and tag outlines interrupted by touching text.
+- Retain unmatched YOLO graphic proposals with non-text pixel evidence and
+  expose candidate rejection reasons, color evidence and fusion timings.
+
 ## [0.9.0] - 2026-10-23
 
 ### Added

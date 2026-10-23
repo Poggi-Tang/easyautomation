@@ -43,6 +43,7 @@ from . import (
     interaction_learning,
     knowledge,
     learning_progress,
+    native_windows,
     scanner,
     skill_installation,
     ui_cli,
@@ -693,22 +694,16 @@ def _observe_window(window_name: str, handle: int = 0) -> dict:
     if not window_name.strip():
         raise ActionError("invalid_argument", "window_name must be a non-empty exact title")
     try:
-        windows = uiautomation.GetRootControl().GetChildren()
-        matches = [window for window in windows if (
-            int(window.NativeWindowHandle) == handle if handle else window.Name == window_name
-        )]
+        matches = native_windows.matching_windows(window_name, handle=handle)
         if not matches:
             return {"exists": False}
         if len(matches) > 1:
             raise ActionError("ambiguous_match", "More than one window matches; use a unique title")
+        # Window-state observations need only Win32 metadata, so even the target
+        # UIA provider cannot block a presence/visibility check.
         window = matches[0]
-        return {
-            "exists": True, "handle": int(window.NativeWindowHandle),
-            "title": window.Name, "class_name": window.ClassName,
-            "process_id": int(window.ProcessId), "enabled": bool(window.IsEnabled),
-            "visible": not bool(window.IsOffscreen),
-            "bounds": _rect_to_dict(window.BoundingRectangle),
-        }
+        return {"exists": True, **{key: window[key] for key in (
+            "handle", "title", "class_name", "process_id", "enabled", "visible", "bounds")}}
     except ActionError:
         raise
     except Exception as error:

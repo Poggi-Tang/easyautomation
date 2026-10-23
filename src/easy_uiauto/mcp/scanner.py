@@ -22,7 +22,7 @@ import uiautomation
 
 from easy_uiauto.utils import get_control_xpath
 
-from . import configuration, knowledge, visualization
+from . import configuration, knowledge, native_windows, visualization
 from .protocol import location_from_xpath, normalize_location, stable_location
 
 ACTIONABLE_TYPES = {
@@ -93,19 +93,17 @@ def _clip_rect(rectangle: dict, window_rect: dict) -> dict:
 
 
 def _find_window(title: str):
-    root = uiautomation.GetRootControl()
-    candidates = []
-    for control in root.GetChildren():
-        name = (getattr(control, "Name", "") or "").strip()
-        if not name:
-            continue
-        if name == title:
-            return control
-        if title.casefold() in name.casefold():
-            candidates.append(control)
+    title = title.strip()
+    if not title:
+        raise ValueError("Window title must not be empty")
+    candidates = native_windows.matching_windows(title, partial=True)
     if not candidates:
         raise RuntimeError(f"Window not found: {title}")
-    return candidates[0]
+    target = next((entry for entry in candidates if entry["visible"]), candidates[0])
+    control = uiautomation.ControlFromHandle(target["handle"])
+    if control is None:
+        raise RuntimeError(f"Could not bind UI Automation to window: {title}")
+    return control
 
 
 def _activate_window(window) -> None:
@@ -1487,11 +1485,15 @@ def _is_desktop_window(window) -> bool:
 def _desktop_shell_roots(window) -> list:
     """Inspect Explorer shell roots only, never other applications' UI trees."""
     roots = {_control_key(window): window}
-    for control in uiautomation.GetRootControl().GetChildren():
-        if getattr(control, "ClassName", "") in {
+    for entry in native_windows.enumerate_windows(visible_only=True):
+        if entry["class_name"] in {
             "Progman", "WorkerW", "Shell_TrayWnd", "Shell_SecondaryTrayWnd"
         }:
-            roots.setdefault(_control_key(control), control)
+            if entry["handle"] == int(getattr(window, "NativeWindowHandle", 0) or 0):
+                continue
+            control = uiautomation.ControlFromHandle(entry["handle"])
+            if control is not None:
+                roots.setdefault(_control_key(control), control)
     return list(roots.values())
 
 
@@ -1820,7 +1822,9 @@ def scan_window(
     strategy = strategy.strip().lower()
     if strategy not in SCAN_STRATEGIES:
         raise ValueError(f"strategy must be one of: {', '.join(sorted(SCAN_STRATEGIES))}")
+    progress("Finding target window through Win32")
     window = _find_window(window_name)
+    progress("Reading target window through UI Automation")
     actual_name = (getattr(window, "Name", "") or window_name).strip()
     _activate_window(window)
     window_rect = _rect(window)

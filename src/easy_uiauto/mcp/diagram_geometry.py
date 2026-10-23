@@ -74,15 +74,23 @@ def shapes(image):
         polygon = cv2.approxPolyDP(contour, min(0.012 * cv2.arcLength(contour, True),
                                                min(w, h) * 0.15), True)
         points = polygon[:, 0, :]
+        tag_points = points
+        if len(points) > 6:
+            # Text touching a tag's border makes inward notches in the enclosed
+            # white contour. Its convex exterior still preserves the pointed end.
+            hull = cv2.convexHull(contour)
+            tag_points = cv2.approxPolyDP(hull, min(0.012 * cv2.arcLength(hull, True),
+                                                  min(w, h) * 0.15), True)[:, 0, :]
         axis_aligned = len(points) == 4 and all(
             min(abs(int(p[0] - q[0])), abs(int(p[1] - q[1]))) <= 2
             for p, q in zip(points, [*points[1:], points[0]], strict=True))
         if (axis_aligned and area > 0.85) or area > 0.96:
             category = "frame"
-        elif 5 <= len(points) <= 6 and min(w, h) >= 12 and 0.65 < area < 0.98:
+        elif 5 <= len(tag_points) <= 6 and min(w, h) >= 12 and 0.65 < area < 0.98:
             # A tag has two parallel horizontal edges and a pointed end.
             horizontal = sum(abs(int(p[1] - q[1])) <= 2 and abs(int(p[0] - q[0])) > w * 0.4
-                             for p, q in zip(points, [*points[1:], points[0]], strict=True))
+                             for p, q in zip(tag_points, [*tag_points[1:], tag_points[0]],
+                                             strict=True))
             if horizontal < 2:
                 continue
             category = "tag"

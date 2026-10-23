@@ -85,6 +85,7 @@ def server():
     namespace = {
         'json': json, 'time': time, 'wraps': wraps, 'Optional': Optional,
         'waiting': waiting, 'normalize_location': protocol.normalize_location,
+        'native_windows': SimpleNamespace(matching_windows=Mock(return_value=[])),
         'observe_control': Mock(return_value=SimpleNamespace(IsEnabled=True)),
         'ui_cli': SimpleNamespace(_read_control_text=Mock(return_value=(True, 'Saved'))),
         '_auto_learn_point': Mock(),
@@ -197,13 +198,26 @@ def test_wait_never_treats_invalid_window_as_disappearance(server):
 
 
 def test_window_change_tracks_handle_after_title_changes(server):
-    window = SimpleNamespace(NativeWindowHandle=42, Name='Saved Editor', ClassName='Editor',
-                             ProcessId=7, IsEnabled=True, IsOffscreen=False, BoundingRectangle=None)
-    server['uiautomation'] = SimpleNamespace(GetRootControl=lambda: SimpleNamespace(GetChildren=lambda: [window]))
+    server['native_windows'].matching_windows.return_value = [dict(
+        handle=42, title='Saved Editor', class_name='Editor', process_id=7,
+        enabled=True, visible=True, bounds=None)]
     value = json.loads(server['wait_for_window']('Editor', state='changed',
                        baseline={'handle': 42, 'title': 'Editor'}, timeout_seconds=0))
     assert value['verified'] is True
     assert value['data']['observation']['title'] == 'Saved Editor'
+    server['native_windows'].matching_windows.assert_called_once_with('Editor', handle=42)
+
+
+def test_window_observation_rejects_ambiguous_native_title(server):
+    server['native_windows'].matching_windows.return_value = [{'handle': 1}, {'handle': 2}]
+    value = json.loads(server['get_window_state']('Editor'))
+    assert value['ok'] is False and value['code'] == 'ambiguous_match'
+
+
+def test_window_inventory_failure_is_not_treated_as_disappearance(server):
+    server['native_windows'].matching_windows.side_effect = OSError('EnumWindows failed')
+    value = json.loads(server['wait_for_window']('Editor', state='absent', timeout_seconds=0))
+    assert value['ok'] is False and value['code'] == 'window_invalid'
 
 
 def test_fastmcp_executes_wrapped_action_with_typed_parameters(server):

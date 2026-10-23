@@ -24,6 +24,7 @@ def _progress_for_message(message: str, previous: float) -> float:
         return max(previous, 10 + 30 * min(1, int(tiles[1]) / max(1, int(tiles[2]))))
     fixed = (
         ("Starting", 1),
+        ("Finding target", 2),
         ("Capturing", 5),
         ("Segmenting", 10),
         ("Traversing", 25),

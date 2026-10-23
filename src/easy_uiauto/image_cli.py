@@ -161,6 +161,8 @@ def analyze_local_image(image_path, output_dir, *, weights=None, profile="block-
             "ok", "image_path", "output_directory", "image_width", "image_height", "profile",
             "element_count", "graphic_count", "text_count", "yolo_raw_count",
             "yolo_supported_graphics", "geometry_recovered_graphics", "needs_review_labels",
+            "color_candidate_count", "color_supported_graphics", "unmatched_yolo_graphics",
+            "fusion_seconds",
             "ocr_base_text_count", "ocr_recovery_count", "ocr_recovery_seconds",
             "model_id", "model_sha256", "ocr_engine", "yolo_seconds", "ocr_seconds",
             "elapsed_seconds", "resources", "notes")}

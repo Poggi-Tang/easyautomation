@@ -132,13 +132,20 @@ def test_native_desktop_coverage_includes_omitted_shortcut_on_second_monitor(mon
     listing.ClassName = "SysListView32"
     worker = FakeControl("", "PaneControl", (2560, 0, 4480, 1440), [listing])
     worker.ClassName = "WorkerW"
+    worker.NativeWindowHandle = 2
     window = FakeControl("Program Manager", "PaneControl", (0, 0, 4480, 1440))
     window.ClassName = "Progman"
     unrelated = FakeControl("Other app", "WindowControl", (0, 0, 500, 500))
     unrelated.GetChildren = lambda: (_ for _ in ()).throw(AssertionError("Other app traversed"))
-    monkeypatch.setattr(scanner.uiautomation, "GetRootControl", lambda: SimpleNamespace(
-        GetChildren=lambda: [window, worker, unrelated]
-    ))
+    monkeypatch.setattr(scanner.native_windows, "enumerate_windows", lambda **_kw: [
+        {"handle": 1, "class_name": "Progman"},
+        {"handle": 2, "class_name": "WorkerW"},
+        {"handle": 3, "class_name": "Other app"}])
+    monkeypatch.setattr(scanner.uiautomation, "GetRootControl", lambda: (_ for _ in ()).throw(
+        AssertionError("Desktop UIA root must not be enumerated")))
+    monkeypatch.setattr(scanner.uiautomation, "ControlFromHandle", lambda handle: worker
+                        if handle == 2 else (_ for _ in ()).throw(
+                            AssertionError("Unrelated application was bound to UIA")))
     monkeypatch.setattr(scanner.uiautomation, "ControlFromPoint", lambda *_: icon)
     segmentation = scanner._validate_segments({}, 4480, 1440)
     scanner._supplement_desktop_targets(window, scanner._rect(window), segmentation, 100)

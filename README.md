@@ -413,6 +413,16 @@ text proposals; it does not force diagram outlines onto arbitrary icons. Results
 still contain missed regions, false positives and OCR errors. Diagram fitting supports
 the implemented outline families only.
 
+Both diagram profiles also detect connected color foreground without selecting
+specific hues. Touching color patches and narrow dark dividers form one body;
+nearby text and connecting wires remain separate. Closed ports can extend the
+body's bounds. Neutral mux bars and tags with text touching their border are
+handled separately. Unmatched YOLO proposals with substantial non-text graphic
+pixels remain review candidates instead of being discarded for an unknown shape.
+The exported geometry records include accepted/rejected candidates, color evidence
+and rejection reasons; the summary includes color counts and fusion time. This
+does not retrain or replace the official YOLO/OCR models.
+
 Small-text recovery is enabled by default inside existing closed control frames.
 It reuses the detector probability map, checks relaxed proposals only inside those
 frames, rejects existing text and connected wire/border strokes, and requires the
