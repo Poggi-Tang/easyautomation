@@ -101,7 +101,7 @@ def substitute_child(monkeypatch, code):
     popen = subprocess.Popen
 
     def launch(args, **kwargs):
-        return popen([args[0], "-I", "-c", code], **kwargs)
+        return popen([args[0], "-E", "-P", "-c", code], **kwargs)
 
     monkeypatch.setattr(highlight.subprocess, "Popen", launch)
 
@@ -127,8 +127,26 @@ def test_unresponsive_child_is_terminated_at_startup_deadline(monkeypatch):
     assert worker.status()["forced_termination"]
 
 
+def test_worker_keeps_interpreter_site_packages_available(monkeypatch):
+    substitute_child(
+        monkeypatch,
+        "import json, sys; sys.stdin.readline(); "
+        "print(json.dumps({'event': 'error' if sys.flags.no_user_site or "
+        "sys.flags.isolated else 'ready', 'message': 'site packages disabled'}), "
+        "flush=True); sys.stdin.readline()",
+    )
+    worker = highlight.HighlightProcess()
+    try:
+        worker.start(timeout=3)
+        assert worker.status()["running"]
+    finally:
+        status = worker.stop()
+    assert status["exitcode"] == 0
+    assert status["error"] is None
+
+
 def test_real_worker_starts_from_an_unrelated_cwd_and_stops_cleanly(monkeypatch, tmp_path):
-    # The child uses -I, so cwd/PYTHONPATH cannot locate this source installation.
+    # The child ignores PYTHONPATH and the cwd, but retains installed dependencies.
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("PYTHONPATH", str(tmp_path / "unrelated-package"))
     worker = highlight.HighlightProcess()

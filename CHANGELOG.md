@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog and is maintained automatically by Semantic Release.
 
+## [0.9.5] - 2026-10-26
+
+### Fixed
+
+- Start the isolated highlight worker without hiding the active Python
+  interpreter's configured site-packages. This supports PyCharm environments
+  that install runtime dependencies in the user site while still loading the
+  exact easy-uiauto source package selected by the parent process.
+
 ## [0.9.4] - 2026-10-26
 
 ### Fixed

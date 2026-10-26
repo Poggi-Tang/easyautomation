@@ -64,14 +64,17 @@ class HighlightProcess:
             raise RuntimeError(
                 f"Highlight worker is missing from {package_dir}; reinstall easy-uiauto"
             )
-        # -I ignores cwd/PYTHONPATH. Bootstrap only the package that loaded us,
-        # including an editable installation, instead of another installed copy.
+        # -E -P ignores Python environment overrides and the unsafe cwd entry,
+        # while keeping the interpreter's configured site-packages available.
+        # This matters when dependencies are installed in the user site (a
+        # common PyCharm setup). Bootstrap the exact package that loaded us,
+        # including editable installations, instead of another installed copy.
         bootstrap = ("import runpy, sys; sys.path.insert(0, sys.argv[1]); "
                      "runpy.run_module('easy_uiauto._highlight_worker', run_name='__main__')")
         deadline = time.monotonic() + timeout
         try:
             self._process = subprocess.Popen(
-                [sys.executable, "-I", "-c", bootstrap, str(package_dir.parent)],
+                [sys.executable, "-E", "-P", "-c", bootstrap, str(package_dir.parent)],
                 stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                 text=True, encoding="utf-8", bufsize=1,
                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
