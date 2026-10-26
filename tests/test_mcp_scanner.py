@@ -9,6 +9,25 @@ from PIL import Image, ImageDraw, ImageGrab
 from easy_uiauto.mcp import knowledge, scanner
 
 
+def test_native_labels_recover_actions_without_reusing_misaligned_visual_meanings(monkeypatch):
+    select = FakeControl("全选(A)\tCtrl+A", "MenuItemControl", (10, 10, 100, 30),
+                         automation_id="25")
+    date = FakeControl("时间/日期(D)\tF5", "MenuItemControl", (10, 30, 100, 50), automation_id="26")
+    menu = FakeControl("编辑", "MenuControl", (0, 0, 120, 60), [select, date])
+    window = FakeControl("Example", "WindowControl", (0, 0, 400, 300), [menu])
+    monkeypatch.setattr(scanner, "get_control_xpath", lambda control: [dict(
+        Name=control.Name, ControlType=control.ControlTypeName)])
+    monkeypatch.setattr(scanner, "control_from_visual_target", lambda *_a: None)
+    target = dict(semantic_name="Go to", intent="goto", actions=["click"],
+                  relative_rect=dict(left=10, top=10, right=100, bottom=30, width=90, height=20))
+    controls, semantics, failures = scanner.controls_from_visual_targets(
+        window, scanner._rect(window), [target], 100)
+    assert [control.Name for control, _depth in controls] == [select.Name, date.Name]
+    assert [item["intent"] for item in semantics.values()] == ["select-all", "insert-date-time"]
+    assert all(item["source"] == "uia-native-label" for item in semantics.values())
+    assert failures[0]["observation"]["intent"] == "goto"
+
+
 class FakeControl:
     def __init__(
         self,
@@ -527,6 +546,21 @@ def test_scan_writes_images_markdown_and_verified_command(monkeypatch, tmp_path)
     assert result["annotated_controls"] == 3
     assert result["annotated_page_image"].endswith("main.annotated.png")
     assert (directory / "operations" / "UI-CLI.md").is_file()
+
+    # A successful new scan must not turn a failed runtime locator executable.
+    from easy_uiauto.mcp import ui_cli
+
+    ui_cli._quarantine(directory, button_record, "XPath step 4 failed; image score=0.292")
+    for _ in range(4):
+        rescanned = scanner.scan_window("Example", "https://api.example/v1", "secret",
+                                        "vision-model", "1.0.0", strategy="full-uia", root=tmp_path)
+        assert rescanned["commands"] == 0
+        assert rescanned["status_counts"]["quarantined"] == 1
+        assert rescanned["quarantine_summary"][0]["runtime_quarantine"] is True
+        assert "0.292" in rescanned["quarantine_summary"][0]["runtime_failure"]
+        saved = knowledge.find_control_record(
+            directory, button_record["id"], include_quarantine=True)[1]
+        assert saved["quarantine"]["active"] and "0.292" in saved["quarantine"]["reason"]
 
 
 def test_visual_first_scan_skips_full_tree_and_second_ai_request(monkeypatch, tmp_path) -> None:

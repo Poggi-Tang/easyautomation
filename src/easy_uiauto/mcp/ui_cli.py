@@ -12,7 +12,7 @@ from uuid import uuid4
 import pyautogui
 import pyperclip
 
-from . import configuration, knowledge, visualization
+from . import configuration, image_storage, knowledge, semantic_identity, visualization
 from .results import ActionError
 from .scanner import (
     _crop_control,
@@ -29,6 +29,12 @@ def _quarantine(directory: Path, record: dict, reason: str) -> None:
     record = {
         **record,
         "status": "quarantined",
+        "quarantine": {"active": True, "reason": reason, "control_id": record["id"],
+                       "failure_images": record.get("image_variants") or [record.get("image", "")],
+                       "failed_at": knowledge.utc_now(),
+                       "failure_location": record.get("location", {}),
+                       "failure_verification": {**record.get("verification", {}),
+                                                "runtime": "failed", "runtime_detail": reason}},
         "notes": f"{record.get('notes', '')}\nQuarantined: {reason}".strip(),
         "verification": {
             **record.get("verification", {}),
@@ -40,6 +46,37 @@ def _quarantine(directory: Path, record: dict, reason: str) -> None:
     knowledge.save_control(directory, record)
     knowledge.rebuild_index(directory)
     knowledge.write_command_catalog(directory)
+
+
+@image_storage.serialized_learning
+def revalidate_control(directory: Path, control_id: str) -> dict:
+    """Explicitly check quarantined positioning without performing its action."""
+    found = knowledge.find_control_record(directory, control_id, include_quarantine=True)
+    if found is None:
+        raise KeyError(f"Unknown control: {control_id}")
+    _path, record = found
+    if record.get("semantic_status") not in {"verified", "manual"}:
+        raise RuntimeError("Control semantics must be established before releasing quarantine")
+    _control, similarity, _rectangle, resolved_by = _resolve_verified_control(directory, record)
+    if resolved_by not in {"location", "image"}:
+        raise RuntimeError(
+            "Quarantine repair requires LOCATION/image evidence; OCR alone is insufficient")
+    record = {**record, "status": "verified",
+              "image_similarity": similarity,
+              "visual_fallback_ready": resolved_by == "image" or record.get(
+                  "visual_fallback_ready", False),
+              "quarantine": {**record.get("quarantine", {}), "active": False,
+                             "released_at": knowledge.utc_now(), "resolved_by": resolved_by},
+              "verification": {**record.get("verification", {}), "runtime": "passed",
+                               "image": "passed", "location": "passed" if resolved_by == "location"
+                               else record.get("verification", {}).get("location", "failed"),
+                               "runtime_detail": "Explicit non-mutating revalidation",
+                               "verified_at": knowledge.utc_now()}}
+    knowledge.save_control(directory, record, release_runtime_quarantine=True)
+    knowledge.rebuild_index(directory)
+    knowledge.write_command_catalog(directory)
+    return {"ok": True, "control_id": control_id, "status": record["status"],
+            "resolved_by": resolved_by, "image_similarity": similarity, "action_executed": False}
 
 
 def _resolve_verified_control(
@@ -71,6 +108,7 @@ def _resolve_verified_control_in_context(
     """Resolve through LOCATION, templates, OCR, then optional remote vision."""
     from PIL import Image
 
+    semantic_identity.assert_consistent(record)
     image_names = list(record.get("image_variants", []))
     if record.get("image"):
         image_names.append(record["image"])
@@ -85,6 +123,9 @@ def _resolve_verified_control_in_context(
         location_error = str(error)
     else:
         location_error = "LOCATION did not resolve"
+    if control and control is not False:
+        # A known contradiction is terminal; templates/OCR must not override it.
+        semantic_identity.assert_consistent(record, control)
     best_template = None
     best_similarity = 0.0
     for expected_image in expected_images:
@@ -490,6 +531,7 @@ def _show_execution_preview(
     return visualization.show_markers(markers, duration_ms, wait_ms)
 
 
+@image_storage.serialized_learning
 def execute(
     directory: Path,
     command: str,
@@ -518,7 +560,7 @@ def execute(
         _quarantine(directory, record, reason)
         raise RuntimeError(
             f"Knowledge verification failed and the control was quarantined: {reason}. "
-            "Rescan the current page before retrying."
+            "Repair positioning and explicitly revalidate this control before retrying."
         ) from error
 
     overlay = {"shown": False, "controls": 0, "detail": "disabled"}
@@ -600,6 +642,7 @@ def _normalize_steps(steps: list[str | dict]) -> list[dict]:
     return normalized
 
 
+@image_storage.serialized_learning
 def execute_many(
     directory: Path,
     steps: list[str | dict],
@@ -669,7 +712,7 @@ def execute_many(
             _quarantine(directory, record, reason)
             raise RuntimeError(
                 "Batch preflight failed before any action and the control was quarantined: "
-                f"{reason}. Rescan the current page before retrying."
+                f"{reason}. Repair positioning and explicitly revalidate before retrying."
             ) from error
     preflight_finished = perf_counter()
 

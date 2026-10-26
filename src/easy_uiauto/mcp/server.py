@@ -37,13 +37,16 @@ from .. import __version__
 from . import (
     annotation_correction,
     configuration,
+    control_tree,
     diagnostics,
     image_analysis,
+    image_storage,
     waiting,
     interaction_learning,
     knowledge,
     learning_progress,
     native_windows,
+    ocr_matching,
     scanner,
     skill_installation,
     ui_cli,
@@ -221,7 +224,7 @@ def _find_text_on_screen(
     min_confidence: float,
     region: Optional[tuple[int, int, int, int]],
 ) -> Optional[dict]:
-    """Locate a single OCR text box on screen."""
+    """Locate one OCR word or contiguous same-line phrase on screen."""
     if not text.strip():
         raise ValueError("text must not be empty")
     if match_mode not in {"contains", "exact"}:
@@ -243,35 +246,8 @@ def _find_text_on_screen(
             f"{error}"
         ) from error
 
-    needle = text.casefold().strip()
     offset_x, offset_y = (region[0], region[1]) if region else (0, 0)
-    for index, candidate in enumerate(data.get("text", [])):
-        candidate = (candidate or "").strip()
-        if not candidate:
-            continue
-        try:
-            confidence = float(data["conf"][index])
-        except (KeyError, TypeError, ValueError):
-            continue
-        haystack = candidate.casefold()
-        matched = haystack == needle if match_mode == "exact" else needle in haystack
-        if not matched or confidence < min_confidence:
-            continue
-        left = int(data["left"][index]) + offset_x
-        top = int(data["top"][index]) + offset_y
-        width = int(data["width"][index])
-        height = int(data["height"][index])
-        return {
-            "text": candidate,
-            "confidence": confidence,
-            "left": left,
-            "top": top,
-            "width": width,
-            "height": height,
-            "center_x": left + width // 2,
-            "center_y": top + height // 2,
-        }
-    return None
+    return ocr_matching.find_match(data, text, match_mode, min_confidence, (offset_x, offset_y))
 
 
 def _vision_api_settings(model: str) -> tuple[str, str, str]:
@@ -879,74 +855,29 @@ def activate_window(title: str) -> str:
 def get_control_tree(
     window_name: str,
     max_depth: int = 5,
+    max_nodes: int = 500,
+    timeout_seconds: float = 15.0,
 ) -> str:
     """Get the UI control tree of a window. Shows the hierarchy of UI elements.
 
     This is the primary way to explore what controls exist in a window.
-    Returns a nested JSON structure of controls with their properties.
+    Uses Win32 window selection and a disposable UIA worker, without activation.
+    Returns nested controls with _inspection metadata for reached limits/errors.
+    Timeout returns ok=false, code=timeout and the latest partial checkpoint;
+    the blocked worker is stopped, without terminating the inspected application.
 
     Args:
         window_name: Title of the window to inspect.
         max_depth: How deep to explore the tree (default 5, max 10). Deeper = slower.
+        max_nodes: Total control limit, including the window (default 500, max 5000).
+        timeout_seconds: Total worker time budget, including startup (default 15, max 60).
     """
-    max_depth = min(max_depth, 10)
-
     try:
-        set_top_window(window_name)
-
-        # Find the top-level window control
-        window = uiautomation.WindowControl(Name=window_name, searchDepth=1)
-        if not window.Exists(maxSearchSeconds=3):
-            # Try partial match
-            window = uiautomation.WindowControl(searchFromControl=uiautomation.GetRootControl(), Name=window_name, searchDepth=5)
-            if not window.Exists(maxSearchSeconds=3):
-                return f"Error: Window '{window_name}' not found"
-
-        def _control_to_dict(ctrl, depth=0):
-            """Recursively build control tree dict."""
-            if depth > max_depth:
-                return None
-
-            try:
-                rect = ctrl.BoundingRectangle
-                info = {
-                    "ControlType": ctrl.ControlTypeName if hasattr(ctrl, 'ControlTypeName') else str(type(ctrl).__name__),
-                    "Name": ctrl.Name or "",
-                    "ClassName": ctrl.ClassName or "",
-                    "AutomationId": ctrl.AutomationId or "",
-                    "bounds": {
-                        "left": rect.left if rect else 0,
-                        "top": rect.top if rect else 0,
-                        "right": rect.right if rect else 0,
-                        "bottom": rect.bottom if rect else 0,
-                    },
-                }
-
-                # Add children (limit to avoid explosion)
-                children = []
-                try:
-                    for child in ctrl.GetChildren():
-                        child_info = _control_to_dict(child, depth + 1)
-                        if child_info:
-                            children.append(child_info)
-                        if len(children) >= 30:  # Limit children per node
-                            children.append({"_note": f"... truncated, more children exist"})
-                            break
-                except Exception:
-                    pass
-
-                if children:
-                    info["children"] = children
-
-                return info
-            except Exception:
-                return None
-
-        tree = _control_to_dict(window)
-        return json.dumps(tree, ensure_ascii=False, indent=2)
-
-    except Exception as e:
-        return f"Error getting control tree: {e}"
+        value = control_tree.inspect_window(window_name, max_depth, max_nodes=max_nodes,
+                                           timeout_seconds=timeout_seconds)
+        return json.dumps(value, ensure_ascii=False, indent=2)
+    except Exception as error:
+        return json.dumps(normalize_result(error), ensure_ascii=False)
 
 
 @mcp.tool()
@@ -1209,7 +1140,7 @@ def get_ui_learning_readiness() -> str:
 @mcp.tool()
 async def scan_window_knowledge(
     window_name: str,
-    ctx: Context,
+    ctx: Optional[Context] = None,
     max_depth: int = 12,
     max_controls: int = 3000,
     verify_limit: int = 500,
@@ -1267,6 +1198,8 @@ async def scan_window_knowledge(
             raise
 
     async def report_status() -> None:
+        if ctx is None:
+            return
         status = learning_progress.get(task_id)
         message = (
             f"[{task_id}] {status['stage']} | "
@@ -1559,7 +1492,7 @@ def learn_ui_command_effect(
 @mcp.tool()
 async def explore_ui_workflows(
     app_id: str,
-    ctx: Context,
+    ctx: Optional[Context] = None,
     policy: str = "safe",
     max_actions: int = 10,
     confirm: bool = False,
@@ -1608,6 +1541,8 @@ async def explore_ui_workflows(
                 raise
 
         async def report_status() -> None:
+            if ctx is None:
+                return
             status = learning_progress.get(task_id)
             message = (
                 f"[{task_id}] {status['stage']} | "
@@ -1690,6 +1625,22 @@ def teach_ui_control(
 
 
 @mcp.tool()
+def revalidate_ui_control(app_id: str, control_id: str) -> str:
+    """Explicitly recheck a quarantined control without executing its action.
+
+    Use after repairing its locator or restoring the required visible page.
+    Ordinary scans and index rebuilds never clear runtime quarantine. A fresh
+    LOCATION/image check is required; ambiguous templates and OCR alone do not
+    release it. Original failure evidence is retained.
+    """
+    try:
+        return json.dumps(ui_cli.revalidate_control(knowledge.app_dir(app_id), control_id),
+                          ensure_ascii=False, indent=2)
+    except Exception as error:
+        return json.dumps(normalize_result(error), ensure_ascii=False)
+
+
+@mcp.tool()
 def rebuild_ui_knowledge_index(app_id: str) -> str:
     """Rebuild the disposable JSON index and UI CLI catalog from Markdown."""
     try:
@@ -1709,6 +1660,29 @@ def rebuild_ui_knowledge_index(app_id: str) -> str:
         )
     except Exception as error:
         return f"Error rebuilding UI knowledge index: {error}"
+
+
+@mcp.tool()
+def cleanup_ui_knowledge_images(
+    app_id: str,
+    keep_control_variants: int | None = None,
+    keep_interaction_images: int | None = None,
+    dry_run: bool = True,
+) -> str:
+    """Preview or remove unreferenced managed images for one learned application.
+
+    Defaults retain eight control variants and the latest 50 interactions' images,
+    plus referenced evidence and the most recent failure for each command.
+    Textual interaction history is retained. dry_run defaults to preview only.
+    Other applications, page images and user-added images are not deleted.
+    """
+    try:
+        value = image_storage.cleanup_images(
+            knowledge.app_dir(app_id), keep_control_variants=keep_control_variants,
+            keep_interaction_images=keep_interaction_images, dry_run=dry_run)
+        return json.dumps(value, ensure_ascii=False, indent=2)
+    except Exception as error:
+        return json.dumps(normalize_result(error), ensure_ascii=False)
 
 
 # ---------------------------------------------------------------------------
@@ -1879,7 +1853,7 @@ def drag_control(
             "目的控件ControlType": target_type,
             "目的控件foundIndex": "",
             "目的控件AutomationId": target_automation_id,
-            "目的控件Xpath": json.loads(target_xpath) if target_xpath else "",
+            "目的控件Xpath": json.loads(target_xpath) if target_xpath else [],
         })
 
         result = Controller.drag_control(
@@ -1890,7 +1864,7 @@ def drag_control(
             ControlType=source_type,
             foundIndex="",
             AutomationId=source_automation_id,
-            Xpath=json.loads(source_xpath) if source_xpath else "",
+            Xpath=json.loads(source_xpath) if source_xpath else [],
             Img="",
             PARAMETERS=json.loads(params),
         )
@@ -2318,7 +2292,7 @@ def run_actions(
 @mcp.tool()
 async def analyze_ui_image(
     image_path: str,
-    ctx: Context,
+    ctx: Optional[Context] = None,
     output_dir: str = "",
     max_elements: int = 1000,
     model: str = "",
@@ -2352,6 +2326,8 @@ async def analyze_ui_image(
             whole circuit model components instead of their internal symbols.
     """
     async def report_progress(current: int, message: str) -> None:
+        if ctx is None:
+            return
         try:
             await ctx.report_progress(current, 1, message)
         except Exception:

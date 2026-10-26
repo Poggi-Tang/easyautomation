@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "easy-uiauto"
-version = "0.9.1"
+version = "0.9.2"
 description = "UI automation toolkit based on pyautogui and uiautomation"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -72,7 +72,7 @@ package-dir = {"" = "src"}
 include-package-data = true
 
 [tool.setuptools.package-data]
-easy_uiauto = ["skills/*/SKILL.md", "skills/*/agents/openai.yaml"]
+easy_uiauto = ["py.typed", "skills/*/SKILL.md", "skills/*/agents/openai.yaml"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

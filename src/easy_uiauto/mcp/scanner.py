@@ -22,7 +22,14 @@ import uiautomation
 
 from easy_uiauto.utils import get_control_xpath
 
-from . import configuration, knowledge, native_windows, visualization
+from . import (
+    configuration,
+    image_storage,
+    knowledge,
+    native_windows,
+    semantic_identity,
+    visualization,
+)
 from .protocol import location_from_xpath, normalize_location, stable_location
 
 ACTIONABLE_TYPES = {
@@ -109,15 +116,19 @@ def _find_window(title: str):
 def _activate_window(window) -> None:
     """Activate a UIA window without relying on pygetwindow's stale handles."""
     handle = int(getattr(window, "NativeWindowHandle", 0) or 0)
-    if not handle or not ctypes.windll.user32.IsWindow(handle):
+    user32, _callback = native_windows._api()
+    if not handle or not user32.IsWindow(handle):
         raise RuntimeError("UI Automation returned an invalid window handle")
-    ctypes.windll.user32.ShowWindow(handle, 9)  # SW_RESTORE
-    if not ctypes.windll.user32.SetForegroundWindow(handle):
+    if user32.IsIconic(handle):
+        user32.ShowWindow(handle, 9)  # Restore minimized windows only; preserve maximization.
+    if int(user32.GetForegroundWindow() or 0) != handle and not user32.SetForegroundWindow(handle):
         try:
             window.SetFocus()
         except Exception as error:
             raise RuntimeError("Could not activate the target window") from error
     time.sleep(0.2)
+    if int(user32.GetForegroundWindow() or 0) != handle:
+        raise RuntimeError("Could not activate the target window; foreground access was denied")
 
 
 def _process_name(process_id: int) -> str:
@@ -588,8 +599,9 @@ def _save_control_images(
     new_variant = variant_dir / f"{image_hash}.png"
     if not new_variant.is_file():
         crop.save(new_variant)
-    variants.append(str(new_variant.relative_to(directory)).replace("\\", "/"))
-    return image_path, list(dict.fromkeys(variants))[-8:], image_hash
+    newest = str(new_variant.relative_to(directory)).replace("\\", "/")
+    variants = [value for value in dict.fromkeys(variants) if value != newest] + [newest]
+    return image_path, variants[-image_storage.control_variant_limit():], image_hash
 
 
 def _parse_json_object(content: str) -> dict:
@@ -1701,7 +1713,9 @@ def control_from_visual_target(
         "height": relative["height"],
     }
     direct = target.get("_uia_control")
-    if direct is not None and _candidate_fits_target(direct, absolute_target, window):
+    if (direct is not None and _candidate_fits_target(direct, absolute_target, window)
+            and semantic_identity.check(target, semantic_identity.native_metadata(direct))[
+                "status"] not in {"conflict", "unresolved"}):
         return direct
     candidates = {}
     for x, y in _visual_sample_points(target, window_rect):
@@ -1723,7 +1737,9 @@ def control_from_visual_target(
         return None
     ranked = sorted(
         (control for control in candidates.values()
-         if _candidate_fits_target(control, absolute_target, window)),
+         if _candidate_fits_target(control, absolute_target, window)
+         and semantic_identity.check(target, semantic_identity.native_metadata(control))[
+             "status"] not in {"conflict", "unresolved"}),
         key=lambda control: _candidate_score(control, target, absolute_target, window),
         reverse=True,
     )
@@ -1733,6 +1749,27 @@ def control_from_visual_target(
     if _candidate_score(selected, target, absolute_target, window)[0] < 0:
         return None
     return selected
+
+
+def _native_action_controls(window, limit: int = 200):
+    """Read only shallow native menu/titlebar containers of the selected window."""
+    queue = [(window, 0)]
+    containers = {"MenuBarControl", "MenuControl", "TitleBarControl", "PaneControl", "GroupControl"}
+    seen = set()
+    while queue and len(seen) < limit:
+        control, depth = queue.pop(0)
+        key = _control_key(control)
+        if key in seen:
+            continue
+        seen.add(key)
+        if semantic_identity.literal_semantics(semantic_identity.native_metadata(control)):
+            yield control
+        if depth < 3 and (depth == 0 or getattr(control, "ControlTypeName", "") in containers):
+            try:
+                children = control.GetChildren()[:limit - len(seen)]
+                queue.extend((child, depth + 1) for child in children)
+            except Exception:
+                continue
 
 
 def controls_from_visual_targets(
@@ -1788,9 +1825,33 @@ def controls_from_visual_targets(
         seen[key] = index
         controls.append((control, max(0, len(xpath) - 1)))
         semantics[index] = {**target, "visual_components": []}
+    # Literal menu labels are independent native evidence. Never repair a model
+    # box by silently assigning its meaning to the adjacent UIA menu item.
+    for control in _native_action_controls(window):
+        if len(controls) >= max_controls:
+            break
+        rectangle = _rect(control)
+        if (rectangle["width"] <= 0 or rectangle["height"] <= 0
+                or rectangle["left"] < window_rect["left"]
+                or rectangle["top"] < window_rect["top"]
+                or rectangle["right"] > window_rect["right"]
+                or rectangle["bottom"] > window_rect["bottom"]):
+            continue
+        xpath = get_control_xpath(control)
+        key = (json.dumps(xpath, ensure_ascii=False, sort_keys=True), _control_key(control))
+        if key in seen:
+            continue
+        index = len(controls) + 1
+        seen[key] = index
+        controls.append((control, max(0, len(xpath) - 1)))
+        literal = semantic_identity.literal_semantics(semantic_identity.native_metadata(control))
+        semantics[index] = {**literal,
+                            "relative_rect": _relative_rect(rectangle, window_rect),
+                            "visual_components": []}
     return controls, semantics, failures
 
 
+@image_storage.serialized_learning
 def scan_window(
     window_name: str,
     api_url: str,
@@ -1834,7 +1895,13 @@ def scan_window(
     process_id = int(getattr(window, "ProcessId", 0) or 0)
     process_name = _process_name(process_id)
     app_id = knowledge.slugify(process_name or actual_name, "application")
-    directory = knowledge.initialize_app(app_id, actual_name, root)
+    try:
+        user32, _callback = native_windows._api()
+        owned_window = bool(user32.GetWindow(
+            int(getattr(window, "NativeWindowHandle", 0) or 0), 4))
+    except Exception:
+        owned_window = False
+    directory = knowledge.initialize_app(app_id, actual_name, root, preserve_name=owned_window)
     knowledge.load_index(directory)
     progress("Capturing window screenshot")
     screenshot = _screenshot_window(window_rect)
@@ -1876,6 +1943,7 @@ def scan_window(
         "window_name": actual_name,
         "image": str(page_image_named.relative_to(directory)).replace("\\", "/"),
         "model": model,
+        "scan_id": scan_id,
     }
     knowledge.save_page(directory, page_record)
     for region in segmentation["regions"]:
@@ -1982,6 +2050,9 @@ def scan_window(
     observed_ids = set()
     identity_counts: dict[str, int] = {}
     previous_by_id = {record.get("id"): record for record in previous_page_records}
+    runtime_blockers = {knowledge.control_anchor(record): record for record in previous_page_records
+                        if knowledge.runtime_quarantined(record)
+                        and knowledge.control_anchor(record)}
     semantic_counts = {"verified": 0, "uncertain": 0, "manual": 0, "not-required": 0}
     verification_interval = max(1, len(controls) // 20)
     location_prefix_cache: dict = {}
@@ -2053,6 +2124,24 @@ def scan_window(
                     "relationships": previous.get("relationships", []),
                     "visual_components": previous.get("visual_components", []),
                 }
+            native_identity = semantic_identity.native_metadata(control)
+            binding = semantic_identity.check(semantic, native_identity)
+            if binding["status"] in {"conflict", "unresolved"}:
+                semantic = {**semantic, "ambiguity": f"Native UIA/semantic conflict: {binding}"}
+            native_semantic = semantic_identity.literal_semantics(native_identity)
+            if (native_semantic and binding["status"] == "consistent"
+                    and semantic.get("source") != "manual"
+                    and float(semantic.get("confidence", 0)) < SEMANTIC_CONFIDENCE_THRESHOLD):
+                prediction = {key: semantic.get(key) for key in (
+                    "semantic_name", "intent", "confidence", "source")}
+                semantic = {**semantic, **native_semantic, "visual_semantic_prediction": prediction}
+            if native_semantic and binding["status"] not in {"conflict", "unresolved"}:
+                risk_order = {"unknown": 0, "safe": 1, "state-changing": 2,
+                              "external": 3, "destructive": 4}
+                if (risk_order.get(native_semantic["risk"], 0)
+                        > risk_order.get(semantic.get("risk"), 0)):
+                    semantic = {**semantic, "risk": native_semantic["risk"],
+                                "requires_confirmation": native_semantic["requires_confirmation"]}
             semantic_name = semantic.get("semantic_name") or _control_semantic_name(control, index)
             intent = semantic.get("intent") or knowledge.slugify(semantic_name, control_id)
             actions = [
@@ -2076,6 +2165,8 @@ def scan_window(
                 semantic_status = "manual"
             elif semantic_confidence >= SEMANTIC_CONFIDENCE_THRESHOLD:
                 semantic_status = "verified"
+            if binding["status"] in {"conflict", "unresolved"}:
+                semantic_status = "uncertain"
             semantic_counts[semantic_status] += 1
             base_command = _command_name(page_id, region_id, intent, control_id)
             command = base_command
@@ -2173,6 +2264,8 @@ def scan_window(
                 "semantic_confidence": semantic_confidence,
                 "semantic_status": semantic_status,
                 "semantic_source": semantic.get("source", "uia-metadata"),
+                "semantic_binding": binding,
+                "visual_semantic_prediction": semantic.get("visual_semantic_prediction"),
                 "semantic_evidence": semantic.get("evidence", []),
                 "semantic_ambiguity": semantic.get("ambiguity", ""),
                 "entity_type": semantic.get("entity_type", "ui-element"),
@@ -2199,6 +2292,8 @@ def scan_window(
                 "class_name": getattr(control, "ClassName", "") or "",
                 "control_type": control_type,
                 "automation_id": getattr(control, "AutomationId", "") or "",
+                "accelerator_key": native_identity["accelerator_key"],
+                "access_key": native_identity["access_key"],
                 "framework_id": getattr(control, "FrameworkId", "") or "",
                 "localized_control_type": str(
                     getattr(control, "LocalizedControlType", "") or ""
@@ -2248,6 +2343,11 @@ def scan_window(
                 "scan_id": scan_id,
                 "scan_strategy": effective_strategy,
             }
+            record = knowledge.merge_control_state(previous, record)
+            blocker = runtime_blockers.get(knowledge.control_anchor(record))
+            if blocker:
+                record = knowledge.merge_control_state(blocker, record)
+            status = record["status"]
             knowledge.save_control(directory, record)
             counts[status] += 1
             key_controls += int(is_key)
@@ -2412,6 +2512,11 @@ def scan_window(
         )
         overlay = visualization.show_markers(live_markers, overlay_duration_ms)
 
+    progress("Pruning unreferenced knowledge images")
+    try:
+        storage_result = image_storage.cleanup_images(directory, dry_run=False)
+    except (OSError, ValueError) as error:
+        storage_result = {"ok": False, "detail": f"Image cleanup deferred: {error}"}
     progress("Finalizing knowledge index and command catalog")
     index = knowledge.rebuild_index(directory)
     command_items = knowledge.available_commands(directory)
@@ -2422,6 +2527,8 @@ def scan_window(
         "app_id": app_id,
         "app_name": actual_name,
         "page_id": page_id,
+        "scan_id": scan_id,
+        "observed_control_ids": [record["id"] for record in scanned_records],
         "vault": str(directory),
         "page_image": str(page_image_named),
         "annotated_page_image": str(annotated_path),
@@ -2446,6 +2553,9 @@ def scan_window(
                 "semantic_name": item.get("semantic_name") or item.get("name"),
                 "semantic_ambiguity": item.get("semantic_ambiguity", ""),
                 "location_detail": item.get("verification", {}).get("location_detail", ""),
+                "runtime_quarantine": knowledge.runtime_quarantined(item),
+                "runtime_failure": item.get("quarantine", {}).get("reason") or item.get(
+                    "verification", {}).get("runtime_detail", ""),
             }
             for item in index["controls"]
             if item.get("status") == "quarantined"
@@ -2463,4 +2573,5 @@ def scan_window(
                       or segmentation.get("coverage", {}).get("desktop_limit_reached", False)),
         "elapsed_seconds": elapsed,
         "stage_timings": stage_timings,
+        "image_storage": storage_result,
     }

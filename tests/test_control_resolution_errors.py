@@ -45,6 +45,17 @@ def resolver(monkeypatch):
     }
     exec(compile(ast.Module(body=nodes, type_ignores=[]), str(SOURCE / "utils.py"), "exec"), namespace)
     namespace["ActionError"] = sys.modules[f"{package}.mcp.results"].ActionError
+
+    def native_window(window_name, first_step):
+        root = namespace["uiautomation"].GetRootControl()
+        if root is None:
+            raise namespace["ActionError"]("action_failed", "Native window backend failed")
+        selector = {"ControlType": "WindowControl", "Name": window_name}
+        selector.update({key: first_step[key] for key in ("ClassName", "AutomationId", "foundIndex")
+                         if first_step.get(key) not in (None, "")})
+        return namespace["_observe_match"](root, selector, search_depth=1, absent_code="window_invalid")
+
+    namespace["_native_window_scope"] = native_window
     return namespace
 
 

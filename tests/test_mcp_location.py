@@ -7,7 +7,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 from easy_uiauto import utils
-from easy_uiauto.mcp import server
+from easy_uiauto.mcp import native_windows, server
 from easy_uiauto.mcp.protocol import (
     build_location,
     location_from_xpath,
@@ -96,36 +96,43 @@ def test_find_window_scope_without_name_uses_desktop_root(monkeypatch) -> None:
 
 
 def test_find_window_scope_prefers_class_and_name(monkeypatch) -> None:
-    calls = []
-    window = SimpleNamespace(Exists=lambda *args: calls.append(args) or True)
-
-    def fake_window_control(**kwargs):
-        calls.append(kwargs)
-        return window
-
-    monkeypatch.setattr(utils.uiautomation, "WindowControl", fake_window_control)
-
+    window = SimpleNamespace(ClassName="WindowClass")
+    enumerate_windows = Mock(return_value=[dict(title="Example", handle=42, class_name="NativeClass")])
+    bind = Mock(return_value=window)
+    forbidden = Mock(side_effect=AssertionError("Desktop UIA lookup is forbidden"))
+    monkeypatch.setattr(native_windows, "enumerate_windows", enumerate_windows)
+    monkeypatch.setattr(utils.uiautomation, "ControlFromHandle", bind)
+    monkeypatch.setattr(utils.uiautomation, "WindowControl", forbidden)
+    monkeypatch.setattr(utils.uiautomation, "GetRootControl", forbidden)
     assert utils._find_window_scope("Example", XPATH) is window
-    assert calls == [
-        {"ClassName": "WindowClass", "Name": "Example", "searchDepth": 1},
-        (1, 0.1),
-    ]
+    enumerate_windows.assert_called_once_with(visible_only=True)
+    bind.assert_called_once_with(42)
+    forbidden.assert_not_called()
 
 
-def test_find_window_scope_retries_name_and_returns_false(monkeypatch) -> None:
-    calls = []
-
-    def fake_window_control(**kwargs):
-        calls.append(kwargs)
-        return SimpleNamespace(Exists=lambda *args: False)
-
-    monkeypatch.setattr(utils.uiautomation, "WindowControl", fake_window_control)
-
+def test_find_window_scope_missing_window_does_not_query_uia(monkeypatch) -> None:
+    monkeypatch.setattr(native_windows, "enumerate_windows", lambda **_kw: [])
+    bind = Mock(side_effect=AssertionError("Missing window must not query UIA"))
+    monkeypatch.setattr(utils.uiautomation, "ControlFromHandle", bind)
     assert utils._find_window_scope("Example", XPATH) is False
-    assert calls == [
-        {"ClassName": "WindowClass", "Name": "Example", "searchDepth": 1},
-        {"Name": "Example", "searchDepth": 1},
-    ]
+    bind.assert_not_called()
+
+
+def test_native_scope_rejects_duplicate_windows_before_binding_and_respects_index(monkeypatch):
+    import pytest
+
+    from easy_uiauto.mcp.results import ActionError
+
+    monkeypatch.setattr(native_windows, "enumerate_windows", lambda **_kw: [
+        dict(title="Example", handle=1), dict(title="Example", handle=2),
+    ])
+    bind = Mock(return_value=object())
+    monkeypatch.setattr(utils.uiautomation, "ControlFromHandle", bind)
+    with pytest.raises(ActionError, match="ambiguous_match"):
+        utils._native_window_scope("Example", {})
+    bind.assert_not_called()
+    assert utils._native_window_scope("Example", {"foundIndex": 2}) is bind.return_value
+    bind.assert_called_once_with(2)
 
 
 def test_location_from_xpath_matches_recorded_location_shape() -> None:

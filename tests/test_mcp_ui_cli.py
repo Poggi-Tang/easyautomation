@@ -5,9 +5,47 @@ from __future__ import annotations
 from copy import deepcopy
 from types import SimpleNamespace
 
+import pytest
 from PIL import Image, ImageDraw
 
 from easy_uiauto.mcp import knowledge, ui_cli
+
+
+@pytest.mark.parametrize("method", ["location", "image"])
+def test_explicit_quarantine_revalidation_does_not_execute_action(
+        monkeypatch, tmp_path, method):
+    directory = knowledge.initialize_app("example", "Example", tmp_path)
+    record = _record()
+    knowledge.save_control(directory, record)
+    ui_cli._quarantine(directory, record, "old runtime failure")
+    monkeypatch.setattr(ui_cli, "_resolve_verified_control", lambda *_a: (None, 0.98, {}, method))
+    monkeypatch.setattr(ui_cli, "_perform_action", lambda *_a: (_ for _ in ()).throw(
+        AssertionError("Revalidation must not execute")))
+    result = ui_cli.revalidate_control(directory, record["id"])
+    assert result["status"] == "verified" and result["action_executed"] is False
+    saved = knowledge.find_control_record(directory, record["id"])[1]
+    assert not saved["quarantine"]["active"]
+    assert saved["quarantine"]["reason"] == "old runtime failure"
+    assert knowledge.available_commands(directory)
+
+
+@pytest.mark.parametrize("method", ["ocr", "ai-vision", "failed"])
+def test_unconfirmed_quarantine_repair_cannot_release_it(monkeypatch, tmp_path, method):
+    directory = knowledge.initialize_app("example", "Example", tmp_path)
+    record = _record()
+    knowledge.save_control(directory, record)
+    ui_cli._quarantine(directory, record, "score=0.292; uniqueness=0.006")
+
+    def resolve(*_args):
+        if method == "failed":
+            raise RuntimeError("LOCATION and template failed")
+        return None, 0.99, {}, method
+
+    monkeypatch.setattr(ui_cli, "_resolve_verified_control", resolve)
+    with pytest.raises(RuntimeError):
+        ui_cli.revalidate_control(directory, record["id"])
+    saved = knowledge.find_control_record(directory, record["id"], include_quarantine=True)[1]
+    assert saved["quarantine"]["active"] and not knowledge.available_commands(directory)
 
 
 def _record() -> dict:
@@ -362,6 +400,7 @@ def test_execute_many_shares_preflight_and_writes_once(monkeypatch, tmp_path) ->
     open_record.update(
         {
             "id": "open",
+            "name": "Open",
             "semantic_name": "Open",
             "intent": "open-document",
             "command": "main.toolbar.open-document",
@@ -436,6 +475,8 @@ def test_execute_many_preflight_failure_runs_no_actions(monkeypatch, tmp_path) -
     open_record.update(
         {
             "id": "open",
+            "name": "Open",
+            "semantic_name": "Open",
             "intent": "open-document",
             "command": "main.toolbar.open-document",
             "image": "images/controls/open.png",

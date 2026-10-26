@@ -4,7 +4,46 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog and is maintained automatically by Semantic Release.
 
-## [Unreleased]
+## [0.9.2] - 2026-10-26
+
+### Fixed
+
+- Export all MCP tools from `easy_uiauto.mcp` with editor-visible signatures,
+  lazy loading and optional progress contexts for ordinary async Python calls.
+  Add import documentation and a runnable example. Resolve named controls and
+  UIA readiness probes through native window handles instead of desktop traversal.
+- Match contiguous OCR phrases across Tesseract word boxes without joining
+  separate rows, distant labels or low-confidence words. Keep omitted drag
+  source/destination XPaths as valid empty arrays.
+- Inspect control trees through Win32-selected window handles in disposable UIA
+  workers. Enforce a total node/time budget, stop child enumeration at the depth
+  limit, report partial checkpoints on timeout and preserve foreground/layout.
+- Bound control image states on disk, deduplicate new interaction PNGs by content,
+  and automatically expire old interaction image sets while retaining textual
+  history. Preserve referenced evidence, manual retention and recent failures;
+  serialize cooperating writers and collection across MCP processes. Add
+  `cleanup_ui_knowledge_images` with a dry-run default for existing vaults.
+- Cross-check native action labels with visual semantics before generating or
+  running commands. Preserve conflicting observations without executing their
+  inferred intent; recover named menu actions from bounded native UIA evidence.
+- Limit interactive candidates to controls observed in the current scan, count
+  parent actions toward the exploration budget, and invalidate learned effects
+  when a control's intent changes.
+- Recover through an enabled owned modal when its owner is disabled; do not send
+  browser-back keys as a generic recovery step. Preserve the application's main
+  window name while learning owned dialogs.
+- Extend native identity checks to checkbox/radio actions and labeled search /
+  replacement inputs. Reject unresolved known action identities and recheck
+  parent candidate lists after recursive exploration.
+- Preserve runtime quarantine and failure evidence across rescans, semantic
+  teaching and index rebuilds. Add explicit non-mutating control revalidation.
+- Skip previously attempted interactions during automatic exploration, preserve
+  learned effect evidence, exclude window-state controls and stop on interference.
+- Restore only minimized windows during scanner activation; preserve maximized
+  layout and verify that the target actually obtained the foreground.
+- Skip disabled actions and new-document/window commands without an Escape
+  reversal during exploration. Withhold parent recovery input after nested
+  discovery stops, including interference and failed recovery.
 
 ## [0.9.1] - 2026-10-23
 

@@ -7,6 +7,61 @@ import json
 from easy_uiauto.mcp import knowledge, server
 
 
+def test_owned_dialog_scan_does_not_replace_application_window_name(tmp_path):
+    directory = knowledge.initialize_app("example", "Document - Example", tmp_path)
+    knowledge.initialize_app("example", "About Example", tmp_path, preserve_name=True)
+    assert knowledge.read_markdown(directory / "app.md")[0]["name"] == "Document - Example"
+
+
+def test_runtime_quarantine_survives_four_rescans_and_rebuilds(tmp_path):
+    from easy_uiauto.mcp import ui_cli
+
+    directory = knowledge.initialize_app("example", "Example", tmp_path)
+    record = _control_record()
+    knowledge.save_control(directory, record)
+    ui_cli._quarantine(directory, record, "XPath step 4 failed; score=0.292; uniqueness=0.006")
+    for _ in range(4):
+        refreshed = {**record, "status": "verified", "verification": {
+            "location": "passed", "image": "passed"}}
+        knowledge.save_control(directory, refreshed)
+        knowledge.rebuild_index(directory)
+        held = knowledge.find_control_record(directory, record["id"], include_quarantine=True)[1]
+        assert held["status"] == "quarantined" and held["quarantine"]["active"]
+        assert "0.292" in held["quarantine"]["reason"]
+        assert not knowledge.available_commands(directory)
+    taught = knowledge.teach_control(directory, record["id"], "Save", "save", "Save item")
+    assert taught["status"] == "quarantined"
+    assert not knowledge.available_commands(directory)
+
+
+def test_rescan_preserves_effect_but_human_teaching_can_add_new_confirmation(tmp_path):
+    directory = knowledge.initialize_app("example", "Example", tmp_path)
+    record = _control_record()
+    evidence = {"status": "effect-observed", "effect_record": "interactions/one.md"}
+    knowledge.save_control(directory, {**record, "function_verification": evidence})
+    knowledge.save_control(directory, {**record, "function_verification": {
+        "status": "inferred", "executed": False}})
+    saved = knowledge.find_control_record(directory, record["id"])[1]
+    assert saved["function_verification"] == evidence
+    knowledge.save_control(directory, {**saved, "function_verification": {
+        "status": "human-confirmed", "executed": False}})
+    assert knowledge.find_control_record(directory, record["id"])[1][
+        "function_verification"]["status"] == "human-confirmed"
+
+
+def test_runtime_failure_anchor_survives_changed_id_without_copying_old_function_proof():
+    old = {**_control_record("old"), "status": "quarantined",
+           "verification": {"runtime": "failed", "runtime_detail": "XPath failed"},
+           "function_verification": {"status": "effect-observed", "effect_record": "old.md"}}
+    new = {**_control_record("new"), "location": {"Xpath": ["different"]},
+           "function_verification": {"status": "inferred"}}
+    assert knowledge.control_anchor(old) == knowledge.control_anchor(new)
+    held = knowledge.merge_control_state(old, new)
+    assert held["id"] == "new" and held["status"] == "quarantined"
+    assert held["quarantine"]["control_id"] == "old"
+    assert held["function_verification"]["status"] == "inferred"
+
+
 def _control_record(control_id: str = "control-1", status: str = "verified") -> dict:
     return {
         "id": control_id,
@@ -148,6 +203,7 @@ def test_teach_control_repairs_semantics_but_not_failed_positioning(tmp_path) ->
 def test_teach_control_publishes_when_positioning_is_verified(tmp_path) -> None:
     directory = knowledge.initialize_app("example", "Example", tmp_path)
     record = _control_record(status="quarantined")
+    record.update(name="Delete selected item", automation_id="delete-item")
     record["semantic_status"] = "uncertain"
     record["verification"] = {"location": "passed", "image": "passed"}
     knowledge.save_control(directory, record)

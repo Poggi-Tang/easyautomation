@@ -906,26 +906,63 @@ def strategy_xpath(name, class_name, control_type, Xpath,debug=False):
 def _find_window_scope(window_name, xpath=None):
     if not window_name:
         return uiautomation.GetRootControl()
+    from .mcp.results import ActionError
 
-    first_step = xpath[0] if xpath else {}
-    expected_class = first_step.get('ClassName', '')
+    try:
+        return _native_window_scope(window_name, xpath[0] if xpath else {})
+    except ActionError as error:
+        if error.code == "window_invalid":
+            return False
+        raise
 
-    # 优先用原生搜索，由 C++ 层完成遍历
-    if expected_class:
-        win = uiautomation.WindowControl(
-            ClassName=expected_class,
-            Name=window_name,
-            searchDepth=1,
-        )
-        if win.Exists(1, 0.1):
-            return win
 
-    # 模糊匹配退回到手动遍历
-    win = uiautomation.WindowControl(Name=window_name, searchDepth=1)
-    if win.Exists(1, 0.1):
-        return win
+def _native_window_scope(window_name, first_step):
+    """Bind a unique visible native window without querying unrelated UIA providers."""
+    from .mcp import native_windows
+    from .mcp.results import ActionError
 
-    return False
+    try:
+        windows = native_windows.enumerate_windows(visible_only=True)
+        candidates = [window for window in windows
+                      if not window_name or window["title"] == window_name]
+        raw_index = first_step.get("foundIndex")
+        try:
+            index = int(raw_index) if raw_index not in (None, "") else 0
+        except (TypeError, ValueError) as error:
+            raise ActionError("invalid_argument", "foundIndex must be an integer") from error
+        if index < 0:
+            raise ActionError("invalid_argument", "foundIndex must not be negative")
+        expected_id = first_step.get("AutomationId")
+        expected_class = first_step.get("ClassName")
+        bound = {}
+        if expected_id or expected_class:
+            filtered = []
+            for window in candidates:
+                control = uiautomation.ControlFromHandle(window["handle"])
+                if control is None:
+                    raise RuntimeError("Could not bind UIA to the selected window")
+                if ((not expected_id or control.AutomationId == expected_id)
+                        and (not expected_class or control.ClassName == expected_class)):
+                    filtered.append(window)
+                    bound[window["handle"]] = control
+            candidates = filtered
+        if not candidates or index > len(candidates):
+            raise ActionError(
+                "window_invalid", "Window not found or no longer visible", retryable=True,
+            )
+        if not index and len(candidates) != 1:
+            raise ActionError("ambiguous_match", "Multiple visible windows match the location")
+        selected = candidates[(index or 1) - 1]
+        control = bound.get(selected["handle"])
+        if control is None:
+            control = uiautomation.ControlFromHandle(selected["handle"])
+        if control is None:
+            raise RuntimeError("Could not bind UIA to the selected window")
+        return control
+    except ActionError:
+        raise
+    except Exception as error:
+        raise ActionError("action_failed", f"Native window lookup failed: {error}") from error
 
 
 def _has_second_match(window, selector):
@@ -1028,19 +1065,16 @@ def observe_control(location):
     xpath = normalized.get("Xpath", [])
     first_step = xpath[0] if xpath else {}
     window_name = normalized.get("WindowName", "")
-    try:
-        root = uiautomation.GetRootControl()
-        if root is None:
-            raise RuntimeError("UIA returned no desktop root")
-    except Exception as error:
-        raise ActionError("action_failed", f"UIA desktop lookup failed: {error}") from error
-    window = root
     window_step = first_step.get("ControlType") == "WindowControl"
     if window_name or window_step:
-        selector = {"ControlType": "WindowControl", "Name": window_name}
-        if window_step:
-            selector.update({key: first_step[key] for key in ("ClassName", "AutomationId", "foundIndex") if first_step.get(key) not in (None, "")})
-        window = _observe_match(root, selector, search_depth=1, absent_code="window_invalid")
+        window = _native_window_scope(window_name, first_step if window_step else {})
+    else:
+        try:
+            window = uiautomation.GetRootControl()
+            if window is None:
+                raise RuntimeError("UIA returned no desktop root")
+        except Exception as error:
+            raise ActionError("action_failed", f"UIA desktop lookup failed: {error}") from error
 
     failures = []
 

@@ -278,11 +278,42 @@ easy_uiauto_ui show <app-id>
 可执行命令。没有独立定位的元素保留为观察记录。仅凭 UIA 名称补充的桌面项不宣称已验证
 打开后的效果，并保留未知风险及确认标记。
 
+`get_control_tree` 通过 Win32 选择可见窗口，只为该句柄绑定 UIA，使用独立工作进程，
+不会激活窗口或改变最大化状态。默认 `max_depth=5`（最多 10）、`max_nodes=500`
+（最多 5000）、`timeout_seconds=15`（0.1～60 秒，含进程启动）。达到深度或节点上限后
+停止枚举子节点。正常树的 `_inspection` 记录达到的上限和提供程序错误；底层 UIA 阻塞时
+返回 `ok=false`、`code="timeout"`，`data` 中包含最近的部分树/检查点，并停止本次工作
+进程。不会终止目标软件。`get_ui_learning_status` 只跟踪学习任务，不跟踪这个树查询。
+
 通过 MCP 学习时，每 5 秒会报告任务 ID、当前阶段、已耗时和控件验证进度。如果客户端
 停止等待，应先调用 `get_ui_learning_status`；状态为 `running` 表示原扫描仍在 MCP 进程中
 继续执行，不能重复启动扫描。只有 `failed` 才表示学习失败。
 普通“学习/扫描”请求到基础扫描结束即完成；只有明确要求“深度学习”或“自主交互探索”时，
 才会执行 `explore_ui_workflows`。
+
+运行时定位验证失败的控件会持续隔离，重扫、重建索引和语义教学都不会解除隔离。修正
+定位或恢复所需可见页面后，调用 `revalidate_ui_control(app_id=..., control_id=...)`
+做显式复核：只检查 LOCATION/图像，不执行控件动作；OCR 单独成功不足以解隔离，原失败
+证据仍保留。自动探索会跳过已经尝试过的控件/动作，包括无可见变化和受干扰的记录；
+需要主动重复观察时仍可显式调用 `learn_ui_command_effect`。激活窗口保持最大化状态；
+前台被其他应用抢走后，停止后续页面发现和恢复输入。
+
+有明确原生文字的菜单、按钮、复选框和单选按钮会核对 UIA 名称与视觉语义，处理
+中文/英文常见动作、助记键
+和快捷键后缀；例如“全选”不能绑定为“转到”，“关闭”不能绑定为“最大化”。冲突的视觉
+观察保留为诊断，不生成相应错误命令。视觉优先扫描额外读取目标窗口内有界的浅层
+菜单/标题栏 UIA 元素，用原生文字补充独立动作记录，不枚举桌面 UIA 根节点。
+执行前重复检查已知语义和当前动作文字；明确冲突不能被图像/OCR 兜底覆盖，旧错误记录
+也不会因重建索引而重新变成可执行命令。该检查覆盖常见动作名称，不把未知自绘控件的
+模型推断当作功能验证。自动探索只选择本轮实际观察到的控件，并跳过禁用项以及不能用
+Escape 撤销的新建文档/窗口；子探索停止后，父层也不继续发送恢复按键。
+“查找内容”“替换为”等已知标签的输入框可使用独立原生标签证据；编辑器中的动态文字
+不参与动作身份推断。主窗口被禁用时，恢复仅激活经所有权确认的模态窗口，不对主窗口
+盲发按键；学习所属弹窗时保留应用主窗口名称。递归返回时会重新检查动作是否已尝试。
+
+客户端调用超时不代表后台任务停止，应先查 `get_ui_learning_status`；杀死 MCP 进程会
+终止工作线程并丢失内存任务状态。知识库文件使用 UTF-8，在 PowerShell 查看时可使用
+`Get-Content -Encoding UTF8`，避免把终端解码乱码误认为文件损坏。
 
 视觉定位不适用或需要诊断完整 UIA 覆盖时，可使用 `--strategy full-uia`。该模式会遍历
 可见 UIA 树并额外执行语义分析，因此更慢，产生的记录也更多。
@@ -458,6 +489,22 @@ applications/<app-id>/
 `.easy_uiauto/index.json` 只是可删除的检索缓存。手工修改 Markdown 后，使用
 `easy_uiauto_ui reindex <app-id>` 重建即可。
 
+扫描或操作响应学习提交记录后，会自动清理无引用的旧图片。每个控件保留当前模板和
+最近 8 个不同的图片状态，超出范围且没有其他引用的状态图片会从磁盘删除。新交互截图
+按 PNG 内容哈希去重，相同的操作前后图或桌面图共用一个文件。交互默认保留最近 50 次
+操作的图片；图片过期后，文字交互记录仍然保留。
+
+被知识记录引用的证据、标记了 `retain_images: true` 的交互，以及每个控件/动作最近一次
+仍有图片的失败交互会额外保留。缺少图片清单的旧隔离控件也会保守保留证据。因此数量
+上限不等于磁盘配额。可用 `EASY_UIAUTO_CONTROL_IMAGE_VARIANTS`（默认 `8`，最小 `1`）
+和 `EASY_UIAUTO_INTERACTION_IMAGE_RECORDS`（默认 `50`，最小 `0`）调整默认保留数量。
+
+已有应用可以调用 `cleanup_ui_knowledge_images(app_id="notepad")`，先查看预计删除的
+文件和字节数，再传入 `dry_run=false` 实际清理。`keep_control_variants` 和
+`keep_interaction_images` 可以覆盖本次调用的保留数量。清理前检查 Markdown/YAML 引用，
+只删除该应用控件/交互目录中由程序管理的 PNG，不涉及页面图和其他应用。知识记录
+无法读取时会推迟清理；知识库文件锁可防止多个新版 MCP 进程清掉彼此尚未提交的图片。
+
 控件和区域只保存窗口内的 `normalized_rect`，并明确标记
 `geometry_role: visual-hint-only`。它只用于页面标注和视觉对比，不能作为控件身份，
 也不能直接用于点击。实时框选和操作会先重新解析当前 `LOCATION`，失败后才使用唯一
@@ -481,7 +528,7 @@ applications/<app-id>/
 `search_ui_knowledge`、`search_ui_knowledge_batch`、`list_ui_commands`、
 `run_ui_command`、`run_ui_commands`、
 `learn_ui_command_effect`、`explore_ui_workflows`、`list_ui_interactions`、
-`teach_ui_control` 和 `rebuild_ui_knowledge_index`。
+`teach_ui_control`、`rebuild_ui_knowledge_index` 和 `cleanup_ui_knowledge_images`。
 
 `--full-setup-codex` 会安装或更新两个配套 Skill。只需要更新 Skill 时，使用
 `--install-codex-skills`。
@@ -516,6 +563,28 @@ MCP 客户端配置可使用 `python -m easy_uiauto.mcp.server` 启动服务。
 在目标窗口内查找，并忽略动态 Name、`foundIndex` 和历史坐标；ID 缺失或重复时再使用 XPath。
 
 ## 🧰 Python API 示例
+
+### 在代码中导入 MCP 工具
+
+从 0.9.2 起，安装或升级 `easy-uiauto[mcp]>=0.9.2` 后，全部 54 个工具可从
+`easy_uiauto.mcp` 导入。使用源码时，在编辑器选中的解释器中执行
+`python -m pip install -e ".[mcp]"`。
+
+```python
+import json
+from easy_uiauto.mcp import list_windows, get_control_tree, find_control
+
+print(json.loads(list_windows()))
+# 用上一步返回的实际窗口标题替换示例值。
+tree = json.loads(get_control_tree("你的文件.txt - 记事本", max_nodes=500, timeout_seconds=15))
+```
+
+导入后直接在本进程中调用，不需要启动 MCP 服务。大部分工具返回 JSON 字符串，
+`take_screenshot` 返回 MCP Image 对象。`scan_window_knowledge`、`explore_ui_workflows`、
+`analyze_ui_image`、`correct_ui_image_annotations` 需要 `await`，普通 Python 可省略 `ctx`。
+包根目录的传统 Controller 接口继续保留。运行 `python demo/mcp_import.py --list-tools`
+可列出全部导出。完整目录、异步示例、返回类型和解释器排查见
+[Python 导入说明](docs/python-imports.zh-CN.md)。
 
 ### 基本控件操作
 

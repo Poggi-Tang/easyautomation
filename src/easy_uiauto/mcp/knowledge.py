@@ -15,6 +15,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from . import image_storage
+
 KNOWLEDGE_DIR = "EASY_UIAUTO_KNOWLEDGE_DIR"
 INDEX_VERSION = 3
 SEARCHABLE_STATUSES = {"verified", "observed", "suspect"}
@@ -162,8 +164,12 @@ def app_dir(app_id: str, root: Path | None = None) -> Path:
     return (root or vault_root()) / "applications" / slugify(app_id, "application")
 
 
-def initialize_app(app_id: str, app_name: str, root: Path | None = None) -> Path:
+def initialize_app(app_id: str, app_name: str, root: Path | None = None,
+                   *, preserve_name: bool = False) -> Path:
     directory = app_dir(app_id, root)
+    if preserve_name and (directory / "app.md").is_file():
+        previous, _body = read_markdown(directory / "app.md")
+        app_name = previous.get("name") or app_name
     for child in (
         "pages",
         "regions",
@@ -258,12 +264,62 @@ def _control_body(record: dict) -> str:
     )
 
 
-def save_control(directory: Path, record: dict) -> Path:
+def runtime_quarantined(record: dict) -> bool:
+    """A failed execution check is a latch, not a scan-time semantic score."""
+    return bool(record.get("quarantine", {}).get("active") or (
+        record.get("status") == "quarantined"
+        and record.get("verification", {}).get("runtime") == "failed"))
+
+
+def merge_control_state(previous: dict, record: dict) -> dict:
+    """Refresh observations without erasing runtime failures or learned effects."""
+    record = dict(record)
+    function = previous.get("function_verification", {})
+    incoming_function = record.get("function_verification", {})
+    if (previous.get("intent") == record.get("intent")
+            and previous.get("id") == record.get("id")) and (
+            function.get("effect_record") or function.get("executed") or (
+            function.get("status") == "human-confirmed")) and incoming_function.get("status") in {
+                None, "", "inferred", "not-applicable", "unknown"}:
+        record["function_verification"] = function
+    if runtime_quarantined(previous):
+        verification = dict(record.get("verification", {}))
+        failure = previous.get("quarantine") or dict(
+            active=True, reason=previous.get("verification", {}).get("runtime_detail", ""),
+            failure_verification=previous.get("verification", {}), control_id=previous["id"])
+        record.update(status="quarantined", quarantine=failure,
+                      latest_observation_verification=verification)
+        record["verification"] = {**verification, "runtime": "failed",
+                                  "runtime_detail": failure.get("reason", "")}
+    return record
+
+
+def control_anchor(record: dict):
+    """Intrinsic identity for retaining a failure when a rescan changes its XPath."""
+    control_type = record.get("control_type", "")
+    identity = record.get("automation_id") or record.get("name")
+    if not control_type or not identity:
+        return None
+    return (record.get("app_id"), record.get("page_id"), control_type,
+            "automation-id" if record.get("automation_id") else "name", identity,
+            record.get("class_name", ""))
+
+
+@image_storage.serialized_learning
+def save_control(directory: Path, record: dict, *, release_runtime_quarantine=False) -> Path:
     record = dict(record)
     record.pop("rect", None)
     existing = find_control_record(directory, record["id"], include_quarantine=True)
     if existing:
         old_path, old_record = existing
+        if release_runtime_quarantine:
+            verification = record.get("verification", {})
+            if (record.get("status") != "verified" or verification.get("runtime") != "passed"
+                    or verification.get("image") != "passed"
+                    or record.get("quarantine", {}).get("active")):
+                raise ValueError("Releasing runtime quarantine requires a fresh successful check")
+        else:
+            record = merge_control_state(old_record, record)
         record.setdefault("created_at", old_record.get("created_at", utc_now()))
         expected_folder = "quarantine" if record["status"] == "quarantined" else "controls"
         if old_path.parent.name != expected_folder:
@@ -308,7 +364,7 @@ def teach_control(
     positioning_ok = record.get("verification", {}).get("image") == "passed" and (
         record.get("verification", {}).get("location") == "passed"
         or record.get("visual_fallback_ready") is True
-    )
+    ) and not runtime_quarantined(record)
     record.update(
         {
             "semantic_name": semantic_name,
@@ -363,6 +419,7 @@ def teach_control(
     return record
 
 
+@image_storage.serialized_learning
 def save_page(directory: Path, record: dict) -> Path:
     record = {**record, "kind": "page", "updated_at": utc_now()}
     record.pop("rect", None)
@@ -373,6 +430,7 @@ def save_page(directory: Path, record: dict) -> Path:
     return path
 
 
+@image_storage.serialized_learning
 def save_region(directory: Path, record: dict) -> Path:
     record = {**record, "kind": "region", "updated_at": utc_now()}
     record.pop("rect", None)
@@ -383,6 +441,7 @@ def save_region(directory: Path, record: dict) -> Path:
     return path
 
 
+@image_storage.serialized_learning
 def save_interaction(directory: Path, record: dict) -> Path:
     """Persist one before/after operation effect as Markdown source of truth."""
     record = sanitize_interaction_geometry(
@@ -637,8 +696,16 @@ def search_controls(
 
 
 def available_commands(directory: Path, page_id: str = "") -> list[dict]:
+    from . import semantic_identity
+
     commands = []
     for control in search_controls(directory, statuses=EXECUTABLE_STATUSES, limit=10000):
+        if runtime_quarantined(control):
+            continue
+        if (control.get("semantic_binding", {}).get("status") in {"conflict", "unresolved"}
+                or semantic_identity.check(control, control)["status"] in {
+                    "conflict", "unresolved"}):
+            continue
         if control.get("semantic_status") not in {"verified", "manual"}:
             continue
         if page_id and control.get("page_id") != page_id:
@@ -649,6 +716,9 @@ def available_commands(directory: Path, page_id: str = "") -> list[dict]:
                     "command": f"{control['command']}.{action}",
                     "control_id": control["id"],
                     "semantic_name": control.get("semantic_name") or control.get("name"),
+                    "name": control.get("name", ""),
+                    "automation_id": control.get("automation_id", ""),
+                    "control_type": control.get("control_type", ""),
                     "intent": control.get("intent"),
                     "description": control.get("description", ""),
                     "entity_type": control.get("entity_type", "ui-element"),

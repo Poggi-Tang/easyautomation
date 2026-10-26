@@ -32,10 +32,8 @@ _VISION_SETTINGS = (
 # cannot hang the MCP server. Only the exit status is exposed to callers.
 _READINESS_PROBES = {
     "uia": """
-import uiautomation
-root = uiautomation.GetRootControl()
-assert root is not None
-root.GetChildren()
+from easy_uiauto.mcp.diagnostics import _test_uia
+_test_uia()
 """,
     "image_matching": """
 import cv2
@@ -152,7 +150,7 @@ def get_capability_readiness(
         "image_matching": ("cv2", "numpy", "PIL"),
     }
     scopes = {
-        "uia": "Desktop root access; individual controls and actions are not tested.",
+        "uia": "Bind one visible native window to UIA; child controls and actions are not tested.",
         "ocr": (
             "OCR imports, executable and requested languages; "
             "recognition and screen capture are not tested."
@@ -374,11 +372,17 @@ def ensure_tesseract() -> tuple[dict, str]:
 def _test_uia() -> str:
     import uiautomation
 
-    root = uiautomation.GetRootControl()
-    if root is None:
-        raise RuntimeError("UI Automation did not return the desktop root")
-    children = root.GetChildren()
-    return f"Desktop root accessible; discovered {len(children)} top-level controls"
+    from . import native_windows
+
+    windows = native_windows.enumerate_windows(visible_only=True)
+    if not windows:
+        raise RuntimeError("No visible native window is available for a UIA probe")
+    target = next((window for window in windows if window["foreground"]), windows[0])
+    with uiautomation.UIAutomationInitializerInThread():
+        control = uiautomation.ControlFromHandle(target["handle"])
+        if control is None or not control.ControlTypeName:
+            raise RuntimeError("Could not bind UIA to the selected visible window")
+    return "Visible native window bound to UIA; no child enumeration or input performed"
 
 
 def _test_ocr(tesseract_path: str) -> str:

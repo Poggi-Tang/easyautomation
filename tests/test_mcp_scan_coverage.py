@@ -95,7 +95,8 @@ def test_duplicate_detection_of_same_visual_item_is_deduplicated(monkeypatch):
     ])
     controls, _, failures = scanner.controls_from_visual_targets(
         window, scanner._rect(window),
-        [target(20, _uia_control=button), target(21, _uia_control=button)], 20,
+        [target(20, _uia_control=button, semantic_name="Save", intent="save-file"),
+         target(21, _uia_control=button, semantic_name="Save", intent="save-file")], 20,
     )
     assert len(controls) == 1
     assert failures == []

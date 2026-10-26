@@ -7,7 +7,32 @@ from unittest.mock import Mock
 
 import pytest
 
-from easy_uiauto.mcp import interaction_learning, native_windows, scanner
+from easy_uiauto.mcp import diagnostics, interaction_learning, native_windows, scanner
+
+
+@pytest.mark.parametrize("minimized", [False, True])
+def test_activation_preserves_maximized_layout_and_only_restores_minimized(
+        monkeypatch, minimized):
+    api = SimpleNamespace(IsWindow=lambda _h: True, IsIconic=lambda _h: minimized,
+                          ShowWindow=Mock(), SetForegroundWindow=lambda _h: True,
+                          GetForegroundWindow=lambda: 42)
+    monkeypatch.setattr(native_windows, "_api", lambda: (api, None))
+    monkeypatch.setattr(scanner.time, "sleep", lambda _s: None)
+    scanner._activate_window(SimpleNamespace(NativeWindowHandle=42))
+    if minimized:
+        api.ShowWindow.assert_called_once_with(42, 9)
+    else:
+        api.ShowWindow.assert_not_called()
+
+
+def test_activation_denied_is_reported_even_if_focus_call_does_not_raise(monkeypatch):
+    api = SimpleNamespace(IsWindow=lambda _h: True, IsIconic=lambda _h: False,
+                          ShowWindow=Mock(), SetForegroundWindow=lambda _h: False,
+                          GetForegroundWindow=lambda: 7)
+    monkeypatch.setattr(native_windows, "_api", lambda: (api, None))
+    monkeypatch.setattr(scanner.time, "sleep", lambda _s: None)
+    with pytest.raises(RuntimeError, match="foreground access was denied"):
+        scanner._activate_window(SimpleNamespace(NativeWindowHandle=42, SetFocus=Mock()))
 
 
 def _entry(handle, title="Editor", class_name="EditorClass", visible=True):
@@ -121,3 +146,17 @@ def test_popup_learning_binds_only_added_window_handles(monkeypatch):
     monkeypatch.setattr(scanner, "_walk_controls", lambda *_args: [])
     interaction_learning._popup_controls({"added": [{"handle": 41}]})
     bind.assert_called_once_with(41)
+
+
+def test_readiness_probe_binds_one_visible_window_without_enumerating_desktop(monkeypatch):
+    from contextlib import nullcontext
+
+    import uiautomation
+
+    monkeypatch.setattr(native_windows, "enumerate_windows", lambda **_kw: [_entry(7)])
+    monkeypatch.setattr(uiautomation, "UIAutomationInitializerInThread", lambda: nullcontext())
+    monkeypatch.setattr(uiautomation, "GetRootControl", _forbid_root)
+    bind = Mock(return_value=SimpleNamespace(ControlTypeName="WindowControl"))
+    monkeypatch.setattr(uiautomation, "ControlFromHandle", bind)
+    assert "no child enumeration" in diagnostics._test_uia()
+    bind.assert_called_once_with(7)

@@ -3,10 +3,249 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from types import SimpleNamespace
+from unittest.mock import Mock
 
+import pytest
 from PIL import Image, ImageDraw
 
 from easy_uiauto.mcp import interaction_learning, knowledge
+
+
+def test_exploration_ignores_commands_not_observed_in_current_scan(monkeypatch, tmp_path):
+    directory = knowledge.initialize_app("example", "Example", tmp_path)
+    record = {**_record(), "risk": "safe"}
+    knowledge.save_control(directory, record)
+    knowledge.rebuild_index(directory)
+    monkeypatch.setattr(interaction_learning.scanner, "scan_window", lambda *_a, **_kw: dict(
+        app_id="example", page_id="main", observed_control_ids=[]))
+    learn = Mock(side_effect=AssertionError("Closed popup item selected from history"))
+    monkeypatch.setattr(interaction_learning, "learn_command_effect", learn)
+    result = interaction_learning.explore_application(directory, "url", "key", "model", "version")
+    assert result["ok"] and result["actions_learned"] == 0
+    learn.assert_not_called()
+
+
+def test_parent_candidate_list_does_not_repeat_action_already_run_in_nested_page(
+        monkeypatch, tmp_path):
+    directory = knowledge.initialize_app("example", "Example", tmp_path)
+    commands = [dict(command=f"main.menu.{intent}.click", intent=intent, action="click",
+                     risk="safe", page="main") for intent in ("open-help", "read-more")]
+    monkeypatch.setattr(knowledge, "available_commands", lambda *_a: commands)
+    monkeypatch.setattr(interaction_learning.scanner, "scan_window", lambda *_a, **_kw: dict(
+        app_id="example", page_id="main"))
+    attempted = []
+
+    def learn(_directory, command, *_a, post_effect=None, **_kw):
+        attempted.append(command)
+        if "open-help" in command:
+            post_effect(dict(window_name="Example", window_changes={"added": []}))
+        return dict(command=command, recovery={"ok": True})
+
+    monkeypatch.setattr(interaction_learning, "learn_command_effect", learn)
+    result = interaction_learning.explore_application(directory, "url", "key", "model", "version")
+    assert result["ok"] and result["actions_learned"] == 2
+    assert attempted == [item["command"] for item in commands]
+
+
+@pytest.mark.parametrize("status", [
+    "effect-observed", "no-observable-change", "interference-detected"])
+@pytest.mark.parametrize("renamed", [False, True, "new-id"])
+def test_explore_does_not_repeat_previous_attempt_even_if_scan_renames_command(
+        monkeypatch, tmp_path, status, renamed):
+    directory = knowledge.initialize_app("example", "Example", tmp_path)
+    record = {**_record(), "risk": "safe"}
+    knowledge.save_control(directory, record)
+    command = record["command"] + ".click"
+    knowledge.save_interaction(directory, dict(
+        id="prior", app_id="example", page_id="main", command=command,
+        control_id=record["id"], status=status))
+    if renamed == "new-id":
+        knowledge.save_control(directory, {**record, "id": "new-id", "command": "main.other.alias"})
+    elif renamed:
+        knowledge.save_control(directory, {**record, "command": "main.other.alias"})
+    knowledge.rebuild_index(directory)
+    monkeypatch.setattr(interaction_learning.scanner, "scan_window", lambda *_a, **_kw: dict(
+        app_id="example", page_id="main", commands=1))
+    learn = Mock(side_effect=AssertionError("Previously attempted control repeated"))
+    monkeypatch.setattr(interaction_learning, "learn_command_effect", learn)
+    result = interaction_learning.explore_application(directory, "url", "key", "model", "version")
+    assert result["ok"] and result["actions_learned"] == 0
+    learn.assert_not_called()
+    assert len(knowledge.list_interactions(directory)) == 1
+
+
+def test_explore_deduplication_includes_history_older_than_500_records(monkeypatch, tmp_path):
+    directory = knowledge.initialize_app("example", "Example", tmp_path)
+    command = "main.menu.open-help.click"
+    history = [dict(page_id="main", command=command, status="no-observable-change")]
+    history += [dict(page_id="other", command=f"other.menu.item-{i}.click",
+                     status="effect-observed") for i in range(501)]
+    monkeypatch.setattr(knowledge, "load_index", lambda *_a: dict(
+        application={"name": "Example"}, interactions=history))
+    monkeypatch.setattr(knowledge, "available_commands", lambda *_a: [dict(
+        command=command, page="main", action="click", intent="open-help", risk="safe")])
+    monkeypatch.setattr(interaction_learning.scanner, "scan_window", lambda *_a, **_kw: dict(
+        app_id="example", page_id="main"))
+    learn = Mock(side_effect=AssertionError("Old interaction was repeated"))
+    monkeypatch.setattr(interaction_learning, "learn_command_effect", learn)
+    result = interaction_learning.explore_application(directory, "url", "key", "model", "version")
+    assert result["actions_learned"] == 0
+    learn.assert_not_called()
+
+
+@pytest.mark.parametrize("automation_id,name", [
+    ("Restore", "Generic"), ("Close", "Generic"), ("Maximize", "Generic"),
+    ("Minimize", "Generic"), ("Button", "还原"), ("Button", "最大化")])
+def test_safe_exploration_excludes_window_state_buttons_even_when_semantics_say_safe(
+        monkeypatch, tmp_path, automation_id, name):
+    directory = knowledge.initialize_app("example", "Example", tmp_path)
+    record = {**_record(), "risk": "safe", "intent": "window-control", "name": name,
+              "automation_id": automation_id}
+    knowledge.save_control(directory, record)
+    knowledge.rebuild_index(directory)
+    monkeypatch.setattr(interaction_learning.scanner, "scan_window", lambda *_a, **_kw: dict(
+        app_id="example", page_id="main", commands=1))
+    learn = Mock(side_effect=AssertionError("Window restore button must be excluded"))
+    monkeypatch.setattr(interaction_learning, "learn_command_effect", learn)
+    result = interaction_learning.explore_application(directory, "url", "key", "model", "version")
+    assert result["actions_learned"] == 0
+    learn.assert_not_called()
+
+
+def test_new_unrelated_foreground_is_interference_not_an_allowed_popup(monkeypatch, tmp_path):
+    directory = knowledge.initialize_app("example", "Example", tmp_path)
+    record = _record()
+    knowledge.save_control(directory, record)
+    knowledge.rebuild_index(directory)
+    before, after = _snapshot(_image(), "before"), _snapshot(_image(True), "after")
+    before["target_handle"] = after["target_handle"] = 1
+    target = dict(handle=1, title="Example", process_id=10, owner_handle=0,
+                  rect=before["window_rect"], foreground=True)
+    other = {**target, "handle": 2, "title": "Other app", "process_id": 20}
+    before["windows"] = [target]
+    after["windows"] = [{**target, "foreground": False}, other]
+    monkeypatch.setattr(interaction_learning.scanner, "_find_window", lambda *_a: object())
+    monkeypatch.setattr(interaction_learning.scanner, "_activate_window", lambda *_a: None)
+    monkeypatch.setattr(interaction_learning, "capture_snapshot", lambda *_a: before)
+    monkeypatch.setattr(interaction_learning, "wait_for_stability", lambda *_a, **_kw: (
+        after, {"stable": True, "observed_windows": []}))
+    monkeypatch.setattr(interaction_learning.ui_cli, "execute", lambda *_a, **_kw: {"ok": True})
+    forbidden = Mock(side_effect=AssertionError("Interference must stop analysis and recovery"))
+    for name in ("_interpret_effects", "_popup_controls", "_attempt_recovery"):
+        monkeypatch.setattr(interaction_learning, name, forbidden)
+    discover = Mock()
+    result = interaction_learning.learn_command_effect(
+        directory, record["command"] + ".click", "url", "key", "model", "version",
+        recover=True, post_effect=discover)
+    assert result["status"] == "interference-detected"
+    assert result["recovery"]["ok"] is False
+    forbidden.assert_not_called()
+    discover.assert_not_called()
+
+
+@pytest.mark.parametrize("disabled_state", [
+    {"is_enabled_at_scan": False}, {"current_state": "disabled"}])
+def test_exploration_skips_disabled_controls_and_continues_to_enabled_actions(
+        monkeypatch, tmp_path, disabled_state):
+    directory = knowledge.initialize_app("example", "Example", tmp_path)
+    disabled = {**_record(), **disabled_state, "risk": "safe"}
+    enabled = {**_record(), "id": "help", "command": "main.menu.open-help",
+               "intent": "open-help", "risk": "safe", "is_enabled_at_scan": True}
+    knowledge.save_control(directory, disabled)
+    knowledge.save_control(directory, enabled)
+    knowledge.rebuild_index(directory)
+    monkeypatch.setattr(interaction_learning.scanner, "scan_window", lambda *_a, **_kw: dict(
+        app_id="example", page_id="main"))
+    learn = Mock(return_value={"recovery": {"ok": True}})
+    monkeypatch.setattr(interaction_learning, "learn_command_effect", learn)
+    result = interaction_learning.explore_application(directory, "url", "key", "model", "version")
+    assert result["ok"] and result["actions_learned"] == 1
+    assert learn.call_args.args[1] == "main.menu.open-help.click"
+
+
+@pytest.mark.parametrize("intent,name", [
+    ("new-window", "New window"), ("new-file", "New"),
+    ("new-document", "New document"), ("generic", "新建窗口")])
+def test_exploration_excludes_new_documents_without_escape_reversal(
+        monkeypatch, tmp_path, intent, name):
+    directory = knowledge.initialize_app("example", "Example", tmp_path)
+    knowledge.save_control(directory, {**_record(), "risk": "safe", "intent": intent,
+                                       "name": name})
+    knowledge.rebuild_index(directory)
+    monkeypatch.setattr(interaction_learning.scanner, "scan_window", lambda *_a, **_kw: dict(
+        app_id="example", page_id="main"))
+    learn = Mock(side_effect=AssertionError("Cannot recover a new document with Escape"))
+    monkeypatch.setattr(interaction_learning, "learn_command_effect", learn)
+    result = interaction_learning.explore_application(directory, "url", "key", "model", "version")
+    assert result["ok"] and result["actions_learned"] == 0
+    learn.assert_not_called()
+
+
+def test_recovery_withholds_keys_when_target_cannot_be_activated(monkeypatch):
+    monkeypatch.setattr(interaction_learning.scanner, "_find_window", lambda *_a: SimpleNamespace(
+        NativeWindowHandle=42))
+    monkeypatch.setattr(interaction_learning.scanner, "_activate_window", Mock(
+        side_effect=RuntimeError("Foreground lock")))
+    press, hotkey = Mock(), Mock()
+    monkeypatch.setattr(interaction_learning.pyautogui, "press", press)
+    monkeypatch.setattr(interaction_learning.pyautogui, "hotkey", hotkey)
+    result = interaction_learning._attempt_recovery("Example", {"target_handle": 42}, {}, "click")
+    assert result["ok"] is False and "withheld" in result["detail"]
+    press.assert_not_called()
+    hotkey.assert_not_called()
+
+
+def test_recovery_activates_owned_modal_instead_of_disabled_owner(monkeypatch):
+    owner = SimpleNamespace(NativeWindowHandle=42, IsEnabled=False)
+    dialog = SimpleNamespace(NativeWindowHandle=43, IsEnabled=True)
+    monkeypatch.setattr(interaction_learning.scanner, "_find_window", lambda *_a: owner)
+    monkeypatch.setattr(interaction_learning.native_windows, "enumerate_windows", lambda **_kw: [
+        dict(handle=99, title="Unrelated", owner_handle=0, enabled=True,
+             bounds=dict(width=100, height=100)),
+        dict(handle=43, title="About", owner_handle=42, enabled=True,
+             bounds=dict(width=100, height=100))])
+    monkeypatch.setattr(interaction_learning.uiautomation, "ControlFromHandle", lambda handle: (
+        dialog if handle == 43 else pytest.fail("Unrelated window selected")))
+    activation, press, hotkey = Mock(), Mock(), Mock()
+    monkeypatch.setattr(interaction_learning.scanner, "_activate_window", activation)
+    monkeypatch.setattr(interaction_learning.pyautogui, "press", press)
+    monkeypatch.setattr(interaction_learning.pyautogui, "hotkey", hotkey)
+    image = _image()
+    monkeypatch.setattr(interaction_learning, "wait_for_stability", lambda *_a, **_kw: (
+        {"_target_image": image}, {"stable": True}))
+    result = interaction_learning._attempt_recovery(
+        "Example", dict(target_handle=42, _target_image=image), {}, "click")
+    assert result["ok"] is True
+    activation.assert_called_once_with(dialog)
+    press.assert_called_once_with("esc")
+    hotkey.assert_not_called()
+
+
+def test_nested_discovery_failure_withholds_parent_recovery(monkeypatch, tmp_path):
+    directory = knowledge.initialize_app("example", "Example", tmp_path)
+    record = _record()
+    knowledge.save_control(directory, record)
+    knowledge.rebuild_index(directory)
+    before, after = _snapshot(_image(), "before"), _snapshot(_image(True), "after")
+    monkeypatch.setattr(interaction_learning.scanner, "_find_window", lambda *_a: object())
+    monkeypatch.setattr(interaction_learning.scanner, "_activate_window", lambda *_a: None)
+    monkeypatch.setattr(interaction_learning, "capture_snapshot", lambda *_a: before)
+    monkeypatch.setattr(interaction_learning, "wait_for_stability", lambda *_a, **_kw: (
+        after, {"stable": True, "observed_windows": []}))
+    monkeypatch.setattr(interaction_learning.ui_cli, "execute", lambda *_a, **_kw: {"ok": True})
+    monkeypatch.setattr(interaction_learning, "_controls_in_changed_regions", lambda *_a: [])
+    monkeypatch.setattr(interaction_learning, "_interpret_effects", lambda *_a: dict(
+        effects=[], summary="Menu opened", confidence=.9, success_condition="Menu visible"))
+    monkeypatch.setattr(interaction_learning, "_navigation_likely", lambda *_a: True)
+    recovery = Mock(side_effect=AssertionError("Unsafe parent recovery"))
+    monkeypatch.setattr(interaction_learning, "_attempt_recovery", recovery)
+    result = interaction_learning.learn_command_effect(
+        directory, record["command"] + ".click", "url", "key", "model", "version",
+        recover=True, post_effect=lambda *_a: dict(ok=False, stopped="Child interference"))
+    assert result["recovery"]["ok"] is False
+    assert "Nested discovery stopped" in result["recovery"]["detail"]
+    recovery.assert_not_called()
 
 
 def _image(changed: bool = False) -> Image.Image:

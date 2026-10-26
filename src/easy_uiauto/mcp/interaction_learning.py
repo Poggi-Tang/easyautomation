@@ -17,13 +17,18 @@ from urllib import request as urlrequest
 import pyautogui
 import uiautomation
 
-from . import configuration, knowledge, native_windows, scanner, ui_cli
+from . import configuration, image_storage, knowledge, native_windows, scanner, ui_cli
 
 BLOCKED_INTENT = re.compile(
     r"(send|publish|post|purchase|pay|delete|remove|upload|logout|log-out|close-window|exit)",
     re.IGNORECASE,
 )
 SAFE_ACTIONS = {"click", "double-click", "right-click", "hover"}
+WINDOW_STATE_ACTION = re.compile(
+    r"maximi[sz]e|minimi[sz]e|restore[-_ ]?(?:window)?|resize[-_ ]?window|"
+    r"close[-_ ]?window|最大化|最小化|还原|恢复窗口|关闭窗口", re.IGNORECASE)
+NEW_DOCUMENT_ACTION = re.compile(
+    r"new[-_ ]?(?:window|file|document)|新建窗口|新建文档|新建文件", re.IGNORECASE)
 
 
 def _owner_handle(handle: int) -> int:
@@ -479,8 +484,6 @@ def _save_interaction_images(
     before: dict,
     after: dict,
 ) -> dict:
-    image_dir = directory / "images" / "interactions" / interaction_id
-    image_dir.mkdir(parents=True, exist_ok=True)
     paths = {}
     for name, image in (
         ("before", before["_target_image"]),
@@ -488,9 +491,7 @@ def _save_interaction_images(
         ("desktop-before", before["_desktop_image"]),
         ("desktop-after", after["_desktop_image"]),
     ):
-        path = image_dir / f"{name}.png"
-        image.save(path)
-        paths[name.replace("-", "_")] = str(path.relative_to(directory)).replace("\\", "/")
+        paths[name.replace("-", "_")] = image_storage.save_interaction_image(directory, image)
     return paths
 
 
@@ -515,8 +516,37 @@ def _attempt_recovery(
                 ),
             ),
         )
-    methods.append(("browser-back", lambda: pyautogui.hotkey("alt", "left")))
     for method, operation in methods:
+        try:
+            window = scanner._find_window(window_name)
+            expected = int(before.get("target_handle", 0) or 0)
+            if expected and int(getattr(window, "NativeWindowHandle", 0) or 0) != expected:
+                raise RuntimeError("The original target window was replaced")
+            recovery_window = window
+            if not bool(getattr(window, "IsEnabled", True)):
+                # A modal dialog disables its owner. Activating the disabled owner
+                # can appear to succeed while Escape is sent behind the dialog.
+                owner = int(getattr(window, "NativeWindowHandle", 0) or 0)
+                entries = native_windows.enumerate_windows(visible_only=True)
+                owned = {owner}
+                for _ in entries:
+                    descendants = {entry["handle"] for entry in entries
+                                   if entry.get("owner_handle") in owned}
+                    if descendants <= owned:
+                        break
+                    owned |= descendants
+                dialogs = [entry for entry in entries if entry["handle"] != owner
+                           and entry["handle"] in owned and entry.get("enabled")
+                           and entry.get("bounds", {}).get("width", 0) > 1
+                           and entry.get("bounds", {}).get("height", 0) > 1
+                           and entry.get("title")]
+                if not dialogs:
+                    raise RuntimeError("Disabled target has no verified owned modal window")
+                recovery_window = uiautomation.ControlFromHandle(dialogs[0]["handle"])
+            scanner._activate_window(recovery_window)
+        except Exception as error:
+            return {"ok": False, "attempts": attempts, "method": method,
+                    "detail": f"Recovery input withheld: {error}"}
         operation()
         time.sleep(0.15)
         try:
@@ -559,6 +589,22 @@ def _navigation_likely(context: dict) -> bool:
     )
 
 
+def _related_window_handles(before: dict, after: dict) -> set[int]:
+    """A newly appearing unrelated application is not a permitted target popup."""
+    handles = {int(s.get("target_handle", 0) or 0) for s in (before, after)} - {0}
+    entries = before.get("windows", []) + after.get("windows", [])
+    process_ids = {e.get("process_id") for e in entries
+                   if e.get("handle") in handles and e.get("process_id")}
+    for _ in range(len(entries) + 1):
+        related = {e["handle"] for e in entries if e.get("handle") and (
+            e.get("owner_handle") in handles or e.get("process_id") in process_ids)}
+        if related <= handles:
+            break
+        handles |= related
+    return handles
+
+
+@image_storage.serialized_learning
 def learn_command_effect(
     directory: Path,
     command: str,
@@ -600,13 +646,23 @@ def learn_command_effect(
     progress(f"Inspecting changed regions after {command}")
     regions = changed_regions(before["_target_image"], after["_target_image"])
     window_changes = _window_differences(before["windows"], after["windows"])
-    changed_controls = _controls_in_changed_regions(
+    allowed_foreground = _related_window_handles(before, after)
+    foreground_after = next(
+        (item.get("handle") for item in after["windows"] if item.get("foreground")), 0)
+    interference = {
+        "detected": bool(foreground_after and foreground_after not in allowed_foreground),
+        "detail": "foreground moved to an unrelated window during observation"
+        if foreground_after and foreground_after not in allowed_foreground else ""}
+    related_changes = {**window_changes, "added": [
+        entry for entry in window_changes.get("added", [])
+        if entry.get("handle") in allowed_foreground]}
+    changed_controls = [] if interference["detected"] else _controls_in_changed_regions(
         after["window_name"],
         after["window_rect"],
         regions,
     )
-    popup_controls = _popup_controls(window_changes)
-    popup_images = _popup_images(after, window_changes)
+    popup_controls = [] if interference["detected"] else _popup_controls(related_changes)
+    popup_images = [] if interference["detected"] else _popup_images(after, related_changes)
     action_property_changes = {
         key: {
             "before": before["action_control"].get(key),
@@ -615,8 +671,11 @@ def learn_command_effect(
         for key in set(before["action_control"]) | set(after["action_control"])
         if before["action_control"].get(key) != after["action_control"].get(key)
     }
-    progress(f"Understanding operation effect for {command} with remote AI")
-    interpretation = _interpret_effects(
+    progress("Stopping effect learning after foreground interference" if interference["detected"]
+             else f"Understanding operation effect for {command} with remote AI")
+    interpretation = (dict(effects=[], summary="Interference detected; effect not attributed",
+                           confidence=0, success_condition="")
+                      if interference["detected"] else _interpret_effects(
         before["_target_image"],
         after["_target_image"],
         regions,
@@ -630,7 +689,7 @@ def learn_command_effect(
         api_key,
         model,
         version,
-    )
+    ))
     change_ratio = image_change_ratio(before["_target_image"], after["_target_image"])
     effect_context = {
         "command": command,
@@ -639,12 +698,12 @@ def learn_command_effect(
         "after_state_id": after["state_id"],
         "window_name": after["window_name"],
         "target_handle": after.get("target_handle", 0),
-        "window_changes": window_changes,
+        "window_changes": related_changes,
         "effects": interpretation["effects"],
         "image_change_ratio": round(change_ratio, 6),
     }
     discovery = {"attempted": False}
-    if post_effect and _navigation_likely(effect_context):
+    if post_effect and not interference["detected"] and _navigation_likely(effect_context):
         try:
             discovery = {"attempted": True, **post_effect(effect_context)}
         except Exception as error:
@@ -668,24 +727,14 @@ def learn_command_effect(
         for item in stability.get("observed_windows", [])
         if item.get("handle") in transient_handles
     ]
-    foreground_after = next(
-        (item.get("handle") for item in after["windows"] if item.get("foreground")),
-        0,
-    )
-    allowed_foreground = {after.get("target_handle", 0)} | {
-        item.get("handle", 0) for item in window_changes.get("added", [])
-    }
-    interference = {
-        "detected": bool(foreground_after and foreground_after not in allowed_foreground),
-        "detail": (
-            "foreground moved to an unrelated window during observation"
-            if foreground_after and foreground_after not in allowed_foreground
-            else ""
-        ),
-    }
     if recover:
         progress(f"Recovering previous UI state after {command}")
-    recovery = _attempt_recovery(
+    recovery = {"ok": False, "detail": (
+        "Interference detected; no recovery input was sent" if interference["detected"]
+        else "Nested discovery stopped; no parent recovery input was sent")
+    } if (
+        recover and (interference["detected"] or discovery.get("ok") is False)
+    ) else _attempt_recovery(
         record["app_name"],
         before,
         record["location"],
@@ -702,6 +751,8 @@ def learn_command_effect(
         "semantic_name": record.get("semantic_name") or command,
         "command": command,
         "control_id": record["id"],
+        "control_anchor": knowledge.control_anchor(record),
+        "action": _action,
         "status": (
             "interference-detected"
             if interference["detected"]
@@ -750,10 +801,15 @@ def learn_command_effect(
             "last_effect_observed_at": knowledge.utc_now(),
         }
         knowledge.save_control(directory, updated)
+    try:
+        storage_result = image_storage.cleanup_images(directory, dry_run=False)
+    except (OSError, ValueError) as error:
+        storage_result = {"ok": False, "detail": f"Image cleanup deferred: {error}"}
     knowledge.rebuild_index(directory)
     return {
         "ok": True,
         "interaction_id": interaction_id,
+        "image_storage": storage_result,
         "command": command,
         "status": interaction["status"],
         "before_state_id": before["state_id"],
@@ -791,23 +847,52 @@ def explore_application(
     if policy not in {"safe", "supervised"}:
         raise ValueError("policy must be safe or supervised")
     pending = []
-    learned_pairs = {
-        (item.get("page_id"), item.get("command"))
-        for item in knowledge.list_interactions(directory, limit=500)
-        if item.get("status") == "effect-observed"
-    }
+    index = knowledge.load_index(directory)
+    history = index.get("interactions", [])
+    attempted_pairs = {(item.get("page_id"), item.get("command")) for item in history}
+    attempted_controls = {(item.get("control_id"), item.get("command", "").rsplit(".", 1)[-1])
+                          for item in history if item.get("control_id")}
+    controls_by_id = {item.get("id"): item for item in index.get("controls", [])}
+    attempted_anchors = set()
+    for item in history:
+        anchor = item.get("control_anchor") or knowledge.control_anchor(
+            controls_by_id.get(item.get("control_id"), {}))
+        if anchor:
+            attempted_anchors.add((tuple(anchor), item.get("action") or
+                                   item.get("command", "").rsplit(".", 1)[-1]))
     results = []
     stopped = []
     visited = set()
+    observed_by_page: dict[str, set[str]] = {}
+    actions_started = 0
     action_limit = max(1, min(int(max_actions), 100))
     depth_limit = max(1, min(int(max_depth), 8))
 
     def candidates_for_page(page_id: str) -> list[dict]:
+        controls_by_id.update({control.get("id"): control for control in
+                               knowledge.load_index(directory).get("controls", [])})
         candidates = []
         for item in knowledge.available_commands(directory, page_id):
+            control = controls_by_id.get(item.get("control_id"), {})
+            if (page_id in observed_by_page
+                    and item.get("control_id") not in observed_by_page[page_id]):
+                continue
+            if (control.get("is_enabled_at_scan") is False
+                    or item.get("current_state") == "disabled"):
+                continue
             if item["action"] not in SAFE_ACTIONS or BLOCKED_INTENT.search(
                 item.get("intent", "")
             ):
+                continue
+            if WINDOW_STATE_ACTION.search(" ".join(str(item.get(key) or "") for key in (
+                    "intent", "semantic_name", "automation_id", "name"))):
+                continue
+            if NEW_DOCUMENT_ACTION.search(" ".join(str(item.get(key) or "") for key in (
+                    "intent", "semantic_name", "name"))):
+                continue
+            if (str(item.get("automation_id", "")).casefold() in {
+                    "close", "maximize", "minimize", "restore"}
+                    or item.get("control_type") == "TitleBarControl"):
                 continue
             if item.get("requires_confirmation"):
                 pending.append(item["command"])
@@ -820,13 +905,15 @@ def explore_application(
             }:
                 pending.append(item["command"])
                 continue
-            pair = (item.get("page"), item.get("command"))
-            if pair in learned_pairs or pair in visited:
+            pair = (item.get("page") or page_id, item.get("command"))
+            control_pair = (item.get("control_id"), item.get("action"))
+            anchor = knowledge.control_anchor(controls_by_id.get(item.get("control_id"), {}))
+            if (pair in attempted_pairs or pair in visited or control_pair in attempted_controls
+                    or (anchor, item.get("action")) in attempted_anchors):
                 continue
             candidates.append(item)
         return candidates
 
-    index = knowledge.load_index(directory)
     app_name = index.get("application", {}).get("name", "")
     if not app_name:
         raise RuntimeError("application knowledge has no window name")
@@ -844,21 +931,34 @@ def explore_application(
     if initial_scan.get("app_id") != directory.name:
         raise RuntimeError("visible window does not match the selected application knowledge")
     initial_pages = [initial_scan["page_id"]]
+    if "observed_control_ids" in initial_scan:
+        observed_by_page[initial_scan["page_id"]] = set(initial_scan["observed_control_ids"])
     considered = sum(len(candidates_for_page(page)) for page in initial_pages)
     planned = min(considered, action_limit)
     progress(f"Exploring actions 0/{planned}")
 
     def explore_page(page_id: str, depth: int) -> list[dict]:
+        nonlocal actions_started
         nested_results = []
-        if depth > depth_limit or len(results) >= action_limit or stopped:
+        if depth > depth_limit or actions_started >= action_limit or stopped:
             return nested_results
         for item in candidates_for_page(page_id):
-            if len(results) >= action_limit or stopped:
+            if actions_started >= action_limit or stopped:
                 break
-            pair = (item.get("page"), item.get("command"))
+            # Nested exploration may have attempted an item from this frozen list.
+            if not any(current["command"] == item["command"]
+                       for current in candidates_for_page(page_id)):
+                continue
+            pair = (item.get("page") or page_id, item.get("command"))
             visited.add(pair)
+            actions_started += 1
+            if item.get("control_id"):
+                attempted_controls.add((item["control_id"], item.get("action")))
+                anchor = knowledge.control_anchor(controls_by_id.get(item["control_id"], {}))
+                if anchor:
+                    attempted_anchors.add((anchor, item.get("action")))
             progress(
-                f"Exploring action {len(results) + 1}/{planned}: {item['command']}"
+                f"Exploring action {actions_started}/{action_limit}: {item['command']}"
             )
 
             def discover(context: dict) -> dict:
@@ -886,6 +986,8 @@ def explore_application(
                     )
                     if scan.get("app_id") != directory.name:
                         continue
+                    if "observed_control_ids" in scan:
+                        observed_by_page[scan["page_id"]] = set(scan["observed_control_ids"])
                     scans.append(
                         {
                             key: scan.get(key)
@@ -900,7 +1002,9 @@ def explore_application(
                         }
                     )
                     nested_results.extend(explore_page(scan["page_id"], depth + 1))
-                return {"ok": True, "scans": scans, "nested_actions": len(nested_results)}
+                return {"ok": not stopped, "scans": scans,
+                        "nested_actions": len(nested_results),
+                        "stopped": stopped[0] if stopped else ""}
 
             try:
                 learned = learn_command_effect(
@@ -920,6 +1024,9 @@ def explore_application(
                 break
             results.append(learned)
             nested_results.append(learned)
+            if learned.get("interference", {}).get("detected"):
+                stopped.append(f"interference detected after {item['command']}")
+                break
             if learned["recovery"].get("ok") is False:
                 stopped.append(f"recovery failed after {item['command']}")
                 break
@@ -927,7 +1034,7 @@ def explore_application(
 
     for page_id in initial_pages:
         explore_page(page_id, 1)
-        if len(results) >= action_limit or stopped:
+        if actions_started >= action_limit or stopped:
             break
     return {
         "ok": not stopped,

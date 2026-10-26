@@ -310,11 +310,53 @@ Only independently verified locators produce executable commands. Desktop items
 supplemented from native names retain unknown risk and confirmation flags; their
 opening effects have not been tested.
 
+`get_control_tree` selects a visible window using Win32 and binds UIA only to its
+handle. It runs in a disposable process without activating/restoring the window.
+The defaults are `max_depth=5` (capped at 10), `max_nodes=500` (up to 5000), and
+`timeout_seconds=15` (0.1–60, including worker startup). Child enumeration stops
+at depth/node limits. Successful trees include `_inspection` with reached limits
+and provider errors. A blocked provider returns `ok=false`, `code="timeout"`,
+and the latest partial tree/checkpoint in `data`; only its worker is stopped.
+`get_ui_learning_status` tracks learning tasks, not this inspection call.
+
 MCP scans report their task ID, stage, elapsed time, and control-verification count
 every five seconds. If a client stops waiting, call `get_ui_learning_status` before
 retrying. A `running` task continues in the MCP process and must not be started twice.
 Plain learning requests stop after this scan. Interactive `explore_ui_workflows`
 runs only when deep or autonomous exploration is explicitly requested.
+
+Runtime verification failures stay quarantined across rescans, index rebuilds and
+semantic teaching. After repairing the locator or restoring the required visible
+page, call `revalidate_ui_control(app_id=..., control_id=...)` for a fresh check.
+It executes no control action and requires LOCATION/image evidence; OCR alone
+cannot release quarantine. Original failure evidence remains in the record.
+Automatic exploration skips previously attempted control/action pairs, including
+no-change and interference records. Explicit `learn_ui_command_effect` remains
+available for intentional repeated observations. Window activation preserves
+maximization; an unrelated foreground window stops discovery and recovery input.
+
+Named native menu, button, checkbox and radio actions are cross-checked against
+their UIA labels, with common
+Chinese/English action aliases and accelerator suffix normalization. For example,
+Select all must not become Go to, nor Close become Maximize. Conflicting visual
+observations remain diagnostics. Visual-first scans supplement actions from a
+bounded shallow menu/titlebar UIA inventory of the target window, without desktop
+root enumeration. Execution repeats the identity check; a known contradiction
+cannot fall through to image/OCR matching, including legacy records after an
+index rebuild. These checks cover common action labels, not every custom control.
+Exploration selects only currently observed controls and excludes disabled
+actions and new documents/windows without an Escape reversal. A nested stop also
+withholds parent recovery input.
+Known input labels such as Find what and Replace with provide independent native
+evidence; editable content is not action identity. Disabled owners recover through
+verified owned modal windows, without generic browser-back keys. Learning owned
+dialogs preserves the application's main window name. Parent candidates are
+checked again after recursive exploration to avoid repeating a nested action.
+
+Client tool-call timeout does not mean the worker stopped: query
+`get_ui_learning_status` before retrying. Killing the MCP process ends its workers
+and loses in-memory task status. Markdown files use UTF-8; when inspecting them in
+PowerShell, use `Get-Content -Encoding UTF8` to avoid console decoding errors.
 
 Use `--strategy full-uia` for diagnostics when visual targeting is not suitable.
 This mode walks the visible UIA tree and performs a separate semantic pass, so it
@@ -521,6 +563,29 @@ applications/<app-id>/
 `.easy_uiauto/index.json` is a disposable search cache. Rebuild it with
 `easy_uiauto_ui reindex <app-id>` after editing Markdown by hand.
 
+Image cleanup runs after a scan or an effect-learning record is committed. Each
+control keeps its current template and up to eight recent distinct image states;
+unused older state files are removed from disk. New interaction snapshots use PNG
+content hashes, so identical before/after or desktop images share one file.
+By default, image sets are retained for the latest 50 interactions. Textual
+interaction records remain available after their images expire.
+
+Referenced evidence, interactions marked `retain_images: true`, and the latest
+available failed interaction for each control/action are protected, even outside
+these limits. Active legacy quarantines without an image manifest are preserved
+conservatively. Set `EASY_UIAUTO_CONTROL_IMAGE_VARIANTS` (default `8`, minimum `1`)
+and `EASY_UIAUTO_INTERACTION_IMAGE_RECORDS` (default `50`, minimum `0`) to change
+the defaults. These are retention limits, not a hard storage quota.
+
+For an existing app, call
+`cleanup_ui_knowledge_images(app_id="notepad")` to preview the files and bytes
+eligible for removal, then pass `dry_run=false` to apply the cleanup. Optional
+`keep_control_variants` and `keep_interaction_images` override the limits for
+that call. Collection checks Markdown/YAML references and only removes managed
+PNGs in that application's control/interaction image directories. Page images
+and other apps are excluded. Unreadable knowledge defers cleanup; a per-vault
+file lock prevents cooperating MCP writers from losing pending images.
+
 Control and region geometry is stored only as a window-relative `normalized_rect`
 with `geometry_role: visual-hint-only`. It is useful for annotations and visual
 comparison, but never identifies or clicks a control. Live overlays and operations
@@ -549,7 +614,7 @@ The same workflow is exposed through `get_ui_learning_readiness`,
 `list_ui_commands`,
 `run_ui_command`, `run_ui_commands`, `learn_ui_command_effect`,
 `explore_ui_workflows`, `list_ui_interactions`, `teach_ui_control`, and
-`rebuild_ui_knowledge_index`.
+`rebuild_ui_knowledge_index`, and `cleanup_ui_knowledge_images`.
 
 `--full-setup-codex` installs or updates both bundled skills. Use
 `--install-codex-skills` when only the skills need to be refreshed.
@@ -587,6 +652,29 @@ remain supported. A present AutomationId is tried before the stored XPath and ig
 dynamic Name, `foundIndex`, and recorded geometry; XPath handles missing or duplicate IDs.
 
 ## 🧰 Python API Examples
+
+### Import MCP tools in Python
+
+Starting with 0.9.2, all 54 MCP tools are importable from `easy_uiauto.mcp` after
+installing or upgrading `easy-uiauto[mcp]>=0.9.2`. Source checkout users should install `-e ".[mcp]"` in the
+same interpreter selected by their editor.
+
+```python
+import json
+from easy_uiauto.mcp import list_windows, get_control_tree, find_control
+
+print(json.loads(list_windows()))
+# Use an actual window title and control properties returned by inspection.
+tree = json.loads(get_control_tree("Your file.txt - Notepad", max_nodes=500, timeout_seconds=15))
+```
+
+Imports call the functions in your Python process without starting an MCP server.
+Most tools return JSON strings; `take_screenshot` returns an MCP Image object.
+Await `scan_window_knowledge`, `explore_ui_workflows`, `analyze_ui_image`, and
+`correct_ui_image_annotations`; `ctx` may be omitted in ordinary Python.
+The traditional package-root Controller API remains available.
+Run `python demo/mcp_import.py --list-tools` to list the exports. See the
+[complete import guide and interpreter checks](docs/python-imports.zh-CN.md).
 
 ### Basic Control Operations
 
