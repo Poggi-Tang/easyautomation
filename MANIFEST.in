@@ -2,5 +2,7 @@ include annotate-image.cmd
 include README.zh-CN.md
 include CHANGELOG.md
 include demo/mcp_import.py
+include src/easy_uiauto/highlight.py
+include src/easy_uiauto/_highlight_worker.py
 recursive-include scripts *.py
 recursive-include docs *.md

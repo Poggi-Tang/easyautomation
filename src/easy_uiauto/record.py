@@ -5,12 +5,10 @@
 # @depict:  录制线程
 import threading
 import time
-from queue import Queue, Empty
-import tkinter as tk
 from comtypes import CoInitialize, CoUninitialize
 from pynput import mouse, keyboard
 from pynput.mouse import Button
-from .draw import ScreenLineBox
+from .highlight import HighlightProcess
 from .utils import VK_KEY_NAME, INPUT_VK_KEY, format_action_data_by_xpath, push_message, \
     get_control_info, MODIFIER_VK
 
@@ -20,7 +18,7 @@ RUN_TIME = time.strftime("%Y%m%d%H%M%S", time.localtime())
 # ========== 录制线程 ==========
 class RecordThread(threading.Thread):
     """
-    录制动作线程 —— 已将绘制窗口替换为 ScreenLineBox (独立 UI 线程)
+    录制动作线程；高亮由独立进程负责，监听器只在启动后清理。
     """
 
     def __init__(self, action_callback=None, close_callback=None):
@@ -41,10 +39,15 @@ class RecordThread(threading.Thread):
         self.last_input_time = 0
         self.input_merge_interval = 3  # 秒
 
-        # —— 新的 UI 线程 & 指令队列 ——
-        self.ui_cmd_queue = Queue()
-        self.ui_thread = None
+        self._state_lock = threading.RLock()
+        self._stopped = False
+        self._stop_complete = threading.Event()
+        self.started = threading.Event()
+        self.run_error = None
+        self.cleanup_errors = []
+        self.ui_error = None
         self.ui_ready = threading.Event()
+        self._ui_highlight = HighlightProcess(name="easy-uiauto-record-highlight")
 
         # 监听器
         self.mouse_listener = mouse.Listener(
@@ -57,60 +60,47 @@ class RecordThread(threading.Thread):
         )
 
     def run(self):
-        # 启动 UI 线程（Tk mainloop + ScreenLineBox）
-        self.start_ui_thread()
+        try:
+            self.start_ui_thread()
+            with self._state_lock:
+                if self._stopped:
+                    return
+                self.mouse_listener.start()
+                self.keyboard_listener.start()
+                self.started.set()
+            push_message(f"\033[1;32m{'录制开始'.center(52, '-')}\033[0m")
+            while self.running:
+                time.sleep(0.05)
+        except Exception as error:
+            self.run_error = error
+            push_message(f"录制启动或运行错误: {error}")
+        finally:
+            self.started.set()
+            try:
+                self.stop()
+            except Exception as error:
+                self.run_error = self.run_error or error
+                push_message(f"录制清理错误: {error}")
 
-        self.mouse_listener.start()
-        self.keyboard_listener.start()
-
-        push_message(f"\033[1;32m{'录制开始'.center(52, '-')}\033[0m")
-
-        # 主循环 —— 这里基本只保持存活；UI 由独立线程处理
-        while self.running:
-            time.sleep(0.05)
-
-    # —— UI 线程：创建 Tk root 与 ScreenLineBox，并按队列处理命令 ——
+    # 保留旧方法名；Tk 的创建、mainloop 和销毁都在子进程主线程。
     def start_ui_thread(self):
-        def ui_thread_func():
-            root = tk.Tk()
-            root.withdraw()
-
-            # 初始不指定控件，track 模式；100ms 刷新
-            # 注意：使用默认样式：红色、线宽2、alpha=1.0
-            box = ScreenLineBox(root=root, control=None, mode="track",
-                                interval_ms=50, topmost=True)
-
-            # 处理命令队列
-            def pump():
-                try:
-                    while True:
-                        cmd = self.ui_cmd_queue.get_nowait()
-                        name = cmd.get("cmd")
-                        if name == "set_control":
-                            box.set_control(cmd.get("control"))
-                        elif name == "set_style":
-                            box.set_style(color=cmd.get("color"),
-                                          line_width=cmd.get("line_width"),
-                                          alpha=cmd.get("alpha"))
-                        elif name == "close":
-                            try:
-                                box.destroy()
-                            except Exception:
-                                pass
-                            root.after(10, root.destroy)
-                            return
-                except Empty:
-                    pass
-                root.after(16, pump)  # ~60fps 轮询队列
-
-            pump()
+        try:
+            self._ui_highlight.start(timeout=5)
+        except Exception as error:
+            self.ui_error = str(error)
+            raise
+        finally:
             self.ui_ready.set()
-            root.mainloop()
 
-        self.ui_thread = threading.Thread(target=ui_thread_func, daemon=True)
-        self.ui_thread.start()
-        # 等 UI 就绪
-        self.ui_ready.wait(timeout=5.0)
+    @property
+    def ui_process(self):
+        return self._ui_highlight.process
+
+    def _stop_ui_process(self):
+        status = self._ui_highlight.stop(timeout=2)
+        self.ui_error = status["error"]
+        if status["forced_termination"]:
+            self.cleanup_errors.append("高亮窗口进程未在超时内退出，已强制终止")
 
     # ESC 退出时
     def on_esc_exit(self, box_track, root):
@@ -124,28 +114,40 @@ class RecordThread(threading.Thread):
             pass
 
     def stop(self):
-        self.flush_last_input()
-        self.mouse_listener.stop()
-        self.keyboard_listener.stop()
-        push_message(f"\033[1;32m{'开始推送动作信息'.center(49, '-')}\033[0m")
-
-        test_id = 0
-        for action_data in self.actions_data:
-            test_id += 1
-            action_data["TEST_ID"] = str(test_id)
-            if self.action_callback:
-                self.action_callback(action_data)
-
-        if self.close_callback:
-            self.close_callback()
-
-        self.running = False
-
-        # 关闭 UI
+        with self._state_lock:
+            if self._stopped:
+                return
+            self.running = False
+            self.flush_last_input()
+            self._stopped = True
         try:
-            self.ui_cmd_queue.put({"cmd": "close"})
-        except Exception:
-            pass
+            for listener in (self.mouse_listener, self.keyboard_listener):
+                # pynput's join raises before start; partial startup is expected.
+                if listener.ident is None:
+                    continue
+                try:
+                    listener.stop()
+                    if listener.ident != threading.get_ident():
+                        listener.join(timeout=2)
+                        if listener.is_alive():
+                            self.cleanup_errors.append("监听器未在超时内退出")
+                except Exception as error:
+                    self.cleanup_errors.append(str(error))
+            push_message(f"\033[1;32m{'开始推送动作信息'.center(49, '-')}\033[0m")
+            for test_id, action_data in enumerate(self.actions_data, 1):
+                action_data["TEST_ID"] = str(test_id)
+                if self.action_callback:
+                    self.action_callback(action_data)
+            if self.close_callback:
+                self.close_callback()
+        except Exception as error:
+            self.run_error = self.run_error or error
+            raise
+        finally:
+            try:
+                self._stop_ui_process()
+            finally:
+                self._stop_complete.set()
 
     def flush_last_input(self):
         if self.last_input:
@@ -159,7 +161,7 @@ class RecordThread(threading.Thread):
             self.last_input = None
 
     # —— 替换原 frame/tracker：用 UI 指令给 ScreenLineBox 设置/跟踪控件 ——
-    def track_control(self, control):
+    def track_control(self, control, xpath=None):
         """锁定并跟踪指定控件"""
         if control and getattr(control, "ClassName", None) == 'TkChild':
             # 与原逻辑保持一致的过滤
@@ -167,7 +169,8 @@ class RecordThread(threading.Thread):
             return
 
         try:
-            self.ui_cmd_queue.put({"cmd": "set_control", "control": control})
+            if xpath:
+                self._ui_highlight.send({"cmd": "set_xpath", "xpath": xpath})
             try:
                 push_message(f"锁定控件: {control.Name} ({control.ControlTypeName})")
             except:
@@ -176,6 +179,8 @@ class RecordThread(threading.Thread):
             pass
 
     def on_click(self, x, y, button, pressed):
+        if self._stopped:
+            return
         self.flush_last_input()
         current_time = time.time()
         CoInitialize()
@@ -183,7 +188,7 @@ class RecordThread(threading.Thread):
             Xpath, control = get_control_info(x, y)
             if control:
                 # 锁定并跟踪该控件（不再 hide/show）
-                self.track_control(control)
+                self.track_control(control, Xpath)
             if button == Button.left:
                 if not self.dragging:
                     if len(Xpath) == 0:
@@ -228,9 +233,9 @@ class RecordThread(threading.Thread):
             if self.last_click_time and current_time - self.last_click_time > 0.2 and (
                     x, y) != self.last_click_position:
                 src_xpath, src_control = get_control_info(self.last_click_position[0], self.last_click_position[1])
-                self.track_control(src_control)
+                self.track_control(src_control, src_xpath)
                 dest_xpath, dest_control = get_control_info(x, y)
-                self.track_control(dest_control)
+                self.track_control(dest_control, dest_xpath)
                 if len(dest_xpath) == 0:
                     drag_parameters = {}
                 else:
@@ -264,6 +269,8 @@ class RecordThread(threading.Thread):
         return [vk for vk, name in VK_KEY_NAME.items() if name in self.pressed_keys]
 
     def on_press(self, key):
+        if self._stopped:
+            return
         try:
             if key == keyboard.Key.esc:
                 self.stop()
@@ -296,6 +303,8 @@ class RecordThread(threading.Thread):
             push_message(f"键盘按下事件处理错误: {e}")
 
     def on_release(self, key):
+        if self._stopped:
+            return
         try:
             try:
                 vk_number = key.vk
@@ -396,7 +405,7 @@ def run_record(write_file=True):
     record_help()
     # 创建录制线程
     record_thread = RecordThread(
-        action_callback=on_action_callback,
+        action_callback=on_action_callback if write_file else None,
         close_callback=on_close_callback,
     )
     try:
@@ -409,9 +418,18 @@ def run_record(write_file=True):
     except KeyboardInterrupt:
         push_message("\033[1;31mESC键: 用户中断录制\033[0m")
         record_thread.stop()
+        record_thread.join(timeout=5)
     except Exception as e:
         push_message(f"\033[1;31m录制出错 :{e}\033[0m")
         record_thread.stop()
+        raise
+
+    record_thread._stop_complete.wait(timeout=5)
+    if record_thread.run_error is not None:
+        raise RuntimeError(f"录制失败: {record_thread.run_error}") from record_thread.run_error
+    if record_thread.cleanup_errors:
+        raise RuntimeError("录制清理失败: " + "; ".join(record_thread.cleanup_errors))
+    return record_thread.actions_data
 
 
 if __name__ == '__main__':

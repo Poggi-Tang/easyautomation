@@ -144,6 +144,7 @@ class ScreenLineBox:
 
         # 状态
         self._control = control
+        self._rect_snapshot = None
         self._tracking_active = False
         self._paused_for_missing = False  # ★保留字段但不再用于暂停
         self._normal_color_cache = self.color
@@ -172,6 +173,7 @@ class ScreenLineBox:
 
     # ---------- 对外 API ----------
     def set_control(self, control):
+        self._rect_snapshot = None
         self._control = control
         rect_map = get_visible_rect_map_by_control(control) if control is not None else None
         if rect_map and rect_map['width'] > 0 and rect_map['height'] > 0:
@@ -180,6 +182,16 @@ class ScreenLineBox:
             self._update_from_rect_map(rect_map, run_occlusion_check=False)
             if self.mode == "track":
                 self._tracking_active = True
+        else:
+            self._enter_lost_mode(initial=not self._ever_drawn_valid)
+
+    def set_rect(self, rect_map):
+        """Display serializable geometry without sharing a COM control."""
+        self._control = None
+        self._rect_snapshot = dict(rect_map) if rect_map else None
+        if rect_map and rect_map.get("width", 0) > 0 and rect_map.get("height", 0) > 0:
+            self._enter_normal_mode()
+            self._update_from_rect_map(rect_map, run_occlusion_check=False)
         else:
             self._enter_lost_mode(initial=not self._ever_drawn_valid)
 
@@ -197,7 +209,8 @@ class ScreenLineBox:
                     pass
         if line_width is not None:
             self.line_w = max(1, int(line_width))
-            rect_map = get_visible_rect_map_by_control(self._control) if self._control is not None else None
+            rect_map = (get_visible_rect_map_by_control(self._control)
+                        if self._control is not None else self._rect_snapshot)
             if rect_map and rect_map['width'] > 0 and rect_map['height'] > 0:
                 self._update_from_rect_map(rect_map, run_occlusion_check=False)
 
@@ -212,6 +225,8 @@ class ScreenLineBox:
             self._tick()
 
     def destroy(self):
+        if self._destroyed:
+            return
         self._tracking_active = False
         self._destroyed = True
 
@@ -252,7 +267,25 @@ class ScreenLineBox:
             w.wm_attributes("-toolwindow", True)
         except tk.TclError:
             pass
+        w.update_idletasks()
+        self._make_click_through(w)
         return w
+
+    @staticmethod
+    def _make_click_through(window):
+        from ctypes import wintypes
+
+        user32 = ctypes.WinDLL("user32", use_last_error=True)
+        parent = user32.GetParent
+        parent.argtypes, parent.restype = [wintypes.HWND], wintypes.HWND
+        getter, setter = user32.GetWindowLongW, user32.SetWindowLongW
+        getter.argtypes, getter.restype = [wintypes.HWND, ctypes.c_int], wintypes.LONG
+        setter.argtypes = [wintypes.HWND, ctypes.c_int, wintypes.LONG]
+        setter.restype = wintypes.LONG
+        hwnd = int(window.winfo_id())
+        hwnd = parent(hwnd) or hwnd
+        # Layered + transparent + toolwindow + noactivate, on Tk's outer HWND.
+        setter(hwnd, -20, getter(hwnd, -20) | 0x80000 | 0x20 | 0x80 | 0x08000000)
 
     def _reveal(self):
         for w in self._wins():
@@ -361,7 +394,8 @@ class ScreenLineBox:
                 w.lift()
 
         if self._tracking_active:
-            rect_map = get_visible_rect_map_by_control(self._control) if self._control is not None else None
+            rect_map = (get_visible_rect_map_by_control(self._control)
+                        if self._control is not None else self._rect_snapshot)
             if rect_map and rect_map['width'] > 0 and rect_map['height'] > 0:
                 # 先更新位置，再根据遮挡切色（但实际遮挡检测由周期控制）
                 self._tick_counter += 1
@@ -584,31 +618,28 @@ def get_control_visibl(control, rect_map=None):
     if not point or point.get('width', 0) <= 0 or point.get('height', 0) <= 0:
         return False  # 空间上不可见，这里不做遮挡判断
 
-    topx, topy = point['width'] / 2 + point['left'], point['top'] + 7
-    leftx, lefty = point['left'] + 7, point['height'] / 2 + point['top']
-    rightx, righty = point['right'] - 7, point['height'] / 2 + point['top']
-    bottomx, bottomy = point['width'] / 2 + point['left'], point['bottom'] - 7
+    # Hit testing needs native window ownership, not repeated UIA point/XPath
+    # discovery (which can enumerate unrelated providers on every overlay tick).
+    from ctypes import wintypes
 
-    check_map = {'left': True, 'right': True, 'top': True, 'bottom': True}
-
-    point_top = get_pos_top_window_point(topx, topy, control)
-    if point_top:
-        check_map = check_visibl(point, point_top, check_map)
-
-    point_left = get_pos_top_window_point(leftx, lefty, control)
-    if point_left:
-        check_map = check_visibl(point, point_left, check_map)
-
-    point_right = get_pos_top_window_point(rightx, righty, control)
-    if point_right:
-        check_map = check_visibl(point, point_right, check_map)
-
-    point_bottom = get_pos_top_window_point(bottomx, bottomy, control)
-    if point_bottom:
-        check_map = check_visibl(point, point_bottom, check_map)
-
-    # 任意一侧为 False 即视为被遮挡
-    return not all(check_map.values())
+    owner = control.GetTopLevelControl().NativeWindowHandle
+    if not owner:
+        return False
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
+    hit = user32.WindowFromPoint
+    hit.argtypes, hit.restype = [wintypes.POINT], wintypes.HWND
+    child = user32.IsChild
+    child.argtypes, child.restype = [wintypes.HWND, wintypes.HWND], wintypes.BOOL
+    cx = (point['left'] + point['right']) // 2
+    cy = (point['top'] + point['bottom']) // 2
+    dx, dy = min(7, point['width'] // 2), min(7, point['height'] // 2)
+    positions = [(cx, point['top'] + dy), (point['left'] + dx, cy),
+                 (point['right'] - dx - 1, cy), (cx, point['bottom'] - dy - 1)]
+    for x, y in positions:
+        window = hit(wintypes.POINT(int(x), int(y)))
+        if window and window != owner and not child(owner, window):
+            return True
+    return False
 
 
 # ================== 示例用法 ==================

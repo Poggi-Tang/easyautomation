@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog and is maintained automatically by Semantic Release.
 
+## [0.9.3] - 2026-10-26
+
+### Fixed
+
+- Ship the recording highlighter and its worker together. Run Tk in a private
+  interpreter and bootstrap the same installed package under isolated Python,
+  including editable installations and calls from unrelated working directories.
+- Detect missing workers and early child exits immediately, preserve startup
+  errors, and stop/join only listeners that actually started. Always clean up the
+  overlay, make repeated stop calls harmless and propagate recording failures
+  to the caller. Honor `run_record(write_file=False)` without creating a file.
+- Keep highlight bars click-through and non-activating. Use native window hit
+  testing for occlusion instead of repeatedly discovering unrelated UIA controls.
+
 ## [0.9.2] - 2026-10-26
 
 ### Fixed
