@@ -1,14 +1,17 @@
-"""Recorder startup/cleanup and the real isolated highlight process."""
+"""Recorder startup, queued control tracking, cleanup, and highlight worker."""
 
 from __future__ import annotations
 
+import queue
 import subprocess
+import threading
 import time
 from unittest.mock import Mock
 
 import pytest
 
 from easy_uiauto import highlight, record
+from easy_uiauto.draw import ScreenLineBox
 
 
 class Listener:
@@ -23,20 +26,48 @@ class Listener:
         self.ident = -1
 
 
+class FakeTk:
+    """Small event-loop fake so the queue handoff can be tested without a GUI."""
+
+    def __init__(self):
+        self.callbacks = queue.Queue()
+        self.stopped = threading.Event()
+        self.quitting = threading.Event()
+        self.owner_thread = None
+
+    def withdraw(self):
+        pass
+
+    def after(self, _delay_ms, callback):
+        self.callbacks.put(callback)
+
+    def mainloop(self):
+        self.owner_thread = threading.get_ident()
+        while not self.stopped.is_set() and not self.quitting.is_set():
+            try:
+                callback = self.callbacks.get(timeout=0.05)
+            except queue.Empty:
+                continue
+            callback()
+
+    def destroy(self):
+        self.stopped.set()
+
+    def quit(self):
+        self.quitting.set()
+
+
 def recorder(monkeypatch):
     monkeypatch.setattr(record.mouse, "Listener", Listener)
     monkeypatch.setattr(record.keyboard, "Listener", Listener)
-    value = record.RecordThread(close_callback=Mock())
-    value._ui_highlight = Mock()
-    value._ui_highlight.stop.return_value = {"error": None, "forced_termination": False}
-    return value
+    return record.RecordThread(close_callback=Mock())
 
 
-def test_highlight_failure_never_starts_or_joins_listeners(monkeypatch):
+def test_ui_start_failure_never_starts_or_joins_listeners(monkeypatch):
     value = recorder(monkeypatch)
-    value._ui_highlight.start.side_effect = RuntimeError("missing worker")
+    value.start_ui_thread = Mock(side_effect=RuntimeError("Tk failed"))
     value.run()
-    assert str(value.run_error) == "missing worker"
+    assert str(value.run_error) == "Tk failed"
     assert value.started.is_set() and value._stop_complete.is_set()
     assert not value.running
     for listener in (value.mouse_listener, value.keyboard_listener):
@@ -44,11 +75,12 @@ def test_highlight_failure_never_starts_or_joins_listeners(monkeypatch):
         listener.stop.assert_not_called()
         listener.join.assert_not_called()
     assert value.cleanup_errors == []
-    value._ui_highlight.stop.assert_called_once()
+    value.start_ui_thread.assert_called_once()
 
 
 def test_partial_listener_start_only_joins_the_started_listener(monkeypatch):
     value = recorder(monkeypatch)
+    value.start_ui_thread = Mock()
     value.keyboard_listener.start.side_effect = OSError("keyboard hook failed")
     value.run()
     assert str(value.run_error) == "keyboard hook failed"
@@ -63,16 +95,16 @@ def test_stop_is_idempotent_even_before_start(monkeypatch):
     value.stop()
     value.stop()
     value.close_callback.assert_called_once()
-    value._ui_highlight.stop.assert_called_once()
     assert value._stop_complete.is_set()
+    assert value.ui_cmd_queue.get_nowait() == {"cmd": "close"}
 
 
-def test_callback_failure_still_closes_highlight(monkeypatch):
+def test_callback_failure_still_closes_ui_thread(monkeypatch):
     value = recorder(monkeypatch)
     value.close_callback.side_effect = ValueError("callback failed")
     with pytest.raises(ValueError, match="callback failed"):
         value.stop()
-    value._ui_highlight.stop.assert_called_once()
+    assert value.ui_cmd_queue.get_nowait() == {"cmd": "close"}
     assert value._stop_complete.is_set()
 
 
@@ -81,9 +113,9 @@ def test_run_record_propagates_startup_failure_and_write_false_creates_no_file(
 ):
     monkeypatch.chdir(tmp_path)
     value = recorder(monkeypatch)
-    value._ui_highlight.start.side_effect = RuntimeError("missing worker")
+    value.start_ui_thread = Mock(side_effect=RuntimeError("Tk failed"))
     monkeypatch.setattr(record, "RecordThread", lambda **_kwargs: value)
-    with pytest.raises(RuntimeError, match="missing worker"):
+    with pytest.raises(RuntimeError, match="Tk failed"):
         record.run_record(write_file=False)
     assert list(tmp_path.iterdir()) == []
 
@@ -162,25 +194,148 @@ def test_real_worker_starts_from_an_unrelated_cwd_and_stops_cleanly(monkeypatch,
     assert not status["forced_termination"]
 
 
-def test_track_control_sends_rect_before_cross_process_xpath(monkeypatch):
+def test_track_control_queues_the_control_for_the_tk_thread(monkeypatch):
     value = recorder(monkeypatch)
-    value._ui_highlight.send = Mock()
-
-    class Rect:
-        left, top, right, bottom = 10, 20, 110, 80
 
     class Control:
         Name = "button"
         ControlTypeName = "ButtonControl"
         ClassName = "Button"
-        BoundingRectangle = Rect()
 
-    value.track_control(Control(), [{"Name": "button"}])
-    assert value._ui_highlight.send.call_args_list[0].args[0] == {
-        "cmd": "rect",
-        "rect": {
-            "left": 10, "top": 20, "right": 110, "bottom": 80,
-            "width": 100, "height": 60,
-        },
-    }
-    assert value._ui_highlight.send.call_args_list[1].args[0]["cmd"] == "set_xpath"
+    control = Control()
+    value.track_control(control)
+    assert value.ui_cmd_queue.get_nowait() == {"cmd": "set_control", "control": control}
+
+
+def test_click_updates_the_highlight_control_without_callback_signature_error(monkeypatch):
+    value = recorder(monkeypatch)
+
+    class Control:
+        Name = "button"
+        ControlTypeName = "ButtonControl"
+        ClassName = "Button"
+
+    control = Control()
+    xpath = [{"Name": "window"}, {"Name": "button"}]
+    monkeypatch.setattr(record, "get_control_info", Mock(return_value=(xpath, control)))
+    monkeypatch.setattr(record, "CoInitialize", Mock())
+    monkeypatch.setattr(record, "CoUninitialize", Mock())
+    value.on_click(10, 20, record.Button.left, True)
+    assert value.ui_cmd_queue.get_nowait() == {"cmd": "set_control", "control": control}
+    assert value.actions_data[-1]["ACTION"] == "点击"
+
+
+def test_drag_updates_source_then_destination_highlight(monkeypatch):
+    value = recorder(monkeypatch)
+
+    class Control:
+        def __init__(self, name):
+            self.Name = name
+            self.ControlTypeName = "ButtonControl"
+            self.ClassName = "Button"
+
+    source = Control("source")
+    destination = Control("destination")
+    source_xpath = [{"Name": "window"}, {"Name": "source"}]
+    destination_xpath = [{"Name": "window"}, {"Name": "destination"}]
+    lookup = Mock(side_effect=[(source_xpath, source), (destination_xpath, destination)])
+    monkeypatch.setattr(record, "get_control_info", lookup)
+    monkeypatch.setattr(record, "CoInitialize", Mock())
+    monkeypatch.setattr(record, "CoUninitialize", Mock())
+    value.last_click_time = time.time() - 1
+    value.last_click_position = (10, 20)
+
+    value.on_click(30, 40, record.Button.left, False)
+
+    assert value.ui_cmd_queue.get_nowait() == {"cmd": "set_control", "control": source}
+    assert value.ui_cmd_queue.get_nowait() == {"cmd": "set_control", "control": destination}
+    assert value.actions_data[-1]["ACTION"] == "拖拽"
+
+
+def test_ui_queue_is_applied_on_tk_thread_and_stop_closes_it(monkeypatch):
+    value = recorder(monkeypatch)
+    root = FakeTk()
+    boxes = []
+
+    class FakeBox:
+        def __init__(self, **kwargs):
+            self.root = kwargs["root"]
+            self.controls = []
+            self.destroyed = False
+            boxes.append(self)
+
+        def set_control(self, control):
+            self.controls.append((control, threading.get_ident()))
+
+        def set_style(self, **_kwargs):
+            pass
+
+        def destroy(self):
+            self.destroyed = True
+            self.root.quit()
+
+    monkeypatch.setattr(record.tk, "Tk", lambda: root)
+    monkeypatch.setattr(record, "ScreenLineBox", FakeBox)
+    value.start_ui_thread()
+    control = object()
+    value.track_control(control)
+    deadline = time.monotonic() + 2
+    while (not boxes or not boxes[0].controls) and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert boxes[0].controls == [(control, root.owner_thread)]
+
+    value.stop()
+    assert value.ui_thread is not None and not value.ui_thread.is_alive()
+    assert boxes[0].destroyed
+
+
+def test_escape_stops_recording_and_closes_highlight(monkeypatch):
+    value = recorder(monkeypatch)
+    root = FakeTk()
+    boxes = []
+
+    class FakeBox:
+        def __init__(self, **_kwargs):
+            self.destroyed = False
+            boxes.append(self)
+
+        def set_control(self, _control):
+            pass
+
+        def set_style(self, **_kwargs):
+            pass
+
+        def destroy(self):
+            self.destroyed = True
+            root.quit()
+
+    monkeypatch.setattr(record.tk, "Tk", lambda: root)
+    monkeypatch.setattr(record, "ScreenLineBox", FakeBox)
+    value.start_ui_thread()
+    value.on_press(record.keyboard.Key.esc)
+    assert not value.running
+    assert value._stop_complete.is_set()
+    assert value.ui_thread is not None and not value.ui_thread.is_alive()
+    assert boxes[0].destroyed
+
+
+def test_screen_line_box_cancels_pending_tracking_tick_on_destroy():
+    box = ScreenLineBox.__new__(ScreenLineBox)
+    box._destroyed = False
+    box._tracking_active = True
+    box._tick_after_id = "pending-tick"
+    box._owns_root = False
+    box.root = Mock()
+    box.win_top = Mock()
+    box.win_right = Mock()
+    box.win_bottom = Mock()
+    box.win_left = Mock()
+
+    box.destroy()
+    box.destroy()
+
+    box.root.after_cancel.assert_called_once_with("pending-tick")
+    box.root.quit.assert_called_once()
+    for window in box._wins():
+        window.destroy.assert_called_once()
+    assert box._tick_after_id is None

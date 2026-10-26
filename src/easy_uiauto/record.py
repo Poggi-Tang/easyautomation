@@ -5,12 +5,22 @@
 # @depict:  录制线程
 import threading
 import time
+import tkinter as tk
+from queue import Empty, Queue
+
 from comtypes import CoInitialize, CoUninitialize
-from pynput import mouse, keyboard
+from pynput import keyboard, mouse
 from pynput.mouse import Button
-from .highlight import HighlightProcess
-from .utils import VK_KEY_NAME, INPUT_VK_KEY, format_action_data_by_xpath, push_message, \
-    get_control_info, MODIFIER_VK
+
+from .draw import ScreenLineBox
+from .utils import (
+    INPUT_VK_KEY,
+    MODIFIER_VK,
+    VK_KEY_NAME,
+    format_action_data_by_xpath,
+    get_control_info,
+    push_message,
+)
 
 RUN_TIME = time.strftime("%Y%m%d%H%M%S", time.localtime())
 
@@ -18,7 +28,7 @@ RUN_TIME = time.strftime("%Y%m%d%H%M%S", time.localtime())
 # ========== 录制线程 ==========
 class RecordThread(threading.Thread):
     """
-    录制动作线程；高亮由独立进程负责，监听器只在启动后清理。
+    录制动作线程；控件高亮由独立 Tk 线程通过队列更新。
     """
 
     def __init__(self, action_callback=None, close_callback=None):
@@ -46,8 +56,9 @@ class RecordThread(threading.Thread):
         self.run_error = None
         self.cleanup_errors = []
         self.ui_error = None
+        self.ui_cmd_queue = Queue()
+        self.ui_thread = None
         self.ui_ready = threading.Event()
-        self._ui_highlight = HighlightProcess(name="easy-uiauto-record-highlight")
 
         # 监听器
         self.mouse_listener = mouse.Listener(
@@ -82,25 +93,71 @@ class RecordThread(threading.Thread):
                 self.run_error = self.run_error or error
                 push_message(f"录制清理错误: {error}")
 
-    # 保留旧方法名；Tk 的创建、mainloop 和销毁都在子进程主线程。
+    # Keep Tk in one dedicated thread and pass UIA controls through an in-process
+    # queue. This matches the working recorder behavior and avoids resolving a
+    # fresh XPath in a separate interpreter for every selected control.
     def start_ui_thread(self):
-        try:
-            self._ui_highlight.start(timeout=5)
-        except Exception as error:
-            self.ui_error = str(error)
-            raise
-        finally:
-            self.ui_ready.set()
+        def ui_thread_func():
+            root = None
+            box = None
+            pump = None
+            try:
+                root = tk.Tk()
+                root.withdraw()
+                box = ScreenLineBox(
+                    root=root, control=None, mode="track",
+                    interval_ms=50, topmost=True,
+                )
 
-    @property
-    def ui_process(self):
-        return self._ui_highlight.process
+                def pump():
+                    try:
+                        while True:
+                            command = self.ui_cmd_queue.get_nowait()
+                            name = command.get("cmd")
+                            if name == "set_control":
+                                try:
+                                    box.set_control(command.get("control"))
+                                except Exception as error:
+                                    self.ui_error = str(error)
+                                    push_message(f"高亮控件更新失败: {error}")
+                            elif name == "set_style":
+                                box.set_style(
+                                    color=command.get("color"),
+                                    line_width=command.get("line_width"),
+                                    alpha=command.get("alpha"),
+                                )
+                            elif name == "close":
+                                box.destroy()
+                                return
+                    except Empty:
+                        pass
+                    root.after(16, pump)
 
-    def _stop_ui_process(self):
-        status = self._ui_highlight.stop(timeout=2)
-        self.ui_error = status["error"]
-        if status["forced_termination"]:
-            self.cleanup_errors.append("高亮窗口进程未在超时内退出，已强制终止")
+                root.after(0, pump)
+                self.ui_ready.set()
+                root.mainloop()
+            except Exception as error:
+                self.ui_error = str(error)
+                self.ui_ready.set()
+            finally:
+                if root is not None:
+                    try:
+                        root.destroy()
+                    except Exception:
+                        pass
+                # Break Tk's callback-closure cycle on the thread that owns Tcl.
+                pump = None
+                box = None
+                root = None
+
+        self.ui_thread = threading.Thread(
+            target=ui_thread_func, name="easy-uiauto-record-ui", daemon=True,
+        )
+        self.ui_thread.start()
+        if not self.ui_ready.wait(timeout=5):
+            raise TimeoutError("录制高亮窗口启动超时")
+        if self.ui_error:
+            raise RuntimeError(f"录制高亮窗口启动失败: {self.ui_error}")
 
     # ESC 退出时
     def on_esc_exit(self, box_track, root):
@@ -144,10 +201,12 @@ class RecordThread(threading.Thread):
             self.run_error = self.run_error or error
             raise
         finally:
-            try:
-                self._stop_ui_process()
-            finally:
-                self._stop_complete.set()
+            self.ui_cmd_queue.put({"cmd": "close"})
+            if self.ui_thread and self.ui_thread.ident != threading.get_ident():
+                self.ui_thread.join(timeout=3)
+                if self.ui_thread.is_alive():
+                    self.cleanup_errors.append("高亮窗口线程未在超时内退出")
+            self._stop_complete.set()
 
     def flush_last_input(self):
         if self.last_input:
@@ -160,8 +219,8 @@ class RecordThread(threading.Thread):
             self.actions_data.append(action_data)
             self.last_input = None
 
-    # —— 替换原 frame/tracker：用 UI 指令给 ScreenLineBox 设置/跟踪控件 ——
-    def track_control(self, control, xpath=None):
+    # —— 将控件对象送回同进程的 Tk 线程跟踪，避免跨进程 XPath 重查 ——
+    def track_control(self, control):
         """锁定并跟踪指定控件"""
         if control and getattr(control, "ClassName", None) == 'TkChild':
             # 与原逻辑保持一致的过滤
@@ -169,35 +228,10 @@ class RecordThread(threading.Thread):
             return
 
         try:
-            # UIA control wrappers are tied to the process/thread that created
-            # them.  The highlight worker runs in a separate process, so
-            # resolving the XPath there can fail with ``window_invalid`` even
-            # though the control was valid in this recorder callback.  Send a
-            # serializable snapshot first so the user gets immediate visual
-            # feedback; XPath tracking remains an optional enhancement.
-            rect = getattr(control, "BoundingRectangle", None) if control else None
-            if rect is not None:
-                left = int(getattr(rect, "left"))
-                top = int(getattr(rect, "top"))
-                right = int(getattr(rect, "right"))
-                bottom = int(getattr(rect, "bottom"))
-                if right > left and bottom > top:
-                    self._ui_highlight.send({
-                        "cmd": "rect",
-                        "rect": {
-                            "left": left,
-                            "top": top,
-                            "right": right,
-                            "bottom": bottom,
-                            "width": right - left,
-                            "height": bottom - top,
-                        },
-                    })
-            if xpath:
-                self._ui_highlight.send({"cmd": "set_xpath", "xpath": xpath})
+            self.ui_cmd_queue.put({"cmd": "set_control", "control": control})
             try:
                 push_message(f"锁定控件: {control.Name} ({control.ControlTypeName})")
-            except:
+            except Exception:
                 push_message("锁定控件")
         except Exception:
             pass
@@ -212,7 +246,7 @@ class RecordThread(threading.Thread):
             Xpath, control = get_control_info(x, y)
             if control:
                 # 锁定并跟踪该控件（不再 hide/show）
-                self.track_control(control, Xpath)
+                self.track_control(control)
             if button == Button.left:
                 if not self.dragging:
                     if len(Xpath) == 0:
@@ -257,9 +291,9 @@ class RecordThread(threading.Thread):
             if self.last_click_time and current_time - self.last_click_time > 0.2 and (
                     x, y) != self.last_click_position:
                 src_xpath, src_control = get_control_info(self.last_click_position[0], self.last_click_position[1])
-                self.track_control(src_control, src_xpath)
+                self.track_control(src_control)
                 dest_xpath, dest_control = get_control_info(x, y)
-                self.track_control(dest_control, dest_xpath)
+                self.track_control(dest_control)
                 if len(dest_xpath) == 0:
                     drag_parameters = {}
                 else:

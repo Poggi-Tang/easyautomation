@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog and is maintained automatically by Semantic Release.
 
+## [0.9.6] - 2026-10-26
+
+### Fixed
+
+- Restore live recorder highlighting by tracking UIA controls in the recorder
+  process, so the outline follows each selected control and avoids cross-process
+  XPath lookups.
+- Cancel pending highlight tracking callbacks during cleanup so ESC closes the
+  highlight window cleanly.
+
 ## [0.9.5] - 2026-10-26
 
 ### Fixed

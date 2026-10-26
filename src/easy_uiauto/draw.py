@@ -120,6 +120,7 @@ class ScreenLineBox:
     ):
         self._destroyed = None
         self._owns_root = False
+        self._tick_after_id = None
         if root is None:
             root = tk.Tk()
             root.withdraw()
@@ -229,6 +230,13 @@ class ScreenLineBox:
             return
         self._tracking_active = False
         self._destroyed = True
+
+        if self._tick_after_id is not None:
+            try:
+                self.root.after_cancel(self._tick_after_id)
+            except tk.TclError:
+                pass
+            self._tick_after_id = None
 
         if self._owns_root:
             self._owns_root = False
@@ -384,6 +392,7 @@ class ScreenLineBox:
                 self._enter_normal_mode()
 
     def _tick(self):
+        self._tick_after_id = None
         if getattr(self, "_destroyed", False):
             return
         if self.mode != "track":
@@ -404,7 +413,7 @@ class ScreenLineBox:
             else:
                 # 丢失：变黄，但不暂停；继续 tick
                 self._enter_lost_mode(initial=False)
-        self.root.after(self.interval_ms, self._tick)
+        self._tick_after_id = self.root.after(self.interval_ms, self._tick)
 
     def run(self):
         if self._owns_root:
