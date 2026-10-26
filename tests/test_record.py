@@ -142,3 +142,27 @@ def test_real_worker_starts_from_an_unrelated_cwd_and_stops_cleanly(monkeypatch,
     assert status["exitcode"] == 0
     assert status["error"] is None
     assert not status["forced_termination"]
+
+
+def test_track_control_sends_rect_before_cross_process_xpath(monkeypatch):
+    value = recorder(monkeypatch)
+    value._ui_highlight.send = Mock()
+
+    class Rect:
+        left, top, right, bottom = 10, 20, 110, 80
+
+    class Control:
+        Name = "button"
+        ControlTypeName = "ButtonControl"
+        ClassName = "Button"
+        BoundingRectangle = Rect()
+
+    value.track_control(Control(), [{"Name": "button"}])
+    assert value._ui_highlight.send.call_args_list[0].args[0] == {
+        "cmd": "rect",
+        "rect": {
+            "left": 10, "top": 20, "right": 110, "bottom": 80,
+            "width": 100, "height": 60,
+        },
+    }
+    assert value._ui_highlight.send.call_args_list[1].args[0]["cmd"] == "set_xpath"

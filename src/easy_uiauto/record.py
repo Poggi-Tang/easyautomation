@@ -169,6 +169,30 @@ class RecordThread(threading.Thread):
             return
 
         try:
+            # UIA control wrappers are tied to the process/thread that created
+            # them.  The highlight worker runs in a separate process, so
+            # resolving the XPath there can fail with ``window_invalid`` even
+            # though the control was valid in this recorder callback.  Send a
+            # serializable snapshot first so the user gets immediate visual
+            # feedback; XPath tracking remains an optional enhancement.
+            rect = getattr(control, "BoundingRectangle", None) if control else None
+            if rect is not None:
+                left = int(getattr(rect, "left"))
+                top = int(getattr(rect, "top"))
+                right = int(getattr(rect, "right"))
+                bottom = int(getattr(rect, "bottom"))
+                if right > left and bottom > top:
+                    self._ui_highlight.send({
+                        "cmd": "rect",
+                        "rect": {
+                            "left": left,
+                            "top": top,
+                            "right": right,
+                            "bottom": bottom,
+                            "width": right - left,
+                            "height": bottom - top,
+                        },
+                    })
             if xpath:
                 self._ui_highlight.send({"cmd": "set_xpath", "xpath": xpath})
             try:

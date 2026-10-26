@@ -65,7 +65,16 @@ def main():
                         elif name == "style":
                             box.set_style(**(command.get("style") or {}))
                     except Exception as error:
-                        _emit("error", message=f"highlight command failed: {error}")
+                        # A control wrapper can become invalid when an XPath
+                        # is resolved from this isolated process.  A rect
+                        # snapshot sent by the recorder is still useful, so
+                        # keep showing it and report the tracking failure as a
+                        # non-fatal warning.  Only fail the worker for errors
+                        # that prevent it from servicing commands at all.
+                        if name == "set_xpath":
+                            _emit("warning", message=f"highlight tracking skipped: {error}")
+                        else:
+                            _emit("error", message=f"highlight command failed: {error}")
                 root.after(16, pump)
 
             root.after(0, pump)

@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog and is maintained automatically by Semantic Release.
 
+## [0.9.4] - 2026-10-26
+
+### Fixed
+
+- Keep recording responsive when cross-process XPath tracking cannot resolve
+  a live UIA window. Send a serializable control rectangle first so the
+  highlight is shown immediately while the recorded mouse and keyboard
+  listeners continue working.
+
 ## [0.9.3] - 2026-10-26
 
 ### Fixed
