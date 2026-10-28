@@ -21,6 +21,7 @@ import pyautogui
 import uiautomation
 
 from easy_uiauto.utils import get_control_xpath
+from easy_uiauto.ctrl import Controller
 
 from . import (
     configuration,
@@ -119,16 +120,7 @@ def _activate_window(window) -> None:
     user32, _callback = native_windows._api()
     if not handle or not user32.IsWindow(handle):
         raise RuntimeError("UI Automation returned an invalid window handle")
-    if user32.IsIconic(handle):
-        user32.ShowWindow(handle, 9)  # Restore minimized windows only; preserve maximization.
-    if int(user32.GetForegroundWindow() or 0) != handle and not user32.SetForegroundWindow(handle):
-        try:
-            window.SetFocus()
-        except Exception as error:
-            raise RuntimeError("Could not activate the target window") from error
-    time.sleep(0.2)
-    if int(user32.GetForegroundWindow() or 0) != handle:
-        raise RuntimeError("Could not activate the target window; foreground access was denied")
+    Controller.activate_window_handle(handle, control=window)
 
 
 def _process_name(process_id: int) -> str:
@@ -356,6 +348,11 @@ def resolve_location(location: dict, window=None, prefix_cache: dict | None = No
 
 
 def _screenshot_window(window_rect: dict):
+    with Controller.suspend_highlights():
+        return _screenshot_window_unmarked(window_rect)
+
+
+def _screenshot_window_unmarked(window_rect: dict):
     from PIL import ImageGrab
 
     bounds = (

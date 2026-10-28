@@ -10,9 +10,9 @@ from urllib import request as urlrequest
 from uuid import uuid4
 
 import pyautogui
-import pyperclip
 
-from . import configuration, image_storage, knowledge, semantic_identity, visualization
+from ..ctrl import Controller, ControlPatternUnavailable
+from . import configuration, image_storage, knowledge, semantic_identity
 from .results import ActionError
 from .scanner import (
     _crop_control,
@@ -325,6 +325,11 @@ def _read_control_text(control) -> tuple[bool, str]:
 
 
 def _capture_action_image(rectangle: dict):
+    with Controller.suspend_highlights():
+        return _capture_action_image_unmarked(rectangle)
+
+
+def _capture_action_image_unmarked(rectangle: dict):
     from PIL import ImageGrab
 
     bounds = (
@@ -379,40 +384,21 @@ def _text_write_evidence(control, expected: str, before, after) -> dict:
 
 
 def _paste_text_with_clipboard(text: str, control, rectangle: dict, fast: bool) -> dict:
-    if control is not None:
-        if fast:
-            control.Click(simulateMove=False, waitTime=0)
-        else:
-            control.Click(simulateMove=False, waitTime=0)
-    else:
-        pyautogui.click(
-            rectangle["left"] + rectangle["width"] // 2,
-            rectangle["top"] + rectangle["height"] // 2,
-        )
-    pyautogui.hotkey("ctrl", "a")
-    sleep(0.05)
     before = _capture_action_image(rectangle)
-    try:
-        previous_clipboard = pyperclip.paste()
-    except Exception:
-        previous_clipboard = None
-    try:
-        pyperclip.copy(text)
-        pyautogui.hotkey("ctrl", "v")
-        sleep(0.12)
+    with Controller.preserve_clipboard_text():
+        execution = Controller.execute_resolved(
+            "paste-text", control=control, rectangle=rectangle, text=text, select_all=True,
+        )
         after = _capture_action_image(rectangle)
         evidence = _text_write_evidence(control, text, before, after)
         if not evidence["verified"]:
             sentinel = f"__easy_uiauto_verify_{uuid4().hex}__"
-            pyperclip.copy(sentinel)
-            pyautogui.hotkey("ctrl", "a")
-            pyautogui.hotkey("ctrl", "c")
+            Controller.set_clipboard_text(sentinel)
+            Controller.hotkey("ctrl", "a")
+            Controller.hotkey("ctrl", "c")
             sleep(0.05)
-            try:
-                copied_back = pyperclip.paste()
-            except Exception:
-                copied_back = sentinel
-            pyautogui.press("end")
+            copied_back = Controller.get_clipboard_text()
+            Controller.press_key("end")
             if copied_back != sentinel and copied_back.replace("\r\n", "\n") == text.replace(
                 "\r\n", "\n"
             ):
@@ -423,20 +409,13 @@ def _paste_text_with_clipboard(text: str, control, rectangle: dict, fast: bool) 
                         "observed_value": copied_back,
                     }
                 )
-    finally:
-        if previous_clipboard is not None:
-            sleep(0.05)
-            try:
-                pyperclip.copy(previous_clipboard)
-            except Exception:
-                pass
     if not evidence["verified"]:
         raise ActionError(
             "result_unconfirmed",
             "Text paste could not be read back from the target control; "
             "the command was not recorded as successful"
         )
-    return {"method": "clipboard-paste", **evidence}
+    return {**execution, **evidence}
 
 
 def _perform_action(
@@ -446,51 +425,24 @@ def _perform_action(
     rectangle: dict,
     fast: bool = False,
 ) -> dict:
-    if action == "click":
-        if control is not None:
-            if fast:
-                control.Click(simulateMove=False, waitTime=0)
-            else:
-                control.Click(simulateMove=False, waitTime=0)
-        else:
-            pyautogui.click(
-                rectangle["left"] + rectangle["width"] // 2,
-                rectangle["top"] + rectangle["height"] // 2,
-            )
-        return {"method": "uia-click" if control is not None else "coordinate-click"}
-    if action == "double-click":
-        pyautogui.doubleClick(
-            rectangle["left"] + rectangle["width"] // 2,
-            rectangle["top"] + rectangle["height"] // 2,
-        )
-        return {"method": "coordinate-double-click"}
-    if action == "right-click":
-        pyautogui.rightClick(
-            rectangle["left"] + rectangle["width"] // 2,
-            rectangle["top"] + rectangle["height"] // 2,
-        )
-        return {"method": "coordinate-right-click"}
-    if action == "hover":
-        pyautogui.moveTo(
-            rectangle["left"] + rectangle["width"] // 2,
-            rectangle["top"] + rectangle["height"] // 2,
-            duration=0 if fast else 0.1,
-        )
-        return {"method": "coordinate-hover"}
+    if action in {"click", "double-click", "right-click", "hover"}:
+        return Controller.execute_resolved(action, control=control, rectangle=rectangle)
     if action == "set-text":
         if not text:
             raise ValueError("text is required for set-text commands")
         if control is not None:
             before = _capture_action_image(rectangle)
             try:
-                control.GetValuePattern().SetValue(text)
+                execution = Controller.execute_resolved("set-value", control=control, text=text)
+            except ControlPatternUnavailable:
+                pass
+            else:
                 sleep(0.1)
                 after = _capture_action_image(rectangle)
                 evidence = _text_write_evidence(control, text, before, after)
                 if evidence["verified"]:
-                    return {"method": "uia-set-value", **evidence}
-            except Exception:
-                pass
+                    return {**execution, **evidence}
+                raise ActionError("result_unconfirmed", "SetValue was sent but could not be read back; do not repeat it")
         return _paste_text_with_clipboard(text, control, rectangle, fast)
     raise ValueError(f"Unsupported UI command action: {action}")
 
@@ -511,24 +463,49 @@ def _show_execution_preview(
     rectangles: dict[str, dict],
     duration_ms: int,
     wait_ms: int,
-) -> dict:
-    markers = []
+):
+    targets = []
     for record in records:
         rectangle = rectangles.get(record["id"])
         if not rectangle:
             continue
-        markers.append(
-            {
-                "index": len(markers) + 1,
-                "control_id": record["id"],
-                "label": record.get("semantic_name") or record.get("name") or record["id"],
-                "rect": rectangle,
-                "status": record.get("status", "verified"),
-                "color": visualization.STATUS_COLORS["verified"],
-                "target": True,
-            }
-        )
-    return visualization.show_markers(markers, duration_ms, wait_ms)
+        targets.append(rectangle)
+    preview = Controller.show_targets(targets, show_time=max(300, int(duration_ms)))
+    try:
+        if wait_ms:
+            sleep(max(0, min(int(wait_ms), 1000)) / 1000)
+    except BaseException as error:
+        try:
+            preview.close()
+        except Exception as cleanup_error:
+            error.add_note(f"Preview cleanup also failed: {cleanup_error}")
+        raise
+    return preview
+
+
+def _perform_with_preview(record, action, text, control, rectangle, *, highlight,
+                          duration_ms, wait_ms, fast=False):
+    preview = None
+    overlay = {"shown": False, "controls": 0, "detail": "disabled"}
+    action_error = None
+    try:
+        if highlight:
+            preview = _show_execution_preview([record], {record["id"]: rectangle}, duration_ms, wait_ms)
+            overlay = preview.summary()
+        verification = _perform_action(action, text, control, rectangle, fast=fast)
+    except BaseException as error:
+        action_error = error
+        raise
+    finally:
+        if preview is not None:
+            try:
+                preview.close()
+                overlay["closed"] = True
+            except Exception as error:
+                overlay.update(closed=False, error=str(error))
+                if action_error is not None:
+                    action_error.add_note(f"Preview cleanup also failed: {error}")
+    return verification, overlay
 
 
 @image_storage.serialized_learning
@@ -563,26 +540,25 @@ def execute(
             "Repair positioning and explicitly revalidate this control before retrying."
         ) from error
 
-    overlay = {"shown": False, "controls": 0, "detail": "disabled"}
-    if highlight:
-        overlay = _show_execution_preview(
-            [record],
-            {record["id"]: rectangle},
-            highlight_duration_ms,
-            highlight_wait_ms,
-        )
     if control is not None and action != "hover" and not bool(
         getattr(control, "IsEnabled", True)
     ):
         condition = record.get("enabling_condition") or "the control must become enabled"
         raise RuntimeError(f"Control is currently disabled; required condition: {condition}")
-    action_verification = _perform_action(action, text, control, rectangle)
+    action_verification, overlay = _perform_with_preview(
+        record, action, text, control, rectangle, highlight=highlight,
+        duration_ms=highlight_duration_ms, wait_ms=highlight_wait_ms,
+    )
     _record_execution(record, evidence=action_verification)
     knowledge.save_control(directory, record)
     knowledge.rebuild_index(directory)
 
     return {
-        "ok": True,
+        "ok": not bool(overlay.get("error")),
+        "code": "result_unconfirmed" if overlay.get("error") else "action_executed",
+        "action_executed": True,
+        "message": "Action executed but preview cleanup failed; do not repeat the action"
+        if overlay.get("error") else "Action executed",
         "command": command,
         "control_id": record["id"],
         "action": action,
@@ -717,13 +693,6 @@ def execute_many(
     preflight_finished = perf_counter()
 
     overlay = {"shown": False, "controls": 0, "detail": "disabled"}
-    if highlight:
-        overlay = _show_execution_preview(
-            list(records.values()),
-            {control_id: value[2] for control_id, value in resolved.items()},
-            highlight_duration_ms,
-            highlight_wait_ms,
-        )
 
     results = []
     execution_counts: dict[str, int] = {}
@@ -740,13 +709,18 @@ def execute_many(
                 raise RuntimeError(
                     f"Control is currently disabled; required condition: {condition}"
                 )
-            action_verification = _perform_action(
-                item["action"], item["text"], control, rectangle, fast=True
+            action_verification, step_overlay = _perform_with_preview(
+                item["record"], item["action"], item["text"], control, rectangle,
+                highlight=highlight, duration_ms=highlight_duration_ms,
+                wait_ms=highlight_wait_ms, fast=True,
             )
+            if highlight:
+                overlay = step_overlay
         except Exception as error:
             failed_step = {
                 "index": item["index"],
                 "command": item["command"],
+                "action_executed": getattr(error, "executed", None),
                 "error": f"{type(error).__name__}: {error}",
             }
             break
@@ -762,8 +736,15 @@ def execute_many(
                 "image_similarity": similarity,
                 "resolved_by": resolved_by,
                 "action_verification": action_verification,
+                "overlay": step_overlay,
             }
         )
+        if step_overlay.get("error"):
+            failed_step = {"index": item["index"], "command": item["command"],
+                           "action_executed": True,
+                           "error": "Action executed but preview cleanup failed; do not repeat: "
+                           + step_overlay["error"]}
+            break
 
     for control_id, count in execution_counts.items():
         record = records[control_id]

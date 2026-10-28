@@ -4,6 +4,28 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog and is maintained automatically by Semantic Release.
 
+## [0.9.7] - 2026-10-28
+
+### Changed
+
+- Route learned UI commands and recorder replay through shared Controller actions
+  backed by uiautomation, including verified targets, coordinate targets, keyboard,
+  text clipboard, recovery input and window activation.
+- Show Controller/ScreenLineBox target previews during deep exploration by default.
+  Acknowledge preview visibility and closure before screenshots; expose
+  `highlight=false` / `--no-highlight` for effect learning and exploration.
+- Preserve action failures and distinguish attempted input from confirmed results.
+  Do not repeat an unconfirmed ValuePattern write using a second input method.
+- Remove emoji decorations from the English and Chinese READMEs.
+- Refresh the contact QR code image used by both READMEs.
+
+### Fixed
+
+- Bound recorder highlight queue processing, coalesce display updates, cancel Tk
+  callbacks on shutdown, guard joins of unstarted UI threads and always signal
+  cleanup completion. Keep recording independent of the UI knowledge vault.
+- Initialize UIAutomation in the MCP background scan/exploration threads.
+
 ## [0.9.6] - 2026-10-26
 
 ### Fixed

@@ -121,6 +121,7 @@ class ScreenLineBox:
         self._destroyed = None
         self._owns_root = False
         self._tick_after_id = None
+        self.tracking_error = None
         if root is None:
             root = tk.Tk()
             root.withdraw()
@@ -169,10 +170,21 @@ class ScreenLineBox:
         elif self.mode == "track":
             self._tracking_active = True
             self._tick()
-        else:
+        elif self.mode != "manual":
             self.root.after(1000, self.destroy)
 
     # ---------- 对外 API ----------
+    def set_visible(self, visible):
+        """Show/hide a caller-managed rectangle on its owning Tk thread."""
+        if self._destroyed:
+            return
+        if visible and self._ever_drawn_valid:
+            self._reveal()
+        elif not visible:
+            for window in self._wins():
+                window.withdraw()
+            self._is_shown = False
+
     def set_control(self, control):
         self._rect_snapshot = None
         self._control = control
@@ -223,7 +235,8 @@ class ScreenLineBox:
         if self.mode == "track":
             self._tracking_active = True
             self._enter_normal_mode()
-            self._tick()
+            if self._tick_after_id is None:
+                self._tick()
 
     def destroy(self):
         if self._destroyed:
@@ -397,23 +410,26 @@ class ScreenLineBox:
             return
         if self.mode != "track":
             return
-        if self.topmost:
-            for w in self._wins():
-                w.wm_attributes("-topmost", True)
-                w.lift()
+        try:
+            if self.topmost:
+                for w in self._wins():
+                    w.wm_attributes("-topmost", True)
+                    w.lift()
 
-        if self._tracking_active:
-            rect_map = (get_visible_rect_map_by_control(self._control)
-                        if self._control is not None else self._rect_snapshot)
-            if rect_map and rect_map['width'] > 0 and rect_map['height'] > 0:
-                # 先更新位置，再根据遮挡切色（但实际遮挡检测由周期控制）
-                self._tick_counter += 1
-                # 仅在周期到点时传入 True，让 _update_from_rect_map 决定是否执行遮挡检测
-                self._update_from_rect_map(rect_map, run_occlusion_check=True)
-            else:
-                # 丢失：变黄，但不暂停；继续 tick
-                self._enter_lost_mode(initial=False)
-        self._tick_after_id = self.root.after(self.interval_ms, self._tick)
+            if self._tracking_active:
+                rect_map = (get_visible_rect_map_by_control(self._control)
+                            if self._control is not None else self._rect_snapshot)
+                if rect_map and rect_map['width'] > 0 and rect_map['height'] > 0:
+                    self._tick_counter += 1
+                    self._update_from_rect_map(rect_map, run_occlusion_check=True)
+                else:
+                    self._enter_lost_mode(initial=False)
+            self.tracking_error = None
+        except Exception as error:
+            self.tracking_error = str(error)
+        finally:
+            if not self._destroyed:
+                self._tick_after_id = self.root.after(self.interval_ms, self._tick)
 
     def run(self):
         if self._owns_root:

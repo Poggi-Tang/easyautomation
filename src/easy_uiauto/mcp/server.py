@@ -1176,20 +1176,21 @@ async def scan_window_knowledge(
 
     def run_scan() -> dict:
         try:
-            result = scanner.scan_window(
-                window_name=window_name,
-                api_url=api_url,
-                api_key=api_key,
-                model=model,
-                version=__version__,
-                max_depth=max_depth,
-                max_controls=max_controls,
-                verify_limit=verify_limit,
-                strategy=strategy,
-                show_overlay=show_overlay,
-                overlay_duration_ms=overlay_duration_ms,
-                progress=update_progress,
-            )
+            with uiautomation.UIAutomationInitializerInThread():
+                result = scanner.scan_window(
+                    window_name=window_name,
+                    api_url=api_url,
+                    api_key=api_key,
+                    model=model,
+                    version=__version__,
+                    max_depth=max_depth,
+                    max_controls=max_controls,
+                    verify_limit=verify_limit,
+                    strategy=strategy,
+                    show_overlay=show_overlay,
+                    overlay_duration_ms=overlay_duration_ms,
+                    progress=update_progress,
+                )
             result["learning_task_id"] = task_id
             learning_progress.complete(task_id, result)
             return result
@@ -1459,6 +1460,7 @@ def learn_ui_command_effect(
     confirm: bool = False,
     recover: bool = False,
     maximum_wait_seconds: float = 3.0,
+    highlight: bool = True,
 ) -> str:
     """Learn one command's before/after visual, window, and local UIA effects.
 
@@ -1466,6 +1468,7 @@ def learn_ui_command_effect(
     local vault. Only target-window before/after images are sent to the configured
     vision API. Difference boxes scope post-operation UIA inspection. Set
     ``recover=true`` only for reversible exploration; recovery currently uses Escape.
+    Controller previews the target by default and removes its frame before screenshots.
     """
     try:
         blocked = _mode_blocks_operation()
@@ -1483,6 +1486,7 @@ def learn_ui_command_effect(
             confirm=confirm,
             recover=recover,
             maximum_wait_seconds=maximum_wait_seconds,
+            highlight=highlight,
         )
         return json.dumps(result, ensure_ascii=False, indent=2)
     except Exception as error:
@@ -1497,6 +1501,7 @@ async def explore_ui_workflows(
     max_actions: int = 10,
     confirm: bool = False,
     max_depth: int = 3,
+    highlight: bool = True,
 ) -> str:
     """Interact with known reversible controls and learn their direct responses.
 
@@ -1505,6 +1510,7 @@ async def explore_ui_workflows(
     confirmation-required commands are returned as pending and never executed.
     New pages and dialogs are scanned recursively up to ``max_depth`` before
     recovery. Scrolling and dragging are intentionally excluded.
+    Interactions use Controller/uiautomation and show target frames by default.
     """
     try:
         blocked = _mode_blocks_operation()
@@ -1521,18 +1527,20 @@ async def explore_ui_workflows(
 
         def run_exploration() -> dict:
             try:
-                value = interaction_learning.explore_application(
-                    knowledge.app_dir(app_id),
-                    api_url,
-                    api_key,
-                    model,
-                    __version__,
-                    policy=policy,
-                    max_actions=max_actions,
-                    confirm=confirm,
-                    max_depth=max_depth,
-                    progress=update_progress,
-                )
+                with uiautomation.UIAutomationInitializerInThread():
+                    value = interaction_learning.explore_application(
+                        knowledge.app_dir(app_id),
+                        api_url,
+                        api_key,
+                        model,
+                        __version__,
+                        policy=policy,
+                        max_actions=max_actions,
+                        confirm=confirm,
+                        max_depth=max_depth,
+                        progress=update_progress,
+                        highlight=highlight,
+                    )
                 value["learning_task_id"] = task_id
                 learning_progress.complete(task_id, value)
                 return value

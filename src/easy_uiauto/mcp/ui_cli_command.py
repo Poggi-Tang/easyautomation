@@ -108,6 +108,7 @@ def _build_parser() -> argparse.ArgumentParser:
     effect.add_argument("--confirm", action="store_true")
     effect.add_argument("--recover", action="store_true")
     effect.add_argument("--maximum-wait", type=float, default=3.0)
+    effect.add_argument("--no-highlight", action="store_true")
     effect.add_argument("--vision-url", default="")
     effect.add_argument("--vision-model", default="")
 
@@ -119,6 +120,7 @@ def _build_parser() -> argparse.ArgumentParser:
     explore.add_argument("--policy", choices=("safe", "supervised"), default="safe")
     explore.add_argument("--max-actions", type=int, default=10)
     explore.add_argument("--max-depth", type=int, default=3)
+    explore.add_argument("--no-highlight", action="store_true")
     explore.add_argument("--confirm", action="store_true")
     explore.add_argument("--vision-url", default="")
     explore.add_argument("--vision-model", default="")
@@ -242,6 +244,7 @@ def main(argv: list[str] | None = None) -> None:
                 confirm=args.confirm,
                 recover=args.recover,
                 maximum_wait_seconds=args.maximum_wait,
+                highlight=not args.no_highlight,
             )
         elif args.subcommand == "explore":
             api_url, api_key, model = _vision_settings(args)
@@ -255,6 +258,7 @@ def main(argv: list[str] | None = None) -> None:
                 max_actions=args.max_actions,
                 confirm=args.confirm,
                 max_depth=args.max_depth,
+                highlight=not args.no_highlight,
             )
         elif args.subcommand == "interactions":
             result = knowledge.list_interactions(

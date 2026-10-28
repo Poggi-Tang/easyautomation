@@ -17,6 +17,7 @@ from urllib import request as urlrequest
 import pyautogui
 import uiautomation
 
+from ..ctrl import Controller
 from . import configuration, image_storage, knowledge, native_windows, scanner, ui_cli
 
 BLOCKED_INTENT = re.compile(
@@ -108,7 +109,8 @@ def capture_snapshot(window_name: str, action_location: dict | None = None) -> d
     window = scanner._find_window(window_name)
     window_rect = scanner._rect(window)
     target_image = scanner._screenshot_window(window_rect)
-    desktop_image, desktop_origin = _capture_virtual_desktop()
+    with Controller.suspend_highlights():
+        desktop_image, desktop_origin = _capture_virtual_desktop()
     action_control = None
     if action_location:
         try:
@@ -502,17 +504,16 @@ def _attempt_recovery(
     action: str,
 ) -> dict:
     attempts = []
-    methods = [("escape", lambda: pyautogui.press("esc"))]
+    methods = [("escape", lambda: Controller.press_key("esc"))]
     if action == "hover":
         rectangle = before["window_rect"]
         methods.insert(
             0,
             (
                 "move-pointer",
-                lambda: pyautogui.moveTo(
-                    rectangle["left"] + rectangle["width"] // 2,
-                    rectangle["top"] + 8,
-                    duration=0,
+                lambda: Controller.execute_resolved(
+                    "hover", x=rectangle["left"] + rectangle["width"] // 2,
+                    y=rectangle["top"] + 8,
                 ),
             ),
         )
@@ -618,6 +619,7 @@ def learn_command_effect(
     maximum_wait_seconds: float = 3.0,
     post_effect: Callable[[dict], dict] | None = None,
     progress: Callable[[str], None] | None = None,
+    highlight: bool = True,
 ) -> dict:
     """Execute one verified command and persist its observed before/after effect."""
     progress = progress or (lambda _message: None)
@@ -636,7 +638,12 @@ def learn_command_effect(
     progress(f"Capturing before state for {command}")
     before = capture_snapshot(record["app_name"], record["location"])
     progress(f"Executing reversible command {command}")
-    execution = ui_cli.execute(directory, command, text, confirm)
+    execution = ui_cli.execute(directory, command, text, confirm, highlight=highlight)
+    if not execution.get("ok", False):
+        raise RuntimeError(
+            "Action was executed but its preview did not close cleanly; "
+            "effect observation stopped. Do not repeat the action. "
+            + str(execution.get("overlay", {}).get("error", "")))
     progress(f"Waiting for UI stability after {command}")
     after, stability = wait_for_stability(
         record["app_name"],
@@ -840,6 +847,7 @@ def explore_application(
     confirm: bool = False,
     max_depth: int = 3,
     progress: Callable[[str], None] | None = None,
+    highlight: bool = True,
 ) -> dict:
     """Recursively explore known low-risk commands and learn their operation effects."""
     progress = progress or (lambda _message: None)
@@ -1018,6 +1026,7 @@ def explore_application(
                     recover=True,
                     post_effect=discover,
                     progress=progress,
+                    highlight=highlight,
                 )
             except Exception as error:
                 stopped.append(f"{item['command']}: {type(error).__name__}: {error}")

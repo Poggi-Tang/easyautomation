@@ -6,39 +6,194 @@
 import tkinter
 import threading
 import time
+from contextlib import contextmanager
+from queue import Empty, Queue
+from weakref import WeakSet
 
-import pyautogui
-import pyperclip
 import uiautomation
 
 from .draw import ScreenLineBox
-from .utils import find_control, package_location, get_control_coordinates, correct_ctrl_position, push_message, set_top_window
+from .utils import find_control, package_location, correct_ctrl_position, push_message, VK_KEY_NAME
 
 
-def _show_thread(control_obj, show_time):
-    """在独立线程中创建 Tk 窗口并显示一次性 overlay（不会阻塞调用线程）。"""
-    try:
-        root = tkinter.Tk()
-        root.withdraw()
-        ScreenLineBox(root, control_obj, mode="once", show_time=show_time)
-        root.mainloop()
-    except Exception as e:
+_preview_lock = threading.RLock()
+_clipboard_lock = threading.RLock()
+_previews = WeakSet()
+
+
+class ControlPatternUnavailable(RuntimeError):
+    """The requested pattern could not be obtained before any write was sent."""
+
+
+class ControlActionError(RuntimeError):
+    """False means no input was sent; None means an attempted input is unconfirmed."""
+
+    def __init__(self, message, *, executed):
+        self.executed = executed
+        code = "action_failed" if executed is False else "result_unconfirmed"
+        suffix = "" if executed is False else "; input was attempted, do not repeat the action"
+        super().__init__(f"[{code}] {message}{suffix}")
+
+
+def _control_rectangle(control):
+    rect = control.BoundingRectangle
+    return _checked_rectangle(dict(left=rect.left, top=rect.top,
+                                   right=rect.right, bottom=rect.bottom))
+
+
+def _checked_rectangle(rectangle):
+    rect = {key: int(rectangle[key]) for key in ("left", "top")}
+    rect["right"] = int(rectangle.get("right", rect["left"] + rectangle.get("width", 0)))
+    rect["bottom"] = int(rectangle.get("bottom", rect["top"] + rectangle.get("height", 0)))
+    rect["width"], rect["height"] = rect["right"] - rect["left"], rect["bottom"] - rect["top"]
+    if rect["width"] <= 0 or rect["height"] <= 0:
+        raise ValueError("Target rectangle must have positive width and height")
+    return rect
+
+
+class ControlPreview:
+    """Own Tk on one thread; exchange only rectangles and acknowledged commands."""
+
+    def __init__(self, rectangles, show_time=300):
+        self.rectangles = [_checked_rectangle(rect) for rect in rectangles]
+        if not self.rectangles:
+            raise ValueError("At least one target rectangle is required")
+        self.show_time = max(0, int(show_time))
+        self.ready = threading.Event()
+        self.closed = threading.Event()
+        self._stop = threading.Event()
+        self._commands = Queue()
+        self.error = None
+        self.thread = threading.Thread(target=self._run, name="easy-uiauto-preview", daemon=True)
+
+    def start(self, timeout=5):
+        self.thread.start()
+        if not self.ready.wait(timeout):
+            self._stop.set()
+            raise TimeoutError("Control preview did not become ready")
+        if self.error:
+            raise RuntimeError(f"Control preview failed: {self.error}")
+        if self.closed.is_set():
+            raise RuntimeError("Control preview closed before it became usable")
+        with _preview_lock:
+            _previews.add(self)
+        return self
+
+    def _run(self):
+        root = None
+        boxes = []
+        after_id = None
+        pump = None
         try:
-            push_message(f"show_ctrl_area 异常: {e}")
-        except Exception:
-            pass
+            if self._stop.is_set():
+                return
+            root = tkinter.Tk()
+            root.withdraw()
+            for rectangle in self.rectangles:
+                box = ScreenLineBox(root=root, mode="manual", control=None)
+                boxes.append(box)
+                box.set_rect(rectangle)
+            root.update()
+            deadline = time.monotonic() + self.show_time / 1000 if self.show_time else None
+
+            def pump():
+                nonlocal after_id
+                after_id = None
+                try:
+                    if self._stop.is_set() or (deadline and time.monotonic() >= deadline):
+                        root.quit()
+                        return
+                    for _ in range(32):
+                        try:
+                            visible, acknowledged = self._commands.get_nowait()
+                        except Empty:
+                            break
+                        for box in boxes:
+                            box.set_visible(visible)
+                        root.update_idletasks()
+                        acknowledged.set()
+                    after_id = root.after(16, pump)
+                except Exception as error:
+                    self.error = str(error)
+                    root.quit()
+
+            after_id = root.after(0, pump)
+            self.ready.set()
+            root.mainloop()
+        except Exception as error:
+            self.error = str(error)
+        finally:
+            self.ready.set()
+            if root is not None:
+                if after_id is not None:
+                    try:
+                        root.after_cancel(after_id)
+                    except tkinter.TclError:
+                        pass
+                for box in boxes:
+                    try:
+                        box.destroy()
+                    except Exception as error:
+                        self.error = self.error or str(error)
+                try:
+                    root.destroy()
+                except tkinter.TclError:
+                    pass
+            boxes.clear()
+            box = pump = root = None
+            with _preview_lock:
+                _previews.discard(self)
+            self.closed.set()
+
+    def set_visible(self, visible, timeout=2):
+        if self.closed.is_set():
+            return
+        acknowledged = threading.Event()
+        self._commands.put((bool(visible), acknowledged))
+        deadline = time.monotonic() + timeout
+        while not acknowledged.wait(0.02):
+            if self.closed.is_set():
+                return
+            if time.monotonic() >= deadline:
+                raise TimeoutError("Control preview visibility change timed out")
+
+    def close(self, timeout=3):
+        self._stop.set()
+        if self.thread.ident is not None and self.thread.ident != threading.get_ident():
+            if not self.closed.wait(timeout):
+                raise TimeoutError("Control preview did not close")
+        if self.error:
+            raise RuntimeError(f"Control preview failed: {self.error}")
+
+    def summary(self):
+        return dict(shown=True, controls=len(self.rectangles), detail="Controller/ScreenLineBox")
 
 
 def show_ctrl_area(control_obj, show_time=300):
-    """非阻塞地显示控件区域：在后台线程启动 Tk 主循环。"""
+    """Preview a snapshot without passing a UIA object to the Tk thread."""
     try:
-        t = threading.Thread(target=_show_thread, args=(control_obj, show_time), daemon=True)
-        t.start()
+        return ControlPreview([_control_rectangle(control_obj)], show_time).start()
     except Exception as e:
         try:
             push_message(f"启动 show_ctrl_area 线程失败: {e}")
         except Exception:
             pass
+
+
+@contextmanager
+def suspend_control_previews():
+    """Keep controller previews out of verification screenshots."""
+    with _preview_lock:
+        previews = list(_previews)
+    hidden = []
+    try:
+        for preview in previews:
+            preview.set_visible(False)
+            hidden.append(preview)
+        yield
+    finally:
+        for preview in hidden:
+            preview.set_visible(True)
 
 
 def locate_and_prepare(LOCATION, PARAMETERS, timeout=3.0, interval=0.2):
@@ -149,6 +304,248 @@ class Controller:
                                 foundIndex, AutomationId, Xpath, Img, PARAMETERS)
 
     @classmethod
+    def show_targets(cls, rectangles, show_time=900):
+        return ControlPreview(rectangles, show_time).start()
+
+    suspend_highlights = staticmethod(suspend_control_previews)
+
+    @staticmethod
+    def _key_code(key):
+        if isinstance(key, int):
+            return key
+        name = str(key).strip().removeprefix("Key.").upper()
+        aliases = {
+            "CTRL_L": "LCTRL", "CTRL_R": "RCTRL", "CTRLLEFT": "LCTRL", "CTRLRIGHT": "RCTRL",
+            "ALT_L": "LALT", "ALT_R": "RALT", "ALTLEFT": "LALT", "ALTRIGHT": "RALT",
+            "SHIFT_L": "LSHIFT", "SHIFT_R": "RSHIFT", "SHIFTLEFT": "LSHIFT", "SHIFTRIGHT": "RSHIFT",
+            "CMD": "WIN", "CMD_L": "LWIN", "CMD_R": "RWIN", "WINLEFT": "LWIN", "WINRIGHT": "RWIN",
+            "CONTROL": "CTRL", "RETURN": "ENTER", "ESCAPE": "ESC", "DEL": "DELETE",
+            "CAPS_LOCK": "CAPSLOCK", "PAGE_DOWN": "PAGEDOWN", "PAGE_UP": "PAGEUP",
+            "PGDN": "PAGEDOWN", "PGUP": "PAGEUP", "PRINT_SCREEN": "PRINTSCREEN",
+            "BACKSPACE": "BACK", "CAPSLOCK": "CAPITAL", "NUM_LOCK": "NUMLOCK",
+            "SCROLL_LOCK": "SCROLL", "SCROLLLOCK": "SCROLL", "MENU": "APPS",
+        }
+        name = aliases.get(name, name)
+        code = uiautomation.SpecialKeyNames.get(name)
+        if isinstance(code, int):
+            return code
+        if len(name) == 1 and name.isascii() and name.isalnum():
+            return ord(name)
+        for virtual_key, recorded_name in VK_KEY_NAME.items():
+            if str(recorded_name).upper() == name:
+                return virtual_key
+        code = getattr(uiautomation.Keys, name if name.startswith("VK_") else f"VK_{name}", None)
+        if isinstance(code, int):
+            return code
+        raise ValueError(f"Unknown keyboard key: {key}")
+
+    @classmethod
+    def press_key(cls, key):
+        code = cls._key_code(key)
+        try:
+            uiautomation.PressKey(code, waitTime=0)
+        finally:
+            uiautomation.ReleaseKey(code, waitTime=0)
+        return {"executed": True, "method": "uia-key"}
+
+    @classmethod
+    def key_down(cls, key):
+        uiautomation.PressKey(cls._key_code(key), waitTime=0)
+
+    @classmethod
+    def key_up(cls, key):
+        uiautomation.ReleaseKey(cls._key_code(key), waitTime=0)
+
+    @classmethod
+    def hotkey(cls, *keys):
+        codes = [cls._key_code(key) for key in keys]
+        if not codes:
+            raise ValueError("At least one hotkey key is required")
+        pressed = []
+        original_error = None
+        try:
+            for code in codes:
+                pressed.append(code)
+                uiautomation.PressKey(code, waitTime=0)
+            time.sleep(0.02)
+        except BaseException as error:
+            original_error = error
+            raise
+        finally:
+            cleanup_errors = []
+            for code in reversed(pressed):
+                try:
+                    uiautomation.ReleaseKey(code, waitTime=0)
+                except Exception as error:
+                    cleanup_errors.append(str(error))
+            if cleanup_errors:
+                detail = "Could not release hotkey: " + "; ".join(cleanup_errors)
+                if original_error is not None:
+                    original_error.add_note(detail)
+                else:
+                    raise RuntimeError(detail)
+        return {"executed": True, "method": "uia-hotkey"}
+
+    @staticmethod
+    def get_clipboard_text():
+        return uiautomation.GetClipboardText()
+
+    @staticmethod
+    def set_clipboard_text(text):
+        if not uiautomation.SetClipboardText(str(text)):
+            raise RuntimeError("Could not write clipboard text")
+
+    @classmethod
+    @contextmanager
+    def preserve_clipboard_text(cls):
+        with _clipboard_lock:
+            previous = cls.get_clipboard_text()
+            original_error = None
+            try:
+                yield
+            except BaseException as error:
+                original_error = error
+                raise
+            finally:
+                try:
+                    cls.set_clipboard_text(previous)
+                except Exception as error:
+                    if original_error is not None:
+                        original_error.add_note(f"Clipboard restoration also failed: {error}")
+                    else:
+                        raise
+
+    @classmethod
+    def activate_window_handle(cls, handle, control=None):
+        handle = int(handle or 0)
+        if not handle:
+            raise ValueError("A window handle is required")
+        if uiautomation.IsIconic(handle):
+            uiautomation.ShowWindow(handle, uiautomation.SW.Restore)
+        if uiautomation.GetForegroundWindow() != handle:
+            uiautomation.SetForegroundWindow(handle)
+            if uiautomation.GetForegroundWindow() != handle and control is not None:
+                control.SetFocus()
+        deadline = time.monotonic() + 0.5
+        while uiautomation.GetForegroundWindow() != handle:
+            if time.monotonic() >= deadline:
+                raise RuntimeError("[window_invalid] Could not activate the target window")
+            time.sleep(0.02)
+        return {"executed": True, "method": "uia-window-activate"}
+
+    @classmethod
+    def execute_resolved(cls, action, *, control=None, rectangle=None, x=None, y=None,
+                         text="", select_all=False, destination=None, wheel_times=1):
+        """Execute an already located target. x/y are inner offsets for controls,
+        screen coordinates otherwise. This never performs a second XPath lookup.
+        """
+        state = {"attempted": False}
+        try:
+            return cls._execute_resolved(
+                action, control=control, rectangle=rectangle, x=x, y=y, text=text,
+                select_all=select_all, destination=destination, wheel_times=wheel_times,
+                state=state,
+            )
+        except (ControlPatternUnavailable, ControlActionError):
+            raise
+        except Exception as error:
+            raise ControlActionError(str(error), executed=None if state["attempted"] else False) from error
+
+    @classmethod
+    def _execute_resolved(cls, action, *, control, rectangle, x, y, text, select_all,
+                          destination, wheel_times, state):
+        started = time.monotonic()
+        pointer_actions = {"click", "double-click", "right-click", "middle-click", "hover",
+                           "left-down", "left-up", "right-down", "right-up", "drag",
+                           "wheel-up", "wheel-down"}
+        if action in pointer_actions:
+            rect = _control_rectangle(control) if control is not None else (
+                _checked_rectangle(rectangle) if rectangle is not None else None)
+            if control is not None and action != "hover" and not bool(control.IsEnabled):
+                raise RuntimeError("[control_disabled] 控件不可点击")
+            if control is None and rect is None and (x is None or y is None):
+                raise ValueError("Pointer actions require a control, rectangle, or screen point")
+            if control is None:
+                px = int(x) if x is not None else rect["left"] + rect["width"] // 2
+                py = int(y) if y is not None else rect["top"] + rect["height"] // 2
+            if action == "drag":
+                destination = _checked_rectangle(destination)
+            if action in {"wheel-up", "wheel-down"} and int(wheel_times) < 0:
+                raise ValueError("wheel_times must not be negative")
+            state["attempted"] = True
+            if action in {"click", "double-click", "right-click", "middle-click", "hover"}:
+                methods = {"click": "Click", "double-click": "DoubleClick", "right-click": "RightClick",
+                           "middle-click": "MiddleClick", "hover": "MoveCursorToInnerPos"}
+                if control is not None:
+                    options = dict(x=x, y=y, simulateMove=False)
+                    if action != "hover":
+                        options["waitTime"] = 0
+                    getattr(control, methods[action])(**options)
+                elif action == "double-click":
+                    uiautomation.Click(px, py, waitTime=uiautomation.GetDoubleClickTime() / 2000)
+                    uiautomation.Click(px, py, waitTime=0)
+                elif action == "hover":
+                    uiautomation.MoveTo(px, py, moveSpeed=0, waitTime=0)
+                else:
+                    getattr(uiautomation, methods[action])(px, py, waitTime=0)
+            else:
+                if control is not None:
+                    point = control.MoveCursorToInnerPos(x=x, y=y, simulateMove=False)
+                    if point is None:
+                        raise RuntimeError("Target has no clickable area")
+                    px, py = point
+                if action == "drag":
+                    target = _checked_rectangle(destination)
+                    uiautomation.DragDrop(px, py, target["left"] + target["width"] // 2,
+                                         target["top"] + target["height"] // 2, moveSpeed=0, waitTime=0)
+                elif action in {"wheel-up", "wheel-down"}:
+                    uiautomation.MoveTo(px, py, moveSpeed=0, waitTime=0)
+                    method = uiautomation.WheelUp if action == "wheel-up" else uiautomation.WheelDown
+                    method(wheelTimes=int(wheel_times), waitTime=0)
+                elif action.endswith("-up"):
+                    method = uiautomation.ReleaseMouse if action == "left-up" else uiautomation.RightReleaseMouse
+                    method(waitTime=0)
+                else:
+                    method = uiautomation.PressMouse if action == "left-down" else uiautomation.RightPressMouse
+                    method(px, py, waitTime=0)
+            method_name = ("uia-" if control is not None else "coordinate-") + action
+        elif action == "set-value":
+            if control is None:
+                raise ControlPatternUnavailable("ValuePattern requires a UIA control")
+            try:
+                pattern = control.GetValuePattern()
+                if pattern is None:
+                    raise RuntimeError("ValuePattern is unavailable")
+            except Exception as error:
+                raise ControlPatternUnavailable(str(error)) from error
+            state["attempted"] = True
+            if not pattern.SetValue(text, waitTime=0):
+                raise RuntimeError("UIA SetValue returned failure")
+            method_name = "uia-set-value"
+        elif action == "send-keys":
+            state["attempted"] = True
+            if control is not None:
+                control.SendKeys(text, interval=0, waitTime=0)
+            else:
+                uiautomation.SendKeys(text, interval=0, waitTime=0)
+            method_name = "uia-send-keys"
+        elif action == "paste-text":
+            state["attempted"] = True
+            if control is not None or rectangle is not None:
+                cls.execute_resolved("click", control=control, rectangle=rectangle)
+            if select_all:
+                cls.hotkey("ctrl", "a")
+            with cls.preserve_clipboard_text():
+                cls.set_clipboard_text(text)
+                cls.hotkey("ctrl", "v")
+                time.sleep(0.12)
+            method_name = "clipboard-paste"
+        else:
+            raise ValueError(f"Unsupported controller action: {action}")
+        return {"executed": True, "method": method_name,
+                "duration_seconds": round(time.monotonic() - started, 4)}
+
+    @classmethod
     def left_click(cls, ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex,
                       AutomationId, Xpath, Img, PARAMETERS):
         _MESSAGE_TYPE = _MESSAGE.INFO
@@ -158,13 +555,7 @@ class Controller:
             # 准备控件
             control, x, y = prepare_control(WindowName, Name, ClassName, ControlType,
                                             foundIndex, AutomationId, Xpath, Img, PARAMETERS)
-            # 对于特定控件类型，使用可点击点
-            if control.ControlTypeName in {'ButtonControl', 'MenuItemControl', 'CheckBoxControl'}:
-                if not control.IsEnabled:
-                    raise Exception('控件不可点击')
-                control.Click(x, y, simulateMove=False, waitTime=0)
-            else:
-                control.Click(x, y, simulateMove=False, waitTime=0)
+            cls.execute_resolved("click", control=control, x=x, y=y)
 
             MESSAGE = f"步骤：{ActionTitle} 控件【{Name}】 执行动作 点击 成功！"
 
@@ -188,7 +579,7 @@ class Controller:
             control = find_control(LOCATION)
             if control:
                 x, y = get_pos(control, PARAMETERS)
-                uiautomation.PressMouse(x, y, waitTime=0)
+                cls.execute_resolved("left-down", control=control, x=x, y=y)
             else:
                 raise Exception("未找到控件！")
             MESSAGE = f"步骤：{ActionTitle} 控件【{Name}】 执行动作 鼠标左键按下 成功！"
@@ -208,9 +599,10 @@ class Controller:
             LOCATION = cls._make_location(WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
                                            PARAMETERS)
 
-            result = cls.mouse_move_control(ActionTitle, **LOCATION)
-            if result[0] == _MESSAGE.INFO:
-                uiautomation.ReleaseMouse(waitTime=0)
+            control = find_control(LOCATION)
+            if control:
+                x, y = get_pos(control, PARAMETERS)
+                cls.execute_resolved("left-up", control=control, x=x, y=y)
                 MESSAGE = f"步骤：{ActionTitle} 控件【{Name}】 执行动作 鼠标左键释放 成功！"
             else:
                 raise Exception("未找到控件！")
@@ -233,7 +625,7 @@ class Controller:
             control = find_control(LOCATION)
             if control:
                 x, y = get_pos(control, PARAMETERS)
-                control.RightClick(x, y, simulateMove=False, waitTime=0)
+                cls.execute_resolved("right-click", control=control, x=x, y=y)
             else:
                 raise Exception("未找到控件！")
             MESSAGE = f"步骤：{ActionTitle} 控件【{Name}】 执行动作 右键点击 成功！"
@@ -256,7 +648,7 @@ class Controller:
             control = find_control(LOCATION)
             if control:
                 x, y = get_pos(control, PARAMETERS)
-                uiautomation.RightPressMouse(x, y, waitTime=0)
+                cls.execute_resolved("right-down", control=control, x=x, y=y)
             else:
                 raise Exception("未找到控件！")
             MESSAGE = f"步骤：{ActionTitle} 控件【{Name}】 执行动作 鼠标右键按下 成功！"
@@ -276,9 +668,10 @@ class Controller:
             LOCATION = cls._make_location(WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
                                            PARAMETERS)
 
-            result = cls.mouse_move_control(ActionTitle, **LOCATION)
-            if result[0] == _MESSAGE.INFO:
-                uiautomation.RightReleaseMouse(waitTime=0)
+            control = find_control(LOCATION)
+            if control:
+                x, y = get_pos(control, PARAMETERS)
+                cls.execute_resolved("right-up", control=control, x=x, y=y)
                 MESSAGE = f"步骤：{ActionTitle} 控件【{Name}】 执行动作 鼠标右键释放 成功！"
             else:
                 raise Exception("未找到控件！")
@@ -301,7 +694,7 @@ class Controller:
             control = find_control(LOCATION)
             if control:
                 x, y = get_pos(control, PARAMETERS)
-                control.MiddleClick(x, y, simulateMove=False, waitTime=0)
+                cls.execute_resolved("middle-click", control=control, x=x, y=y)
             else:
                 raise Exception("未找到控件！")
             MESSAGE = f"步骤：{ActionTitle} 控件【{Name}】 执行动作 中键点击 成功！"
@@ -324,7 +717,7 @@ class Controller:
             control = find_control(LOCATION)
             if control:
                 x, y = get_pos(control, PARAMETERS)
-                control.DoubleClick(x, y, simulateMove=False, waitTime=0)
+                cls.execute_resolved("double-click", control=control, x=x, y=y)
             else:
                 raise Exception("未找到控件！")
 
@@ -341,7 +734,7 @@ class Controller:
         _MESSAGE_TYPE = _MESSAGE.INFO
         MESSAGE = ""
         try:
-            uiautomation.MoveTo(x, y, moveSpeed=0, waitTime=0)
+            cls.execute_resolved("hover", x=x, y=y)
             MESSAGE = f"步骤：{ActionTitle} 位置【{x}{y}】 执行动作 移动鼠标到坐标位置 成功！"
         except Exception as e:
             _MESSAGE_TYPE = _MESSAGE.ERROR
@@ -362,7 +755,7 @@ class Controller:
             control = find_control(LOCATION)
             if control:
                 x, y = get_pos(control, PARAMETERS)
-                control.MoveCursorToInnerPos(x, y, simulateMove=False)
+                cls.execute_resolved("hover", control=control, x=x, y=y)
             else:
                 raise Exception("未找到控件！")
             MESSAGE = f"步骤：{ActionTitle} 控件【{Name}】 执行动作 移动鼠标到坐标位置 成功！"
@@ -375,13 +768,8 @@ class Controller:
 
     @classmethod
     def drag_control_by_control(cls, current_control, target_control):
-        current_coord = get_control_coordinates(current_control)
-        target_coord = get_control_coordinates(target_control)
-        current_coord_x = (current_coord[0] + current_coord[2]) // 2
-        current_coord_y = (current_coord[1] + current_coord[3]) // 2
-        target_coord_x = (target_coord[0] + target_coord[2]) // 2
-        target_coord_y = (target_coord[1] + target_coord[3]) // 2
-        uiautomation.DragDrop(current_coord_x, current_coord_y, target_coord_x, target_coord_y, moveSpeed=0, waitTime=0)
+        return cls.execute_resolved("drag", control=current_control,
+                                    destination=_control_rectangle(target_control))
 
     @classmethod
     def drag_control(cls, ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
@@ -432,7 +820,9 @@ class Controller:
             control = find_control(LOCATION)
             if control:
                 correct_ctrl_position(control)
-            control.SendKeys(PARAMETERS["设置文本"], interval=0, waitTime=0)
+            if not control:
+                raise RuntimeError("未找到控件！")
+            cls.execute_resolved("send-keys", control=control, text=PARAMETERS["设置文本"])
             MESSAGE = f"步骤：{ActionTitle} 控件【{Name}】 执行动作 设置文本 成功！"
         except Exception as e:
             _MESSAGE_TYPE = _MESSAGE.ERROR
@@ -452,9 +842,10 @@ class Controller:
             if WindowName:
                 control = find_control(LOCATION)
                 if control:
-                    control.Click(simulateMove=False, waitTime=0)
-            pyperclip.copy(PARAMETERS['输入文本'])
-            pyautogui.hotkey('ctrl', 'v', interval=0)
+                    cls.execute_resolved("click", control=control)
+                else:
+                    raise RuntimeError("未找到控件！")
+            cls.execute_resolved("paste-text", text=PARAMETERS['输入文本'])
             MESSAGE = f"步骤：{ActionTitle}执行动作 输入 成功"
         except Exception as e:
             _MESSAGE_TYPE = _MESSAGE.ERROR
@@ -474,8 +865,10 @@ class Controller:
             if WindowName:
                 control = find_control(LOCATION)
                 if control:
-                    control.Click(simulateMove=False, waitTime=0)
-            pyautogui.press(PARAMETERS['键盘按键'])
+                    cls.execute_resolved("click", control=control)
+                else:
+                    raise RuntimeError("未找到控件！")
+            cls.press_key(PARAMETERS['键盘按键'])
             MESSAGE = f"步骤：{ActionTitle}执行动作 键盘操作 成功"
         except Exception as e:
             _MESSAGE_TYPE = _MESSAGE.ERROR
@@ -495,8 +888,10 @@ class Controller:
             if WindowName:
                 control = find_control(LOCATION)
                 if control:
-                    control.Click(simulateMove=False, waitTime=0)
-            pyautogui.keyDown(PARAMETERS['键盘按键'])
+                    cls.execute_resolved("click", control=control)
+                else:
+                    raise RuntimeError("未找到控件！")
+            cls.key_down(PARAMETERS['键盘按键'])
             MESSAGE = f"步骤：{ActionTitle}执行动作 键盘按下 成功"
         except Exception as e:
             _MESSAGE_TYPE = _MESSAGE.ERROR
@@ -516,8 +911,10 @@ class Controller:
             if WindowName:
                 control = find_control(LOCATION)
                 if control:
-                    control.Click(simulateMove=False, waitTime=0)
-            pyautogui.keyUp(PARAMETERS['键盘按键'])
+                    cls.execute_resolved("click", control=control)
+                else:
+                    raise RuntimeError("未找到控件！")
+            cls.key_up(PARAMETERS['键盘按键'])
             MESSAGE = f"步骤：{ActionTitle}执行动作 键盘释放 成功"
         except Exception as e:
             _MESSAGE_TYPE = _MESSAGE.ERROR
@@ -534,21 +931,14 @@ class Controller:
         try:
             LOCATION = cls._make_location(WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
                                            PARAMETERS)
-            key_mapping = {
-                'ctrl_l': 'ctrlleft',
-                'ctrl_r': 'ctrlright',
-                'alt_l': 'altleft',
-                'alt_r': 'altright',
-                'shift_l': 'shiftleft',
-                'shift_r': 'shiftright',
-            }
             if WindowName:
                 control = find_control(LOCATION)
                 if control:
-                    control.Click(simulateMove=False, waitTime=0)
-            raw_keys = PARAMETERS['组合键'].lower().split('+')
-            mapped_keys = [key_mapping.get(k.strip(), k.strip()) for k in raw_keys]
-            pyautogui.hotkey(*mapped_keys)
+                    cls.execute_resolved("click", control=control)
+                else:
+                    raise RuntimeError("未找到控件！")
+            keys = PARAMETERS['组合键'].replace('++', '+{PLUS}').split('+')
+            cls.hotkey(*(key if key != '{PLUS}' else '+' for key in keys))
             MESSAGE = f"步骤：{ActionTitle}执行动作 组合键 成功"
         except Exception as e:
             _MESSAGE_TYPE = _MESSAGE.ERROR
@@ -559,7 +949,15 @@ class Controller:
 
     @classmethod
     def activate_window(cls, WindowTitle):
-        return set_top_window(WindowTitle)
+        from .utils import _native_window_scope
+
+        try:
+            window = _native_window_scope(WindowTitle, {})
+            cls.activate_window_handle(window.NativeWindowHandle, control=window)
+            return True
+        except Exception as error:
+            push_message(f"窗口激活失败：{error}")
+            return False
 
 
 # ==============================鼠标动作==============================

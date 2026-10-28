@@ -26,44 +26,44 @@ It also annotates saved images locally with YOLO + OCR: provide an image path an
 an output directory to receive separate text, graphic and combined annotation
 images, coordinates, recognition evidence and a local HTML viewer.
 
-> ⚠️ Visual scanning and workflow exploration are still evolving. Review learned
+> Visual scanning and workflow exploration are still evolving. Review learned
 > commands before using them for messages, payments, deletion, uploads, account
 > changes, or other operations with external effects.
 
-## ✨ What It Includes
+## What It Includes
 
-- 🖱️ **Desktop automation**: click, double-click, right-click, drag, scroll,
+- **Desktop automation**: click, double-click, right-click, drag, scroll,
   keyboard input, hotkeys, window activation, and text entry.
-- 🎬 **Action recording**: record real operations, highlight the selected control,
+- **Action recording**: record real operations, highlight the selected control,
   and generate reusable Python actions with a complete `LOCATION`.
-- 🔌 **MCP server**: use the same automation surface from Codex, Claude Code, or
+- **MCP server**: use the same automation surface from Codex, Claude Code, or
   another MCP client.
-- 🔎 **Visual-first learning**: identify the important regions and controls in one
+- **Visual-first learning**: identify the important regions and controls in one
   screenshot, then map them back to stable local UIA controls without walking the
   whole tree by default.
-- 🧠 **State-aware semantics**: distinguish stable functions from dynamic values,
+- **State-aware semantics**: distinguish stable functions from dynamic values,
   retain names and avatars, connect related controls, and explain visible states such
   as a Send button disabled while its message input is empty.
-- 🧭 **Semantic UI CLI**: turn verified controls into searchable application
+- **Semantic UI CLI**: turn verified controls into searchable application
   commands instead of rediscovering coordinates for every task.
-- 🖼️ **Control overlays**: number every learned or executable control in one
+- **Control overlays**: number every learned or executable control in one
   click-through overlay, save annotated page images, and preview operation targets.
-- 🏷️ **Local image annotation**: use CPU-based YOLO + OCR without a vision API;
+- **Local image annotation**: use CPU-based YOLO + OCR without a vision API;
   export blue `G` graphics and orange `T` text with one-pixel boxes, adjacent IDs,
   local geometry correction and automatic small-text recovery.
-- 🧪 **Effect learning**: compare before/after screenshots, inspect changed UIA
+- **Effect learning**: compare before/after screenshots, inspect changed UIA
   properties and new windows, and store an evidence-backed success condition.
-- 🗂️ **Readable knowledge**: keep pages, controls, images, interactions, and
+- **Readable knowledge**: keep pages, controls, images, interactions, and
   quarantine records as Markdown/YAML/PNG files that work directly with Obsidian
   and version control.
-- 📐 **Stable records**: persist structured `LOCATION` identities and normalized
+- **Stable records**: persist structured `LOCATION` identities and normalized
   visual hints, never process IDs, window handles, or absolute desktop rectangles.
-- 🛟 **Layered lookup**: unique `AutomationId`, contextual XPath, stable property
+- **Layered lookup**: unique `AutomationId`, contextual XPath, stable property
   combinations, saved image states, local OCR, then opt-in remote vision.
-- ⚡ **Fast anchors**: use a unique window-scoped `AutomationId` before XPath, while
+- **Fast anchors**: use a unique window-scoped `AutomationId` before XPath, while
   keeping hierarchy as the fallback for missing or duplicate IDs.
 
-## 🚦 Capability Status
+## Capability Status
 
 | Area | Status | Notes |
 | --- | --- | --- |
@@ -79,7 +79,7 @@ Automated workflow exploration intentionally excludes scrolling and dragging.
 The base automation library still provides those operations for explicit scripts
 and direct MCP calls.
 
-## 📦 Installation
+## Installation
 
 Requirements: Windows and Python 3.11 or newer.
 
@@ -112,7 +112,7 @@ is `block-diagram`; use `--profile ui` for ordinary software screenshots or
 `--profile circuit` for electrical symbols. See
 [local image annotation from CMD](#local-image-annotation-from-cmd) for details.
 
-## 🔌 MCP Setup
+## MCP Setup
 
 Install the optional MCP dependencies when using easy-uiauto from an MCP client:
 
@@ -265,7 +265,7 @@ consistent direction in both tools.
 
 See [outcome codes, migration notes and examples (Chinese)](docs/mcp-results-and-waits.md).
 
-## 🧭 Learn an Application
+## Learn an Application
 
 The package includes two Codex skills:
 
@@ -279,7 +279,7 @@ Use $easy-uiauto-learning to learn the currently open WeChat window and build
 its control knowledge and UI commands.
 ```
 
-### 🔎 Light Scan
+### Light Scan
 
 A light scan observes one visible page. It does not click the application.
 
@@ -490,10 +490,18 @@ another interpreter. Use `annotate-image.cmd --help` for options. Exit status is
 on success and 2 on failure; failures after processing begins are recorded in that
 run's `summary.json` and `run.log`.
 
-### 🧪 Deep Exploration
+### Deep Exploration
 
 Deep exploration starts with a light scan, executes known reversible commands,
 and records what changed. New pages and dialogs can be scanned recursively.
+
+Deep-learning interactions and recorded replay share `Controller` actions backed
+by `uiautomation`. Verified targets are passed directly to the execution layer,
+without a second XPath lookup. Target previews use the in-process `ScreenLineBox`
+and close before operation-effect screenshots are captured; text-verification screenshots
+temporarily hide previews. Use `highlight=false` with `learn_ui_command_effect`
+or `explore_ui_workflows`, or `--no-highlight` on the CLI, to disable previews.
+Manual recording remains independent of the knowledge vault.
 
 ```text
 Use $easy-uiauto-learning to deeply learn the currently open WeChat window with
@@ -516,7 +524,7 @@ reversible state-changing commands. External, destructive, and
 confirmation-required commands are never explored automatically. Scrolling and
 dragging are not implemented in the explorer.
 
-### ▶️ Run Learned Commands
+### Run Learned Commands
 
 ```bash
 easy_uiauto_ui search <app-id> "search terms"
@@ -543,7 +551,7 @@ Use a batch only for commands on the same stable page. Split the sequence after
 navigation. Commands with external or destructive effects require `--confirm`
 or `confirm=true`.
 
-### 🗂️ Knowledge Vault
+### Knowledge Vault
 
 The default vault is `~/easy_uiauto_vault`. Set
 `EASY_UIAUTO_KNOWLEDGE_DIR` to use another location. Markdown/YAML and PNG files
@@ -593,7 +601,7 @@ resolve the current `LOCATION` first, then use a unique image template or local 
 fallback. Version 0.6 automatically removes legacy absolute rectangles, PIDs, and
 window handles when an older vault index is rebuilt.
 
-### 🔐 Privacy and Safety
+### Privacy and Safety
 
 - Light scanning sends the selected target-window screenshot to the configured
   endpoint.
@@ -651,7 +659,7 @@ and the complete result from `get_control_at_position`. Legacy flat arguments
 remain supported. A present AutomationId is tried before the stored XPath and ignores
 dynamic Name, `foundIndex`, and recorded geometry; XPath handles missing or duplicate IDs.
 
-## 🧰 Python API Examples
+## Python API Examples
 
 ### Import MCP tools in Python
 
@@ -735,7 +743,7 @@ run_record(write_file=True)
 # Generated script will be saved to Record{timestamp}.py
 ```
 
-## 🏗️ Project Structure
+## Project Structure
 
 ```text
 easyautomation
@@ -761,7 +769,7 @@ easyautomation
 └── pyproject.toml
 ```
 
-## 🚀 Release Automation
+## Release Automation
 
 The repository uses GitHub Actions for validation and publishing:
 
@@ -769,7 +777,7 @@ The repository uses GitHub Actions for validation and publishing:
 - **Tagged releases** build and publish through PyPI Trusted Publishing.
 - **Build artifacts** include both an sdist and a wheel.
 
-## 🛠️ Development
+## Development
 
 ```bash
 pip install -e .[dev]
@@ -777,15 +785,15 @@ pytest
 ruff check .
 ```
 
-## 📚 More Examples
+## More Examples
 
 For more examples, please refer to the test files in the `demo/` directory or check the docstrings in the source code.
 
-## 📄 License
+## License
 
 MIT License. See [LICENSE](https://github.com/Poggi-Tang/easyautomation/blob/main/LICENSE).
 
-## 💬 Contact
+## Contact
 
 Scan the QR code to add me on WeChat:
 

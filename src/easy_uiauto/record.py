@@ -59,6 +59,10 @@ class RecordThread(threading.Thread):
         self.ui_cmd_queue = Queue()
         self.ui_thread = None
         self.ui_ready = threading.Event()
+        self._ui_stop = threading.Event()
+        self._ui_closed = threading.Event()
+        self.ui_warning = None
+        self.ui_warning_count = 0
 
         # 监听器
         self.mouse_listener = mouse.Listener(
@@ -81,6 +85,10 @@ class RecordThread(threading.Thread):
                 self.started.set()
             push_message(f"\033[1;32m{'录制开始'.center(52, '-')}\033[0m")
             while self.running:
+                if self._ui_closed.is_set() and not self._ui_stop.is_set():
+                    self.ui_error = self.ui_error or "高亮线程意外退出，动作采集仍在继续"
+                    push_message(f"录制高亮中断: {self.ui_error}")
+                    self._ui_stop.set()
                 time.sleep(0.05)
         except Exception as error:
             self.run_error = error
@@ -101,7 +109,36 @@ class RecordThread(threading.Thread):
             root = None
             box = None
             pump = None
+            pump_after_id = None
+            pending_control = None
+            has_pending_control = False
+            last_tracking_error = None
+
+            def update_control():
+                nonlocal has_pending_control, pending_control
+                if not has_pending_control:
+                    return
+                try:
+                    box.set_control(pending_control)
+                    if box._current_mode == "lost":
+                        raise RuntimeError("当前控件暂时无法读取有效位置")
+                    if self.ui_warning:
+                        push_message(f"控件高亮已恢复，此前失败 {self.ui_warning_count} 次")
+                    self.ui_warning = None
+                    self.ui_warning_count = 0
+                except Exception as error:
+                    detail = str(error)
+                    if detail != self.ui_warning:
+                        push_message(f"高亮控件更新失败: {detail}")
+                    self.ui_warning = detail
+                    self.ui_warning_count += 1
+                finally:
+                    pending_control = None
+                    has_pending_control = False
+
             try:
+                if self._ui_stop.is_set():
+                    return
                 root = tk.Tk()
                 root.withdraw()
                 box = ScreenLineBox(
@@ -110,37 +147,70 @@ class RecordThread(threading.Thread):
                 )
 
                 def pump():
+                    nonlocal pump_after_id, pending_control, has_pending_control, last_tracking_error
+                    pump_after_id = None
                     try:
-                        while True:
-                            command = self.ui_cmd_queue.get_nowait()
+                        if self._ui_stop.is_set():
+                            root.quit()
+                            return
+                        for _ in range(32):
+                            if self._ui_stop.is_set():
+                                root.quit()
+                                return
+                            try:
+                                command = self.ui_cmd_queue.get_nowait()
+                            except Empty:
+                                break
                             name = command.get("cmd")
                             if name == "set_control":
-                                try:
-                                    box.set_control(command.get("control"))
-                                except Exception as error:
-                                    self.ui_error = str(error)
-                                    push_message(f"高亮控件更新失败: {error}")
+                                pending_control = command.get("control")
+                                has_pending_control = True
                             elif name == "set_style":
-                                box.set_style(
-                                    color=command.get("color"),
-                                    line_width=command.get("line_width"),
-                                    alpha=command.get("alpha"),
-                                )
+                                update_control()
+                                try:
+                                    box.set_style(
+                                        color=command.get("color"),
+                                        line_width=command.get("line_width"),
+                                        alpha=command.get("alpha"),
+                                    )
+                                except Exception as error:
+                                    push_message(f"高亮样式更新失败: {error}")
                             elif name == "close":
-                                box.destroy()
+                                self._ui_stop.set()
+                                root.quit()
                                 return
-                    except Empty:
-                        pass
-                    root.after(16, pump)
+                        update_control()
+                        tracking_error = getattr(box, "tracking_error", None)
+                        if tracking_error != last_tracking_error:
+                            if tracking_error:
+                                push_message(f"控件跟踪暂时失败: {tracking_error}")
+                            elif last_tracking_error:
+                                push_message("控件跟踪已恢复")
+                            last_tracking_error = tracking_error
+                        pump_after_id = root.after(16, pump)
+                    except Exception as error:
+                        self.ui_error = str(error)
+                        root.quit()
 
-                root.after(0, pump)
+                pump_after_id = root.after(0, pump)
                 self.ui_ready.set()
                 root.mainloop()
             except Exception as error:
                 self.ui_error = str(error)
                 self.ui_ready.set()
             finally:
+                self.ui_ready.set()
                 if root is not None:
+                    if pump_after_id is not None:
+                        try:
+                            root.after_cancel(pump_after_id)
+                        except tk.TclError:
+                            pass
+                    if box is not None:
+                        try:
+                            box.destroy()
+                        except Exception as error:
+                            self.cleanup_errors.append(str(error))
                     try:
                         root.destroy()
                     except Exception:
@@ -149,11 +219,16 @@ class RecordThread(threading.Thread):
                 pump = None
                 box = None
                 root = None
+                pending_control = update_control = None
+                self._ui_closed.set()
 
-        self.ui_thread = threading.Thread(
-            target=ui_thread_func, name="easy-uiauto-record-ui", daemon=True,
-        )
-        self.ui_thread.start()
+        with self._state_lock:
+            if self._stopped:
+                return
+            self.ui_thread = threading.Thread(
+                target=ui_thread_func, name="easy-uiauto-record-ui", daemon=True,
+            )
+            self.ui_thread.start()
         if not self.ui_ready.wait(timeout=5):
             raise TimeoutError("录制高亮窗口启动超时")
         if self.ui_error:
@@ -175,9 +250,13 @@ class RecordThread(threading.Thread):
             if self._stopped:
                 return
             self.running = False
-            self.flush_last_input()
             self._stopped = True
+            self._ui_stop.set()
         try:
+            try:
+                self.flush_last_input()
+            except Exception as error:
+                self.run_error = self.run_error or error
             for listener in (self.mouse_listener, self.keyboard_listener):
                 # pynput's join raises before start; partial startup is expected.
                 if listener.ident is None:
@@ -201,12 +280,17 @@ class RecordThread(threading.Thread):
             self.run_error = self.run_error or error
             raise
         finally:
-            self.ui_cmd_queue.put({"cmd": "close"})
-            if self.ui_thread and self.ui_thread.ident != threading.get_ident():
-                self.ui_thread.join(timeout=3)
-                if self.ui_thread.is_alive():
-                    self.cleanup_errors.append("高亮窗口线程未在超时内退出")
-            self._stop_complete.set()
+            try:
+                self.ui_cmd_queue.put({"cmd": "close"})
+                if (self.ui_thread is not None and self.ui_thread.ident is not None
+                        and self.ui_thread.ident != threading.get_ident()):
+                    self.ui_thread.join(timeout=3)
+                    if self.ui_thread.is_alive():
+                        self.cleanup_errors.append("高亮窗口线程未在超时内退出")
+            except Exception as error:
+                self.cleanup_errors.append(str(error))
+            finally:
+                self._stop_complete.set()
 
     def flush_last_input(self):
         if self.last_input:
@@ -233,8 +317,8 @@ class RecordThread(threading.Thread):
                 push_message(f"锁定控件: {control.Name} ({control.ControlTypeName})")
             except Exception:
                 push_message("锁定控件")
-        except Exception:
-            pass
+        except Exception as error:
+            push_message(f"高亮更新未入队: {error}")
 
     def on_click(self, x, y, button, pressed):
         if self._stopped:
