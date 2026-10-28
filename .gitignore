@@ -9,3 +9,6 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Compiled on Windows and included in distributions by the packaging workflows.
+/src/easy_uiauto/bin/*.exe

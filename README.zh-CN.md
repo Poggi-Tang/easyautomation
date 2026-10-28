@@ -166,6 +166,35 @@ EASY_UIAUTO_VISION_MODEL=your-vision-model
 这两个工具仅在调用时向配置的端点上传当前截图。应优先采用 UIA、OCR 或图片模板匹配，
 多模态 API 只作为最后兜底。
 
+### 图形配置窗口
+
+Windows x64 安装包的 wheel 和源码包均内置 `easy_uiauto/bin/easy-uiauto-config.exe`。
+安装后运行 `easy_uiauto_config` 即可打开内置 EXE；也可直接双击独立构建产物
+`dist/easy-uiauto-config.exe`。窗口用于配置知识库路径、API URL、API Key 和 API Model；
+EXE 自带运行环境，单独运行不需要另装 Python。API Key 按明文显示，
+Model 下拉框既可输入，也可点击右侧“获取”后选择服务提供的模型。“浏览”用于选择
+本地知识库目录，“保存配置”将四项设置写入 Windows 当前用户环境。
+
+API URL 支持服务根地址、`/v1` 地址或完整的 `/chat/completions` 地址；保存时转换为
+现有 MCP 使用的完整请求地址。获取模型列表不会修改已保存配置，也不会发送截图。
+新版本 MCP 在下次调用时读取知识库路径和 API 配置；旧版 MCP 需先升级并重启。
+修改知识库路径不会自动迁移原有内容。本窗口仅配置一个 API。
+
+从源码构建 EXE（Windows）：
+
+```cmd
+python -m pip install pyinstaller
+python scripts/build_config_exe.py --bundle-package
+python -m build
+python scripts/verify_config_bundle.py
+```
+
+打包前须先生成 EXE；`--bundle-package` 会将 EXE 复制进包资源目录。
+仓库 CI 和标签发布流程会先在 Windows 编译 EXE，再生成并检查 wheel、源码包，
+确认两者都包含同一份 EXE 后才允许发布。编译产物通过构建工件传递，不提交到 Git。
+
+### 命令行配置
+
 MCP 服务随库一起安装，直接复用同一套自动化 API：
 
 ```bash

@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog and is maintained automatically by Semantic Release.
 
+## [Unreleased]
+
+### Added
+
+- Add a standalone Windows Tk configuration EXE and `easy_uiauto_config` GUI
+  entry point for the knowledge directory, API URL, visible API Key and editable
+  model dropdown. Fetch the provider's model list in a background thread.
+- Persist the four settings to the Windows user environment. Read the knowledge
+  directory dynamically, matching the existing API configuration behavior.
+- Add a reproducible PyInstaller build script for the standalone EXE.
+- Bundle the Windows x64 configuration EXE in wheels and source distributions,
+  launch it through `easy_uiauto_config`, and verify package contents in CI and
+  the tag publication workflow before uploading distributions.
+
 ## [0.9.8] - 2026-10-28
 
 ### Fixed

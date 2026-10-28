@@ -8,24 +8,22 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import re
 import shutil
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from . import image_storage
+from . import configuration, image_storage
 
-KNOWLEDGE_DIR = "EASY_UIAUTO_KNOWLEDGE_DIR"
+KNOWLEDGE_DIR = configuration.KNOWLEDGE_DIR
 INDEX_VERSION = 3
 SEARCHABLE_STATUSES = {"verified", "observed", "suspect"}
 EXECUTABLE_STATUSES = {"verified"}
 
 
 def vault_root() -> Path:
-    configured = os.environ.get(KNOWLEDGE_DIR, "").strip()
-    return Path(configured).expanduser() if configured else Path.home() / "easy_uiauto_vault"
+    return configuration.knowledge_directory()
 
 
 def slugify(value: str, fallback: str = "item") -> str:

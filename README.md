@@ -265,6 +265,39 @@ consistent direction in both tools.
 
 See [outcome codes, migration notes and examples (Chinese)](docs/mcp-results-and-waits.md).
 
+### Configuration Window
+
+Windows x64 wheels and source distributions include
+`easy_uiauto/bin/easy-uiauto-config.exe`. After installation, run
+`easy_uiauto_config` to launch that bundled EXE, or double-click the standalone
+`dist/easy-uiauto-config.exe`. It configures the knowledge directory, API URL,
+API Key and API Model and includes its Python/Tk runtime for standalone use.
+The API Key is readable; the model dropdown accepts typed names as well
+as selections from the provider's model list. Browse selects a local directory,
+Fetch retrieves models in the background, and Save persists the four settings to
+the Windows user environment. This window configures one API.
+
+URLs may be a provider base, a versioned `/v1` base or a full `/chat/completions`
+endpoint; saving normalizes the URL for the existing MCP. Model retrieval does
+not save changes or send screenshots. The updated MCP reads saved settings on
+its next call; older MCP versions need an upgrade and restart. Existing knowledge
+is not moved when the directory changes.
+
+Build on Windows:
+
+```cmd
+python -m pip install pyinstaller
+python scripts/build_config_exe.py --bundle-package
+python -m build
+python scripts/verify_config_bundle.py
+```
+
+Build the EXE before the Python distributions. `--bundle-package` copies it into
+the package resources. CI and tag publication first compile it on Windows, then
+build the wheel and sdist and verify that both contain the same EXE before
+publication. Compiled binaries travel as build artifacts and are not checked
+into Git.
+
 ## Learn an Application
 
 The package includes two Codex skills:

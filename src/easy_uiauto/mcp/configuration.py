@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import getpass
+import json
 import os
 import shutil
 import subprocess
 import sys
 from pathlib import Path
+from urllib import error as urlerror, parse as urlparse, request as urlrequest
 
 import tomllib
 
@@ -16,6 +18,7 @@ SERVER_MODULE = "easy_uiauto.mcp.server"
 VISION_API_URL = "EASY_UIAUTO_VISION_API_URL"
 VISION_API_KEY = "EASY_UIAUTO_VISION_API_KEY"
 VISION_MODEL = "EASY_UIAUTO_VISION_MODEL"
+KNOWLEDGE_DIR = "EASY_UIAUTO_KNOWLEDGE_DIR"
 
 
 def _read_user_environment(name: str) -> str:
@@ -66,6 +69,145 @@ def _existing_vision_value(name: str) -> str:
         or os.environ.get(name, "").strip()
         or _read_existing_codex_environment(name).strip()
     )
+
+
+def knowledge_directory() -> Path:
+    """Read the saved directory on each call, including in an already running MCP."""
+    configured = _existing_vision_value(KNOWLEDGE_DIR)
+    return Path(configured).expanduser() if configured else Path.home() / "easy_uiauto_vault"
+
+
+def load_gui_configuration() -> dict[str, str]:
+    """Read only this application's settings for the local configuration window."""
+    return {
+        "knowledge_dir": str(knowledge_directory()),
+        "api_url": _existing_vision_value(VISION_API_URL),
+        "api_key": _existing_vision_value(VISION_API_KEY),
+        "api_model": _existing_vision_value(VISION_MODEL),
+    }
+
+
+def api_endpoints(api_url: str) -> tuple[str, str]:
+    """Accept a provider base, versioned base, models URL or chat-completions URL."""
+    value = api_url.strip()
+    try:
+        parts = urlparse.urlsplit(value)
+        valid = parts.scheme in {"http", "https"} and parts.hostname
+        _ = parts.port  # Validate an explicitly supplied port as well.
+    except ValueError as error:
+        raise ValueError("API URL 格式不正确") from error
+    if not valid or parts.username or parts.password or parts.query or parts.fragment:
+        raise ValueError("API URL 须为 http:// 或 https:// 地址，不含账号、查询参数或片段")
+    if any(character.isspace() for character in value):
+        raise ValueError("API URL 不能包含空格或换行")
+    path = parts.path.rstrip("/")
+    for suffix in ("/chat/completions", "/models"):
+        if path.endswith(suffix):
+            path = path[:-len(suffix)]
+            break
+    base = urlparse.urlunsplit((parts.scheme, parts.netloc, path, "", ""))
+    return base + "/chat/completions", base + "/models"
+
+
+def fetch_models(api_url: str, api_key: str, timeout: float = 20) -> list[str]:
+    """Fetch an OpenAI-compatible model catalogue; never include credentials in errors."""
+    _chat_url, models_url = api_endpoints(api_url)
+    api_key = api_key.strip()
+    if not api_key or "\r" in api_key or "\n" in api_key:
+        raise ValueError("请填写有效的 API Key")
+    request = urlrequest.Request(
+        models_url,
+        headers={"Authorization": f"Bearer {api_key}", "Accept": "application/json"},
+        method="GET",
+    )
+    try:
+        with urlrequest.urlopen(request, timeout=timeout) as response:
+            body = response.read(2 * 1024 * 1024 + 1)
+        if len(body) > 2 * 1024 * 1024:
+            raise ValueError("模型列表响应过大，请手动填写模型名称")
+        result = json.loads(body.decode("utf-8-sig"))
+    except urlerror.HTTPError as error:
+        hints = {
+            401: "请检查 API Key", 403: "当前 API Key 没有访问权限",
+            404: "该地址没有模型列表接口，可手动填写 API Model",
+            405: "接口不支持获取模型列表，可手动填写 API Model",
+            429: "请求过于频繁，请稍后再试",
+        }
+        detail = f"获取失败（HTTP {error.code}）：" + hints.get(error.code, "请检查服务状态")
+        error.close()
+        raise RuntimeError(detail) from None
+    except (TimeoutError, urlerror.URLError) as error:
+        reason = getattr(error, "reason", error)
+        detail = "请求超时" if isinstance(reason, TimeoutError) else "无法连接服务"
+        raise RuntimeError(detail + "，请检查 API URL 或稍后重试") from None
+    except (UnicodeError, json.JSONDecodeError):
+        raise RuntimeError("接口未返回有效 JSON，可手动填写 API Model") from None
+    if not isinstance(result, dict) or not isinstance(result.get("data"), list):
+        raise RuntimeError("接口未返回兼容的模型列表，可手动填写 API Model")
+    models = sorted({
+        item["id"].strip() for item in result["data"]
+        if isinstance(item, dict) and isinstance(item.get("id"), str) and item["id"].strip()
+    }, key=str.casefold)
+    if not models:
+        raise RuntimeError("接口返回的模型列表为空，可手动填写 API Model")
+    return models
+
+
+def save_gui_configuration(knowledge_dir: str, api_url: str, api_key: str,
+                           api_model: str) -> dict[str, str]:
+    """Validate the entire form before persisting any of its four values."""
+    if os.name != "nt":
+        raise RuntimeError("配置窗口的持久化保存仅支持 Windows")
+    if not knowledge_dir.strip():
+        raise ValueError("请选择或填写知识库路径")
+    directory = Path(os.path.expandvars(knowledge_dir.strip())).expanduser()
+    if not directory.is_absolute():
+        raise ValueError("知识库路径须为绝对路径")
+    chat_url, _models_url = api_endpoints(api_url)
+    api_key, api_model = api_key.strip(), api_model.strip()
+    if not api_key or "\r" in api_key or "\n" in api_key:
+        raise ValueError("请填写有效的 API Key")
+    if not api_model:
+        raise ValueError("请输入或选择 API Model")
+    directory.mkdir(parents=True, exist_ok=True)
+    values = {
+        KNOWLEDGE_DIR: str(directory), VISION_API_URL: chat_url,
+        VISION_API_KEY: api_key, VISION_MODEL: api_model,
+    }
+    import winreg
+
+    # Roll back a partial write. The process environment is updated only on success.
+    with winreg.CreateKey(winreg.HKEY_CURRENT_USER, "Environment") as key:
+        previous = {}
+        written = []
+        try:
+            for name, value in values.items():
+                try:
+                    previous[name] = winreg.QueryValueEx(key, name)
+                except FileNotFoundError:
+                    previous[name] = None
+                winreg.SetValueEx(key, name, 0, winreg.REG_SZ, value)
+                written.append(name)
+        except OSError:
+            for name in reversed(written):
+                old_value = previous[name]
+                if old_value is None:
+                    winreg.DeleteValue(key, name)
+                else:
+                    winreg.SetValueEx(key, name, 0, old_value[1], old_value[0])
+            raise
+    os.environ.update(values)
+    # Let future processes inherit the changes. A running MCP reads the registry itself.
+    import ctypes
+    from ctypes import wintypes
+
+    result = ctypes.c_size_t()
+    send = ctypes.WinDLL("user32", use_last_error=True).SendMessageTimeoutW
+    send.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPCWSTR,
+                     wintypes.UINT, wintypes.UINT, ctypes.POINTER(ctypes.c_size_t)]
+    send.restype = wintypes.LPARAM
+    send(0xFFFF, 0x001A, 0, "Environment", 0x0002, 1000, ctypes.byref(result))
+    return {"knowledge_dir": str(directory), "api_url": chat_url, "api_model": api_model}
 
 
 def vision_request_options(model: str) -> dict:

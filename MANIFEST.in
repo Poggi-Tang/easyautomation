@@ -4,5 +4,6 @@ include CHANGELOG.md
 include demo/mcp_import.py
 include src/easy_uiauto/highlight.py
 include src/easy_uiauto/_highlight_worker.py
+include src/easy_uiauto/bin/easy-uiauto-config.exe
 recursive-include scripts *.py
 recursive-include docs *.md
