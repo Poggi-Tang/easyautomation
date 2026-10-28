@@ -8,7 +8,16 @@ from types import SimpleNamespace
 import pytest
 from PIL import Image, ImageDraw
 
+from easy_uiauto import ctrl
 from easy_uiauto.mcp import knowledge, ui_cli
+
+
+def _control(**properties):
+    return SimpleNamespace(**{
+        "IsEnabled": True,
+        "BoundingRectangle": SimpleNamespace(left=20, top=40, right=120, bottom=80),
+        **properties,
+    })
 
 
 @pytest.mark.parametrize("method", ["location", "image"])
@@ -82,7 +91,7 @@ def test_execute_clicks_verified_control(monkeypatch, tmp_path) -> None:
     knowledge.save_control(directory, record)
     knowledge.rebuild_index(directory)
     clicks: list[dict] = []
-    control = SimpleNamespace(Click=lambda **kwargs: clicks.append(kwargs))
+    control = _control(Click=lambda **kwargs: clicks.append(kwargs))
     monkeypatch.setattr(
         ui_cli,
         "_resolve_verified_control",
@@ -92,7 +101,7 @@ def test_execute_clicks_verified_control(monkeypatch, tmp_path) -> None:
     result = ui_cli.execute(directory, "main.toolbar.save.click")
 
     assert result["ok"] is True
-    assert clicks == [{"simulateMove": False, "waitTime": 0}]
+    assert clicks == [{"x": None, "y": None, "simulateMove": False, "waitTime": 0}]
     assert result["resolved_by"] == "location"
 
 
@@ -103,16 +112,19 @@ def test_execute_highlights_resolved_target_before_action(monkeypatch, tmp_path)
     knowledge.rebuild_index(directory)
     events = []
     rectangle = {"left": 20, "top": 40, "right": 120, "bottom": 80, "width": 100, "height": 40}
-    control = SimpleNamespace(Click=lambda **_kwargs: events.append("click"))
+    control = _control(Click=lambda **_kwargs: events.append("click"))
     monkeypatch.setattr(
         ui_cli,
         "_resolve_verified_control",
         lambda *_args: (control, 0.95, rectangle, "location"),
     )
     monkeypatch.setattr(
-        ui_cli.visualization,
-        "show_markers",
-        lambda markers, *_args: events.append(("overlay", markers)) or {"shown": True},
+        ui_cli.Controller,
+        "show_targets",
+        lambda rectangles, **_kwargs: events.append(("overlay", rectangles)) or SimpleNamespace(
+            summary=lambda: {"shown": True, "controls": len(rectangles)},
+            close=lambda: events.append("closed"),
+        ),
     )
 
     result = ui_cli.execute(
@@ -122,9 +134,11 @@ def test_execute_highlights_resolved_target_before_action(monkeypatch, tmp_path)
     )
 
     assert events[0][0] == "overlay"
-    assert events[0][1][0]["rect"] == rectangle
+    assert events[0][1] == [rectangle]
     assert events[1] == "click"
+    assert events[2] == "closed"
     assert result["overlay"]["shown"] is True
+    assert result["overlay"]["closed"] is True
 
 
 def test_execute_uses_verified_image_fallback(monkeypatch, tmp_path) -> None:
@@ -138,39 +152,42 @@ def test_execute_uses_verified_image_fallback(monkeypatch, tmp_path) -> None:
         "_resolve_verified_control",
         lambda *_args: (None, 0.91, rectangle, "image"),
     )
-    monkeypatch.setattr(ui_cli.pyautogui, "click", lambda x, y: clicks.append((x, y)))
+    monkeypatch.setattr(ctrl.uiautomation, "Click", lambda x, y, **kwargs: clicks.append(
+        (x, y, kwargs["waitTime"])))
 
     result = ui_cli.execute(directory, "main.toolbar.save.click")
 
     assert result["resolved_by"] == "image"
-    assert clicks == [(70, 60)]
+    assert clicks == [(70, 60, 0)]
 
 
 def test_perform_action_supports_right_click_and_hover(monkeypatch) -> None:
     calls = []
     rectangle = {"left": 20, "top": 40, "width": 100, "height": 40}
     monkeypatch.setattr(
-        ui_cli.pyautogui,
-        "rightClick",
-        lambda x, y: calls.append(("right-click", x, y)),
+        ctrl.uiautomation,
+        "RightClick",
+        lambda x, y, **kwargs: calls.append(("right-click", x, y, kwargs["waitTime"])),
     )
     monkeypatch.setattr(
-        ui_cli.pyautogui,
-        "moveTo",
-        lambda x, y, duration: calls.append(("hover", x, y, duration)),
+        ctrl.uiautomation,
+        "MoveTo",
+        lambda x, y, **kwargs: calls.append(("hover", x, y, kwargs["waitTime"])),
     )
 
     ui_cli._perform_action("right-click", "", None, rectangle)
     ui_cli._perform_action("hover", "", None, rectangle, fast=True)
 
-    assert calls == [("right-click", 70, 60), ("hover", 70, 60, 0)]
+    assert calls == [("right-click", 70, 60, 0), ("hover", 70, 60, 0)]
 
 
 def test_set_text_verifies_uia_value_without_using_clipboard(monkeypatch) -> None:
     pattern = SimpleNamespace(Value="")
 
-    def set_value(value):
+    def set_value(value, *, waitTime):
+        assert waitTime == 0
         pattern.Value = value
+        return True
 
     pattern.SetValue = set_value
     control = SimpleNamespace(GetValuePattern=lambda: pattern)
@@ -197,23 +214,46 @@ def test_set_text_verifies_uia_value_without_using_clipboard(monkeypatch) -> Non
     assert result["evidence"] == "accessible-value"
 
 
-def test_set_text_falls_back_to_verified_unicode_clipboard_paste(monkeypatch) -> None:
-    pattern = SimpleNamespace(Value="", SetValue=lambda _value: None)
+@pytest.mark.parametrize("outcome", ["unreadable", "rejected", "exception"])
+def test_unconfirmed_value_write_is_not_repeated_as_clipboard_paste(monkeypatch, outcome):
+    calls = []
+
+    def set_value(value, *, waitTime):
+        calls.append((value, waitTime))
+        if outcome == "exception":
+            raise RuntimeError("Provider lost the write result")
+        return outcome != "rejected"
+
     control = SimpleNamespace(
-        GetValuePattern=lambda: pattern,
+        GetValuePattern=lambda: SimpleNamespace(Value="", SetValue=set_value),
+    )
+    monkeypatch.setattr(ui_cli, "_capture_action_image", lambda _rect: Image.new("RGB", (100, 30)))
+    monkeypatch.setattr(ui_cli, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(ui_cli, "_paste_text_with_clipboard", lambda *_args: pytest.fail(
+        "An attempted ValuePattern write must not be repeated"))
+
+    with pytest.raises(RuntimeError, match="result_unconfirmed"):
+        ui_cli._perform_action(
+            "set-text", "你好", control, {"left": 0, "top": 0, "width": 100, "height": 30},
+        )
+    assert calls == [("你好", 0)]
+
+
+def test_missing_value_pattern_uses_verified_unicode_clipboard_paste(monkeypatch) -> None:
+    control = _control(
+        GetValuePattern=lambda: None,
         Click=lambda **_kwargs: None,
     )
     unchanged = Image.new("RGB", (100, 30), "white")
     changed = unchanged.copy()
     ImageDraw.Draw(changed).rectangle((5, 5, 40, 20), fill="black")
-    images = iter((unchanged, unchanged, unchanged, changed))
+    images = iter((unchanged, unchanged, changed))
     monkeypatch.setattr(ui_cli, "_capture_action_image", lambda _rectangle: next(images))
     hotkeys = []
-    monkeypatch.setattr(ui_cli.pyautogui, "hotkey", lambda *keys: hotkeys.append(keys))
-    monkeypatch.setattr(ui_cli.pyautogui, "press", lambda key: hotkeys.append((key,)))
+    monkeypatch.setattr(ui_cli.Controller, "press_key", lambda key: hotkeys.append((key,)))
     copied = []
     clipboard = ["original clipboard"]
-    monkeypatch.setattr(ui_cli.pyperclip, "paste", lambda: clipboard[0])
+    monkeypatch.setattr(ui_cli.Controller, "get_clipboard_text", lambda: clipboard[0])
 
     def copy(value):
         copied.append(value)
@@ -224,8 +264,9 @@ def test_set_text_falls_back_to_verified_unicode_clipboard_paste(monkeypatch) ->
         if keys == ("ctrl", "c"):
             clipboard[0] = "你好"
 
-    monkeypatch.setattr(ui_cli.pyautogui, "hotkey", hotkey)
-    monkeypatch.setattr(ui_cli.pyperclip, "copy", copy)
+    monkeypatch.setattr(ui_cli.Controller, "hotkey", hotkey)
+    monkeypatch.setattr(ui_cli.Controller, "set_clipboard_text", copy)
+    monkeypatch.setattr(ctrl.time, "sleep", lambda _seconds: None)
     monkeypatch.setattr(ui_cli, "sleep", lambda _seconds: None)
 
     result = ui_cli._perform_action(
@@ -250,8 +291,8 @@ def test_set_text_falls_back_to_verified_unicode_clipboard_paste(monkeypatch) ->
 
 
 def test_set_text_rejects_clipboard_paste_without_observable_effect(monkeypatch) -> None:
-    control = SimpleNamespace(
-        GetValuePattern=lambda: SimpleNamespace(Value="", SetValue=lambda _value: None),
+    control = _control(
+        GetValuePattern=lambda: None,
         Click=lambda **_kwargs: None,
     )
     monkeypatch.setattr(
@@ -259,10 +300,12 @@ def test_set_text_rejects_clipboard_paste_without_observable_effect(monkeypatch)
         "_capture_action_image",
         lambda _rectangle: Image.new("RGB", (100, 30), "white"),
     )
-    monkeypatch.setattr(ui_cli.pyautogui, "hotkey", lambda *_keys: None)
-    monkeypatch.setattr(ui_cli.pyautogui, "press", lambda _key: None)
-    monkeypatch.setattr(ui_cli.pyperclip, "paste", lambda: "")
-    monkeypatch.setattr(ui_cli.pyperclip, "copy", lambda _value: None)
+    clipboard = [""]
+    monkeypatch.setattr(ui_cli.Controller, "hotkey", lambda *_keys: None)
+    monkeypatch.setattr(ui_cli.Controller, "press_key", lambda _key: None)
+    monkeypatch.setattr(ui_cli.Controller, "get_clipboard_text", lambda: clipboard[0])
+    monkeypatch.setattr(ui_cli.Controller, "set_clipboard_text", lambda value: clipboard.__setitem__(0, value))
+    monkeypatch.setattr(ctrl.time, "sleep", lambda _seconds: None)
     monkeypatch.setattr(ui_cli, "sleep", lambda _seconds: None)
 
     try:
@@ -382,7 +425,7 @@ def test_dangerous_command_requires_explicit_confirmation(monkeypatch, tmp_path)
         raise AssertionError("dangerous batch executed without confirmation")
 
     clicks: list[bool] = []
-    control = SimpleNamespace(Click=lambda **kwargs: clicks.append(kwargs["simulateMove"] is False))
+    control = _control(Click=lambda **kwargs: clicks.append(kwargs["simulateMove"] is False))
     monkeypatch.setattr(
         ui_cli,
         "_resolve_verified_control",
@@ -414,8 +457,8 @@ def test_execute_many_shares_preflight_and_writes_once(monkeypatch, tmp_path) ->
     calls = {"window": 0, "screenshot": 0, "resolved": [], "saved": [], "rebuilt": 0}
     clicks = []
     controls = {
-        "save": SimpleNamespace(Click=lambda **_kwargs: clicks.append("save")),
-        "open": SimpleNamespace(Click=lambda **_kwargs: clicks.append("open")),
+        "save": _control(Click=lambda **_kwargs: clicks.append("save")),
+        "open": _control(Click=lambda **_kwargs: clicks.append("open")),
     }
 
     def find_window(_name):

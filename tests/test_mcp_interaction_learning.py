@@ -188,8 +188,8 @@ def test_recovery_withholds_keys_when_target_cannot_be_activated(monkeypatch):
     monkeypatch.setattr(interaction_learning.scanner, "_activate_window", Mock(
         side_effect=RuntimeError("Foreground lock")))
     press, hotkey = Mock(), Mock()
-    monkeypatch.setattr(interaction_learning.pyautogui, "press", press)
-    monkeypatch.setattr(interaction_learning.pyautogui, "hotkey", hotkey)
+    monkeypatch.setattr(interaction_learning.Controller, "press_key", press)
+    monkeypatch.setattr(interaction_learning.Controller, "hotkey", hotkey)
     result = interaction_learning._attempt_recovery("Example", {"target_handle": 42}, {}, "click")
     assert result["ok"] is False and "withheld" in result["detail"]
     press.assert_not_called()
@@ -209,8 +209,8 @@ def test_recovery_activates_owned_modal_instead_of_disabled_owner(monkeypatch):
         dialog if handle == 43 else pytest.fail("Unrelated window selected")))
     activation, press, hotkey = Mock(), Mock(), Mock()
     monkeypatch.setattr(interaction_learning.scanner, "_activate_window", activation)
-    monkeypatch.setattr(interaction_learning.pyautogui, "press", press)
-    monkeypatch.setattr(interaction_learning.pyautogui, "hotkey", hotkey)
+    monkeypatch.setattr(interaction_learning.Controller, "press_key", press)
+    monkeypatch.setattr(interaction_learning.Controller, "hotkey", hotkey)
     image = _image()
     monkeypatch.setattr(interaction_learning, "wait_for_stability", lambda *_a, **_kw: (
         {"_target_image": image}, {"stable": True}))

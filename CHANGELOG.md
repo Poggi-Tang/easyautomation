@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog and is maintained automatically by Semantic Release.
 
+## [0.9.8] - 2026-10-28
+
+### Fixed
+
+- Align automation test doubles with the shared Controller/uiautomation input,
+  preview lifecycle and foreground activation interfaces introduced in 0.9.7.
+- Check that an unconfirmed ValuePattern write is never repeated via clipboard
+  paste. Keep the existing Windows test matrix as the PyPI publication gate.
+
 ## [0.9.7] - 2026-10-28
 
 ### Changed

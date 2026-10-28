@@ -10,15 +10,36 @@ import pytest
 from easy_uiauto.mcp import diagnostics, interaction_learning, native_windows, scanner
 
 
+def _activation_api(monkeypatch, *, minimized=False, grant_foreground=True):
+    foreground = [7]
+
+    def activate(handle):
+        if grant_foreground:
+            foreground[0] = handle
+        return grant_foreground
+
+    api = SimpleNamespace(
+        IsWindow=lambda _h: True,
+        IsIconic=lambda _h: minimized,
+        ShowWindow=Mock(),
+        SetForegroundWindow=Mock(side_effect=activate),
+        GetForegroundWindow=lambda: foreground[0],
+    )
+    monkeypatch.setattr(native_windows, "_api", lambda: (api, None))
+    for name in ("IsIconic", "ShowWindow", "SetForegroundWindow", "GetForegroundWindow"):
+        monkeypatch.setattr(scanner.uiautomation, name, getattr(api, name))
+    monkeypatch.setattr(scanner.time, "sleep", lambda _s: None)
+    return api
+
+
 @pytest.mark.parametrize("minimized", [False, True])
 def test_activation_preserves_maximized_layout_and_only_restores_minimized(
         monkeypatch, minimized):
-    api = SimpleNamespace(IsWindow=lambda _h: True, IsIconic=lambda _h: minimized,
-                          ShowWindow=Mock(), SetForegroundWindow=lambda _h: True,
-                          GetForegroundWindow=lambda: 42)
-    monkeypatch.setattr(native_windows, "_api", lambda: (api, None))
-    monkeypatch.setattr(scanner.time, "sleep", lambda _s: None)
-    scanner._activate_window(SimpleNamespace(NativeWindowHandle=42))
+    api = _activation_api(monkeypatch, minimized=minimized)
+    focus = Mock()
+    scanner._activate_window(SimpleNamespace(NativeWindowHandle=42, SetFocus=focus))
+    api.SetForegroundWindow.assert_called_once_with(42)
+    focus.assert_not_called()
     if minimized:
         api.ShowWindow.assert_called_once_with(42, 9)
     else:
@@ -26,13 +47,12 @@ def test_activation_preserves_maximized_layout_and_only_restores_minimized(
 
 
 def test_activation_denied_is_reported_even_if_focus_call_does_not_raise(monkeypatch):
-    api = SimpleNamespace(IsWindow=lambda _h: True, IsIconic=lambda _h: False,
-                          ShowWindow=Mock(), SetForegroundWindow=lambda _h: False,
-                          GetForegroundWindow=lambda: 7)
-    monkeypatch.setattr(native_windows, "_api", lambda: (api, None))
-    monkeypatch.setattr(scanner.time, "sleep", lambda _s: None)
-    with pytest.raises(RuntimeError, match="foreground access was denied"):
-        scanner._activate_window(SimpleNamespace(NativeWindowHandle=42, SetFocus=Mock()))
+    api = _activation_api(monkeypatch, grant_foreground=False)
+    focus = Mock()
+    with pytest.raises(RuntimeError, match=r"\[window_invalid\].*Could not activate"):
+        scanner._activate_window(SimpleNamespace(NativeWindowHandle=42, SetFocus=focus))
+    api.SetForegroundWindow.assert_called_once_with(42)
+    focus.assert_called_once_with()
 
 
 def _entry(handle, title="Editor", class_name="EditorClass", visible=True):
