@@ -74,6 +74,31 @@ def _rect(control) -> dict:
     }
 
 
+def _window_rect(window, bounds: dict | None = None) -> dict:
+    """Use the same visible frame for capture, normalized hints and coordinate mapping."""
+    return native_windows.visible_window_bounds(
+        int(getattr(window, "NativeWindowHandle", 0) or 0),
+        _rect(window) if bounds is None else bounds,
+        class_name=str(getattr(window, "ClassName", "") or ""),
+    )
+
+
+def _trim_window_capture(image, bounds: dict, window):
+    """Keep image pixels and screen origin together after optional local edge cropping."""
+    if (not hasattr(image, "size") or str(getattr(window, "ClassName", "")) in {
+        "Progman", "WorkerW", "Shell_TrayWnd", "Shell_SecondaryTrayWnd",
+    }):
+        return image, bounds
+    from .window_crop import crop_window_image
+
+    try:
+        cropped = crop_window_image(image, bounds)
+    except (ImportError, RuntimeError):
+        # The local visual dependency is optional; native visible bounds still work.
+        return image, bounds
+    return cropped["image"], cropped["screen_rect"]
+
+
 def _valid_rect(rectangle: dict, window_rect: dict) -> bool:
     return (
         rectangle["width"] > 1
@@ -1885,7 +1910,7 @@ def scan_window(
     progress("Reading target window through UI Automation")
     actual_name = (getattr(window, "Name", "") or window_name).strip()
     _activate_window(window)
-    window_rect = _rect(window)
+    window_rect = _window_rect(window)
     if window_rect["width"] <= 1 or window_rect["height"] <= 1:
         raise RuntimeError(f"Window has no visible bounds: {actual_name}")
 
@@ -1902,6 +1927,8 @@ def scan_window(
     knowledge.load_index(directory)
     progress("Capturing window screenshot")
     screenshot = _screenshot_window(window_rect)
+    capture_bounds = dict(window_rect)
+    screenshot, window_rect = _trim_window_capture(screenshot, window_rect, window)
     page_image = directory / "images" / "pages" / "latest.png"
     screenshot.save(page_image)
 
@@ -1915,8 +1942,8 @@ def scan_window(
         progress("Segmenting interface with remote AI")
         segmentation = segment_interface(screenshot, api_url, api_key, model, version, progress)
     _activate_window(window)
-    refreshed_rect = _rect(window)
-    if refreshed_rect != window_rect:
+    refreshed_rect = _window_rect(window)
+    if refreshed_rect != capture_bounds:
         raise RuntimeError("Window moved or resized during visual analysis; scan again when stable")
     page = _reuse_page_identity(directory, screenshot, segmentation["page"])
     page_id = page["id"]
@@ -1941,6 +1968,7 @@ def scan_window(
         "image": str(page_image_named.relative_to(directory)).replace("\\", "/"),
         "model": model,
         "scan_id": scan_id,
+        "capture_geometry": "visible-window-bounds+local-edge-crop",
     }
     knowledge.save_page(directory, page_record)
     for region in segmentation["regions"]:

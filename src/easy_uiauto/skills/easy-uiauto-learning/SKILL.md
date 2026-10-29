@@ -9,12 +9,32 @@ Build reusable UI knowledge through the `easy_uiauto` MCP tools.
 
 ## Supplied UI Images
 
-For standalone local YOLO + OCR exports from CMD, use the checkout's
+YOLO + RapidOCR is the default and recommended saved-image annotation combination.
+It uses official OmniParser v2.0 icon_detect_v3/model.pt (YOLOv9-E), not custom
+circuit training, and RapidOCR PP-OCRv6 small ONNX for text.
+Default YOLO confidence is 0.1. Local annotations automatically snap graphic
+boxes to nearby closed rectangles (threshold 210, width 30..600, height 12..60,
+IoU >=0.35, growth <=1.6x, with a contour-area guard). Text and IDs stay unchanged;
+raw predictions, corrected bounds and all coordinate fields are preserved together.
+Review rectangle-snap.json, before-snap.png and snap-compare.png. Disable with
+MCP rectangle_snap=false or CMD --no-rectangle-snap when inappropriate.
+For profile="ui", review ui-fusion.json: pixel evidence rejects empty proposals,
+compact borders protect checkbox graphics from OCR deduplication, and same-image
+templates recover repeated small icons. Raw OCR/YOLO remain available; merged
+compact controls retain all yolo_proposal_ids. Template-correlation scores are
+not YOLO scores or semantic verification. Recovery never uses old reviewed boxes.
+The report also keeps grid/list layout regions separately from atomic text/icons.
+Symbolic OCR duplicates require independent icon evidence. Inspect text_corrections
+and geometry_additions for locally separated magnifiers and supported scroll thumbs;
+their semantics remain unverified. Wide light borders protect inputs and buttons.
+Display annotated_preview_image for dense pages: its 2x drawing keeps coordinates
+relative to the original analysis input, with thin strokes and adjacent labels.
+For standalone local YOLO + RapidOCR exports from CMD, use the checkout's
 `annotate-image.cmd "input-image" "output-parent"` or installed
 `easy_uiauto_image "input-image" "output-parent"`. This creates an independent run
 folder with `text.png`, `controls.png`, `combined.png`, coordinates, raw detections,
-logs and `index.html`. Default profile is `block-diagram`; use `--profile circuit`
-for electrical symbols or `--profile ui` for general UI proposals. Inference is
+logs and `index.html`. Default profile is `ui`; use `--profile block-diagram`
+for both control and electrical model diagrams. Inference is
 local CPU with cached models; it does not use the configured remote vision API.
 The CMD pipeline automatically checks missed small text inside closed frames,
 using cached detection proposals and agreeing original/enlarged recognition.
@@ -23,23 +43,32 @@ observations are appended while baseline text and display IDs remain stable.
 `--no-small-text-recovery` disables that pass for comparison.
 
 For an attached or saved screenshot, call `analyze_ui_image(image_path=..., output_dir=...)`
-with its local file path on the MCP server's machine. This path uses the configured vision
-endpoint directly; window enumeration and live-desktop readiness checks are unnecessary.
+with its local file path on the MCP server's machine. It defaults to engine="local",
+using the same YOLO + RapidOCR pipeline as CMD with profile="ui". Install the image
+extra in the server's Python environment. Missing dependencies must not trigger a
+remote fallback. Use engine="api" only for an explicitly requested remote analysis;
+that mode uses the configured vision endpoint. Window enumeration and live-desktop
+readiness checks are unnecessary for either saved-image engine.
 Return `annotated_image`, `coordinates_json`, and the matching numbered `elements`.
-Coordinates are pixels relative to the EXIF-oriented image's top-left corner, with
-exclusive right/bottom bounds. Honor `truncated`; all detections remain observations.
+Both modes first crop a reliable window frame locally; auto_crop=false preserves
+the full input. Coordinates refer to the returned image_path, with exclusive
+right/bottom bounds. When cropped, image_path is the saved analysis-input.png;
+crop.offset maps its coordinates back to the EXIF-oriented input_image_path.
+Honor `truncated`; all detections remain observations.
 Saved-image graphics use blue boxes and `G1…` labels, text uses orange boxes and
 `T1…` labels. Keep each label two pixels outside its own box, sliding only along
 the four edges for collision avoidance. `annotation_label` maps the display label
 to the original numeric `id` used by correction tools. Preserve labels across layers.
 If image-edge labels need canvas margins, `annotation_layout.image_origin` records
 the input-image offset; element coordinates remain relative to the original input.
-Small images are enlarged automatically; returned coordinates still refer to the original
-displayed image. Use `analysis_scale=1` only when enlargement is unwanted.
+In API mode, small images are enlarged automatically; returned coordinates still
+refer to the recognition input. model, analysis_scale and analysis_context require
+engine="api". Local profiles are ui or block-diagram. The separate circuit profile
+has been removed; replace old calls with block-diagram, including model correction.
 Display `annotated_preview_image` when present; its strokes are drawn at one pixel
-after enlargement. `rect`/`bbox` include `box_padding` (default two original pixels)
+after enlargement. `rect`/`bbox` include `box_padding` (local default one pixel, API two)
 and known attached components; `detected_rect` preserves the raw prediction. Use
-`analysis_context` for the user's requested scope and component granularity.
+`analysis_context` in API mode for the user's requested scope and component granularity.
 Inferred names, functions, and suggested actions have no UIA or execution verification.
 This operation does not update the application vault or generate commands.
 Visible text is also a control: include independent captions, titles, numeric
@@ -54,11 +83,17 @@ its `text_control_ids` remain observations needing a text detector/OCR or review
 To repair existing boxes, call `correct_ui_image_annotations(coordinates_json=...,`
 `refine_ids=[...])` for local pixel fitting of selected isolated icons on light,
 plain backgrounds. This uses the saved original image and makes no API request.
+Do not apply icons fitting indiscriminately to input fields, lists or panels: it
+can shrink the complete control to its internal text. It is not part of the default
+annotation pipeline. Inspect changes rather than counting applied fits as correct.
+For closed rectangular controls, use profile="rectangles" for contour snapping
+instead. With no refine_ids, this profile handles all graphic observations; with
+IDs it handles only those graphics. Text remains unchanged and no model is called.
 For exact corrections, pass `corrections=[{"id":3,"rect":{"left":110,"top":65,`
 `"right":125,"bottom":81}}]` instead; right/bottom are exclusive original-image
 coordinates and receive no extra padding. Preserve IDs and semantic content.
 Return the new PNG/JSON pair and review `correction.updates` for skipped targets.
-For connected circuit diagrams, set `profile="circuit"` and pass the original
+For connected model diagrams, set `profile="block-diagram"` and pass the original
 model output as `coordinates_json`. It detects rectangular frames, paired circles,
 grounded load branches, and thick busbars in the original pixels. Selected
 observations sharing one geometry candidate are merged under their primary ID;
@@ -69,7 +104,7 @@ new annotation. A correction test must not substitute previous reviewed geometry
 for the original model output. Originals and `detected_rect` remain available;
 correction does not establish UIA or functional verification. Unsupported symbols
 or ambiguous backgrounds may still require explicit bounds.
-The circuit profile also fits connected control block diagrams using complete
+The block-diagram profile also fits connected control block diagrams using complete
 frames, pointed tags, machine/meter ellipses, terminal rings and grounds. Review
 `diagram_family`, `needs_review_ids` and each skipped update: unsupported model
 boxes remain unchanged. Do not count them as successful corrections. Coverage

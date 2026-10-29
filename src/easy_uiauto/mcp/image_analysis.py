@@ -15,6 +15,41 @@ from uuid import uuid4
 from . import scanner, visualization
 
 
+def prepare_image(image, auto_crop: bool) -> tuple:
+    """Crop the window before recognition; retain its input-coordinate origin."""
+    if auto_crop:
+        from .window_crop import crop_window_image
+
+        crop = crop_window_image(image)
+        return crop["image"], {"enabled": True, **{key: value for key, value in crop.items()
+                                                  if key != "image"}}
+    width, height = image.size
+    return image, {"enabled": False, "cropped": False, "method": "unchanged",
+                   "offset": {"x": 0, "y": 0},
+                   "rect_in_input": dict(left=0, top=0, right=width, bottom=height,
+                                         width=width, height=height)}
+
+
+def save_analysis_input(original, image, source: Path, source_hash: str,
+                        crop: dict, directory: Path) -> dict:
+    """Keep the actual recognition image available for later pixel corrections."""
+    original.save(directory / "original.png")
+    image.save(directory / "analysis-input.png")
+    reference = directory / "analysis-input.png" if crop["cropped"] else source
+    reference_hash = (hashlib.sha256(reference.read_bytes()).hexdigest()
+                      if crop["cropped"] else source_hash)
+    return {"image_path": str(reference), "source_image_sha256": reference_hash,
+            "input_image_path": str(source), "input_image_sha256": source_hash,
+            "original_image_size": {"width": original.width, "height": original.height},
+            "analysis_input_image": str(directory / "analysis-input.png"), "crop": crop,
+            "coordinate_system": {"origin": "top-left", "units": "pixels",
+                                  "reference": "window-cropped-input" if crop["cropped"]
+                                  else "display-oriented-input",
+                                  "bounds": "left/top inclusive, right/bottom exclusive",
+                                  "original_image_offset": crop["offset"],
+                                  "screen_coordinates": False}}
+
+
 def complete_element_bounds(elements: list[dict], width: int, height: int,
                             padding: int = 2) -> list[dict]:
     """Include known attached parts and a small margin without losing raw predictions."""
@@ -124,6 +159,13 @@ def save_image_annotations(image, elements: list[dict], directory: Path, *,
     annotated.save(annotated_path)
     layout = annotated.info["annotation_layout"]
     scale = max(1, min(4, 960 / max(image.size)))
+    if len(elements) >= 40:
+        from statistics import median
+
+        if median(min(e['rect']['width'], e['rect']['height']) for e in elements) <= 20:
+            # Leave space for adjacent labels in dense tables and trees. Strokes
+            # and labels are redrawn at one pixel, coordinates stay unscaled.
+            scale = max(scale, 2)
     preview_path = annotated_path
     preview_layout = layout
     if scale > 1:
@@ -152,6 +194,7 @@ def analyze_image(
     analysis_scale: float = 0,
     box_padding: int = 2,
     analysis_context: str = "",
+    auto_crop: bool = False,
 ) -> dict:
     """Return numbered observations and coordinates in the displayed input image."""
     from PIL import Image, ImageOps
@@ -175,6 +218,8 @@ def analyze_image(
         # Transparent screenshots should look the same against a white viewer background.
         background = Image.new("RGBA", oriented.size, "white")
         image = Image.alpha_composite(background, oriented).convert("RGB")
+    original = image
+    image, crop = prepare_image(original, auto_crop)
     width, height = image.size
     scale = analysis_scale or max(1, min(4, 960 / max(width, height)))
     analysis_size = (round(width * scale), round(height * scale))
@@ -221,23 +266,22 @@ def analyze_image(
     base = Path(output_dir).expanduser() if output_dir else Path(gettempdir()) / "easy_uiauto"
     destination = (base / f"image-analysis-{uuid4().hex[:12]}").resolve()
     destination.mkdir(parents=True, exist_ok=False)
+    provenance = save_analysis_input(original, image, source,
+                                     hashlib.sha256(source_bytes).hexdigest(), crop, destination)
     coordinates_path = destination / "elements.json"
     annotation_paths = save_image_annotations(image, elements, destination)
     result = {
         "ok": True,
-        "image_path": str(source),
-        "source_image_sha256": hashlib.sha256(source_bytes).hexdigest(),
+        **provenance,
+        "engine": "api",
+        "local_only": False,
+        "api_requests": segmentation.get("coverage", {}).get("visual_tiles", 1),
         "image_width": width,
         "image_height": height,
         "analysis_image_width": analysis_size[0],
         "analysis_image_height": analysis_size[1],
         "analysis_scale": {"x": scale_x, "y": scale_y},
         "exif_orientation_applied": orientation not in (None, 1),
-        "coordinate_system": {
-            "origin": "top-left", "units": "pixels", "reference": "display-oriented-input",
-            "bounds": "left/top inclusive, right/bottom exclusive",
-            "screen_coordinates": False,
-        },
         "page": segmentation["page"],
         "regions": segmentation["regions"],
         "elements": elements,

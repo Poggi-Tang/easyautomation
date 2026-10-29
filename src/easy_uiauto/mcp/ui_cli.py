@@ -20,6 +20,8 @@ from .scanner import (
     _image_similarity,
     _rect,
     _screenshot_window,
+    _trim_window_capture,
+    _window_rect,
     locate_template,
     resolve_location,
 )
@@ -85,8 +87,9 @@ def _resolve_verified_control(
     allow_vision_fallback: bool = False,
 ):
     window = _find_window(record["app_name"])
-    window_rect = _rect(window)
+    window_rect = _window_rect(window, _rect(window))
     current_screen = _screenshot_window(window_rect)
+    current_screen, window_rect = _trim_window_capture(current_screen, window_rect, window)
     return _resolve_verified_control_in_context(
         directory,
         record,
@@ -672,8 +675,9 @@ def execute_many(
         raise ValueError("batch commands must belong to one application window")
 
     window = _find_window(prepared[0]["record"]["app_name"])
-    window_rect = _rect(window)
+    window_rect = _window_rect(window, _rect(window))
     current_screen = _screenshot_window(window_rect)
+    current_screen, window_rect = _trim_window_capture(current_screen, window_rect, window)
     resolved: dict[str, tuple] = {}
     for control_id, record in records.items():
         try:

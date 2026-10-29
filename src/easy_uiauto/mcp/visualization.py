@@ -288,7 +288,8 @@ def show_markers(markers: list[dict], duration_ms: int = 3000, wait_ms: int = 10
 def _match_current_page(directory: Path, requested_page_id: str = "") -> dict:
     from PIL import Image
 
-    from .scanner import _find_window, _image_similarity, _rect, _screenshot_window
+    from .scanner import (_find_window, _image_similarity, _screenshot_window,
+                          _trim_window_capture, _window_rect)
 
     index = knowledge.load_index(directory)
     pages = index.get("pages", [])
@@ -300,8 +301,9 @@ def _match_current_page(directory: Path, requested_page_id: str = "") -> dict:
     if not app_name:
         raise RuntimeError("Application knowledge has no window name")
     window = _find_window(app_name)
-    window_rect = _rect(window)
+    window_rect = _window_rect(window)
     screenshot = _screenshot_window(window_rect)
+    screenshot, window_rect = _trim_window_capture(screenshot, window_rect, window)
     matches = []
     for page in pages:
         image_name = page.get("image", "")

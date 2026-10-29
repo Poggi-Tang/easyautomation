@@ -6,6 +6,40 @@ import ctypes
 from ctypes import wintypes
 
 
+def _dwm_api():
+    dwm = ctypes.WinDLL("dwmapi", use_last_error=True)
+    get = dwm.DwmGetWindowAttribute
+    get.argtypes = [wintypes.HWND, wintypes.DWORD, ctypes.c_void_p, wintypes.DWORD]
+    get.restype = ctypes.c_long
+    return get
+
+
+def visible_window_bounds(handle: int, bounds: dict, *, class_name: str = "") -> dict:
+    """Exclude invisible resize margins using DWM's physical screen coordinates.
+
+    Only accept a nonempty rectangle contained in the supplied physical window
+    bounds. This prevents a stale handle or a DPI coordinate mismatch from
+    moving the crop. Desktop and taskbar surfaces keep their original bounds.
+    """
+    original = dict(bounds)
+    if not handle or class_name in {"Progman", "WorkerW", "Shell_TrayWnd", "Shell_SecondaryTrayWnd"}:
+        return original
+    try:
+        left, top, right, bottom = (int(bounds[key]) for key in ("left", "top", "right", "bottom"))
+        if right <= left or bottom <= top:
+            return original
+        frame = wintypes.RECT()
+        if _dwm_api()(int(handle), 9, ctypes.byref(frame), ctypes.sizeof(frame)) != 0:
+            return original
+        if not (left <= frame.left < frame.right <= right
+                and top <= frame.top < frame.bottom <= bottom):
+            return original
+        return dict(left=frame.left, top=frame.top, right=frame.right, bottom=frame.bottom,
+                    width=frame.right - frame.left, height=frame.bottom - frame.top)
+    except (OSError, AttributeError, TypeError, ValueError, KeyError):
+        return original
+
+
 def _api():
     # Private DLL signatures must not change pygetwindow's EnumWindows callback
     # types on the shared ctypes.windll.user32 instance.

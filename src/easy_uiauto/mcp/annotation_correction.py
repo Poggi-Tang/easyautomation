@@ -135,10 +135,10 @@ def correct_annotations(coordinates_json: str, refine_ids: list[int] | None = No
     from PIL import Image, ImageOps
 
     started = time.perf_counter()
-    if profile not in {"icons", "circuit"}:
-        raise ValueError("profile must be icons or circuit")
-    if discover_missing and profile != "circuit":
-        raise ValueError("discover_missing is supported only with profile=circuit")
+    if profile not in {"icons", "block-diagram", "rectangles"}:
+        raise ValueError("profile must be icons, block-diagram or rectangles")
+    if discover_missing and profile != "block-diagram":
+        raise ValueError("discover_missing is supported only with profile=block-diagram")
     if type(search_margin) is not int or not 1 <= search_margin <= 64:
         raise ValueError("search_margin must be an integer from 1 to 64")
     if type(box_padding) is not int or not 0 <= box_padding <= 20:
@@ -154,6 +154,10 @@ def correct_annotations(coordinates_json: str, refine_ids: list[int] | None = No
     if any(type(value) is not int for value in ids) or len(ids) != len(set(ids)):
         raise ValueError("Element IDs must be unique integers")
     refine_ids, corrections = refine_ids or [], corrections or []
+    if profile == "rectangles" and not refine_ids and not corrections:
+        from .diagram_geometry import is_text
+
+        refine_ids = [item["id"] for item in items if not is_text(item)]
     if not refine_ids and not corrections and not discover_missing:
         raise ValueError("Specify refine_ids for pixel fitting or corrections for exact bounds")
     manual_ids = [item.get("id") if isinstance(item, dict) else None for item in corrections]
@@ -176,14 +180,21 @@ def correct_annotations(coordinates_json: str, refine_ids: list[int] | None = No
     explicit = {item["id"]: _manual_rect(item.get("rect"), width, height)
                 for item in corrections}
     elements, updates = copy.deepcopy(items), []
-    circuit_report = {}
-    if profile == "circuit":
-        from . import circuit_geometry
+    component_report = {}
+    rectangle_report = {}
+    if profile == "block-diagram":
+        from . import component_geometry
 
-        elements, updates, circuit_report = circuit_geometry.correct(
+        elements, updates, component_report = component_geometry.correct(
             image, elements, refine_ids, box_padding, discover_missing)
+    if profile == "rectangles":
+        from .rectangle_snap import snap_rectangles
+
+        elements, rectangle_report = snap_rectangles(image, elements, refine_ids=refine_ids,
+                                                      box_padding=box_padding)
+        updates = rectangle_report["updates"]
     for item in elements:
-        if item["id"] not in requested or (profile == "circuit" and item["id"] not in explicit):
+        if item["id"] not in requested or (profile in {"block-diagram", "rectangles"} and item["id"] not in explicit):
             continue
         before = dict(item["rect"])
         if item["id"] in explicit:
@@ -216,12 +227,14 @@ def correct_annotations(coordinates_json: str, refine_ids: list[int] | None = No
               "coordinates_json": str(destination / "elements.json"),
               "correction": {"source_coordinates_json": str(path), "updates": updates,
                              "profile": profile, "input_element_count": len(items),
-                             **circuit_report,
+                             **component_report,
+                             **({"rectangle_snap": rectangle_report} if rectangle_report else {}),
                              "applied_count": sum(item["applied"] and item["before"] is not None
                                                   for item in updates),
-                             "skipped_count": sum(not item["applied"] for item in updates),
+                             "skipped_count": sum(not item["applied"] and not item.get("matched")
+                                                  for item in updates),
                              "needs_review_ids": [item["id"] for item in updates
-                                                  if not item["applied"]],
+                                                  if not item["applied"] and not item.get("matched")],
                              "source_validation": ("sha256" if data.get("source_image_sha256")
                                                    else "dimensions-only"),
                              "api_requests": 0,

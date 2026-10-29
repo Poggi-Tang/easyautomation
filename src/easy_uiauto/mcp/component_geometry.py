@@ -1,4 +1,4 @@
-"""Local circuit-symbol geometry; no reference annotations or remote requests."""
+"""Shared model-component geometry from local pixels, without remote requests."""
 
 from __future__ import annotations
 
@@ -316,7 +316,7 @@ def correct(image, elements, refine_ids, padding, discover_missing=False):
             kept.append(item)
             continue
         candidate = assignments[item["id"]]
-        update = {"id": item["id"], "method": "circuit-geometry", "before": dict(item["rect"]),
+        update = {"id": item["id"], "method": "component-geometry", "before": dict(item["rect"]),
                   "applied": candidate is not None}
         if candidate is None:
             update["detail"] = ("Text control retained; circuit outlines do not validate "
@@ -334,7 +334,7 @@ def correct(image, elements, refine_ids, padding, discover_missing=False):
                                                    "evidence": candidate["evidence"]},
                               merged_source_element_ids=item.get("merged_source_element_ids",
                                                                  [item["id"]]),
-                              geometry_correction={"method": "circuit-geometry",
+                              geometry_correction={"method": "component-geometry",
                                                    "candidate_id": key,
                                                    "evidence": candidate["evidence"]})
                 fitted.setdefault("detected_rect", dict(item["rect"]))
@@ -372,18 +372,18 @@ def correct(image, elements, refine_ids, padding, discover_missing=False):
             item = {"id": next_id, "semantic_name": "Busbar component", "entity_type": "busbar",
                     "intent": f"observe-busbar-{next_id}", "role": "read-only", "confidence": 0.0,
                     "ambiguity": "Local geometric observation; electrical identity not verified",
-                    "source": "local-circuit-geometry", "suggested_actions": [],
+                    "source": "local-component-geometry", "suggested_actions": [],
                     "rect": candidate["rect"], "detected_rect": candidate["rect"],
                     "detected_rect_provenance": "Local pixels, not a model prediction",
                     "corrected_rect": candidate["rect"], "geometry_padding": padding,
-                    "geometry_correction": {"method": "circuit-geometry-discovery",
+                    "geometry_correction": {"method": "component-geometry-discovery",
                                             "candidate_id": candidate["candidate_id"],
                                             "evidence": candidate["evidence"]}}
             item["geometry_validation"] = {"status": "supported", "kind": "busbar",
                                            "evidence": candidate["evidence"]}
             kept.append(item)
             added_ids.append(next_id)
-            updates.append({"id": next_id, "method": "circuit-geometry-discovery", "before": None,
+            updates.append({"id": next_id, "method": "component-geometry-discovery", "before": None,
                             "applied": True, "candidate_id": candidate["candidate_id"],
                             "detail": candidate["evidence"]})
             next_id += 1

@@ -79,6 +79,22 @@ def test_truncation_is_explicit_and_each_run_has_separate_outputs(monkeypatch, t
     assert Path(first["annotated_image"]).is_file()
 
 
+def test_dense_small_controls_get_a_readable_preview_with_original_coordinates(tmp_path):
+    image = Image.new('RGB',(1000,700),'white')
+    elements = image_analysis.complete_element_bounds([
+        dict(id=i+1, entity_type='graphic-control', rect=dict(left=30+(i%8)*100,
+             top=30+(i//8)*60, right=46+(i%8)*100, bottom=46+(i//8)*60))
+        for i in range(40)], *image.size, 1)
+    original = [dict(e['rect']) for e in elements]
+    result = image_analysis.save_image_annotations(image,elements,tmp_path)
+    with Image.open(result['annotated_preview_image']) as preview:
+        origin = result['annotation_preview_layout']['image_origin']
+        assert preview.width >= 2000 and preview.height >= 1400
+        assert preview.getpixel((elements[0]['rect']['left']*2+origin['x'],
+                                 70+origin['y']))==(21,101,192)
+    assert [e['rect'] for e in elements]==original
+
+
 def test_exif_orientation_and_transparency_use_displayed_image_coordinates(monkeypatch, tmp_path):
     source = tmp_path / "rotated.png"
     image = Image.new("RGBA", (100, 80), (0, 0, 0, 0))
@@ -130,10 +146,11 @@ def test_mcp_image_tool_returns_artifact_paths_and_structured_errors(monkeypatch
 
     context = SimpleNamespace(report_progress=report)
     result = json.loads(asyncio.run(server.analyze_ui_image(
-        str(source), context, str(tmp_path), analysis_scale=1)))
+        str(source), context, str(tmp_path), analysis_scale=1, engine="api")))
     assert result["ok"] and Path(result["annotated_image"]).is_file()
     assert progress[0][0] == 0 and progress[-1][0] == 1
-    failure = json.loads(asyncio.run(server.analyze_ui_image(str(source)+"missing", context)))
+    failure = json.loads(asyncio.run(server.analyze_ui_image(
+        str(source)+"missing", context, engine="api")))
     assert failure["ok"] is False and "FileNotFoundError" in failure["error"]
 
 
@@ -142,7 +159,30 @@ def test_mcp_advertises_image_file_input():
     tool = next(item for item in tools if item.name == "analyze_ui_image")
     assert tool.inputSchema["required"] == ["image_path"]
     assert "output_dir" in tool.inputSchema["properties"]
+    assert tool.inputSchema["properties"]["engine"]["default"] == "local"
+    assert tool.inputSchema["properties"]["auto_crop"]["default"] is True
+    assert tool.inputSchema["properties"]["confidence"]["default"] == 0.1
+    assert tool.inputSchema["properties"]["rectangle_snap"]["default"] is True
     assert visualization.STATUS_COLORS["observed"] == "#00b8d4"
+
+
+def test_image_profile_schema_and_removed_profile_never_reach_a_model(monkeypatch, tmp_path):
+    def forbidden(*_a, **_kw):
+        raise AssertionError('Unsupported profiles must fail before model or file access')
+
+    tools = asyncio.run(server.mcp.list_tools())
+    analysis = next(t.inputSchema for t in tools if t.name=='analyze_ui_image')
+    correction = next(t.inputSchema for t in tools if t.name=='correct_ui_image_annotations')
+    assert set(analysis['properties']['profile']['enum'])=={'ui','block-diagram'}
+    assert set(correction['properties']['profile']['enum'])=={'icons','block-diagram','rectangles'}
+    monkeypatch.setattr(server, '_vision_api_settings', forbidden)
+    monkeypatch.setattr(server.image_cli, 'analyze_local_image', forbidden)
+    for engine in ('local','api'):
+        result=json.loads(asyncio.run(server.analyze_ui_image('missing.png',engine=engine,profile='circuit')))
+        assert not result['ok'] and 'profile' in result['error']
+    result=json.loads(asyncio.run(server.correct_ui_image_annotations('missing.json',profile='circuit')))
+    assert not result['ok'] and 'profile' in result['error']
+    assert not list(tmp_path.iterdir())
 
 
 def test_progress_disconnect_does_not_discard_completed_image_result(monkeypatch, tmp_path):
@@ -156,8 +196,54 @@ def test_progress_disconnect_does_not_discard_completed_image_result(monkeypatch
 
     result = json.loads(asyncio.run(server.analyze_ui_image(
         str(source), SimpleNamespace(report_progress=broken_progress), str(tmp_path),
-        analysis_scale=1)))
+        analysis_scale=1, engine="api")))
     assert result["ok"] and Path(result["coordinates_json"]).is_file()
+
+
+def test_mcp_defaults_to_local_without_resolving_api_credentials(monkeypatch, tmp_path):
+    calls = []
+
+    def remote_forbidden(*_args, **_kwargs):
+        raise AssertionError("Default image annotation must not resolve or use an API")
+
+    def local(path, output, **options):
+        calls.append((path, output, options))
+        return {"ok": True, "engine": "local", "api_requests": 0, "elements": []}
+
+    monkeypatch.setattr(server, "_vision_api_settings", remote_forbidden)
+    monkeypatch.setattr(server.image_analysis, "analyze_image", remote_forbidden)
+    monkeypatch.setattr(server.image_cli, "analyze_local_image", local)
+    result = json.loads(asyncio.run(server.analyze_ui_image("input.png", output_dir=str(tmp_path))))
+    assert result["ok"] and result["engine"] == "local" and result["api_requests"] == 0
+    path, output, options = calls[0]
+    assert (path, output) == ("input.png", str(tmp_path))
+    assert options["profile"] == "ui" and options["auto_crop"] is True
+    assert options["max_elements"] == 1000 and options["box_padding"] == 1
+    assert options["confidence"] == 0.1 and options["rectangle_snap"] is True
+
+
+def test_missing_local_dependencies_never_trigger_a_remote_fallback(monkeypatch):
+    def remote_forbidden(*_args, **_kwargs):
+        raise AssertionError("A local failure must not upload the user's image")
+
+    def unavailable(*_args, **_kwargs):
+        raise RuntimeError('Install local dependencies with: pip install "easy-uiauto[image]"')
+
+    monkeypatch.setattr(server, "_vision_api_settings", remote_forbidden)
+    monkeypatch.setattr(server.image_cli, "analyze_local_image", unavailable)
+    result = json.loads(asyncio.run(server.analyze_ui_image("input.png")))
+    assert result["ok"] is False and "easy-uiauto[image]" in result["error"]
+
+
+@pytest.mark.parametrize("options", [{"engine": "unknown"}, {"model": "remote-model"}])
+def test_invalid_engine_or_implicit_remote_options_do_not_upload(monkeypatch, options):
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("Invalid routing must fail before any analysis")
+
+    monkeypatch.setattr(server, "_vision_api_settings", forbidden)
+    monkeypatch.setattr(server.image_cli, "analyze_local_image", forbidden)
+    result = json.loads(asyncio.run(server.analyze_ui_image("input.png", **options)))
+    assert result["ok"] is False and "ValueError" in result["error"]
 
 
 def test_small_image_enlargement_maps_coordinates_back_to_original(monkeypatch, tmp_path):

@@ -19,7 +19,7 @@
 适用于 Windows 自动化测试、RPA、Agent 工具和桌面软件操作知识沉淀。
 项目仅支持 Windows，目前仍处于 `0.x` 阶段。
 
-也支持在本机使用 YOLO＋OCR 标注图片：输入图片路径和输出目录，即可生成文字标注图、
+图片标注默认并推荐使用 **YOLO＋RapidOCR**：输入图片路径和输出目录，即可生成文字标注图、
 图形控件标注图、合并标注图、坐标、识别证据和本地 HTML 查看页。
 
 > 视觉扫描和流程探索仍在持续完善。涉及发送消息、支付、删除、上传、
@@ -40,7 +40,7 @@
   不必重新猜坐标。
 - **控件框选反馈**：使用一个点击穿透覆盖层为整页控件编号，保存页面标注图，
   并在执行命令前突出实际目标。
-- **本地图片标注**：CPU 运行 YOLO＋OCR，无需视觉 API；蓝色 G 编号表示图形、
+- **本地图片标注**：默认 CPU 运行 YOLO＋RapidOCR，无需视觉 API；蓝色 G 编号表示图形、
   橙色 T 编号表示文字，使用 1 像素边框和贴边标签，支持几何纠正及小文字自动补检。
 - **操作响应学习**：比较操作前后截图，检查变化区域、UIA 属性和新窗口，
   保存有证据支撑的成功条件。
@@ -61,7 +61,7 @@
 | 动作录制与回放 | Stable | 生成可复用的结构化动作 |
 | MCP 工具与客户端配置 | Beta | 内置 Codex 和 Claude Code 安装命令 |
 | 视觉优先扫描与软件 UI CLI | Beta | 需要 OpenAI 兼容视觉接口 |
-| 本地图片标注 CLI | Experimental | CPU YOLO＋OCR，无需 API key；支持普通界面、控制框图和电气元件图 |
+| 本地图片标注 | Experimental | 默认并推荐 YOLO＋RapidOCR，无需 API key；MCP 和 CMD 支持普通界面、控制框图和电气元件图 |
 | 操作前后响应学习 | Beta | 保存本地证据和成功条件 |
 | 递归流程探索 | Experimental | 仅探索可恢复操作，并限制递归深度 |
 
@@ -95,8 +95,8 @@ easy_uiauto_image "C:\images\input.bmp" "C:\images\results"
 
 每次在输出目录下新建独立结果子目录，生成 `text.png`、`controls.png`、`combined.png`、
 `elements.json`、`elements.csv`、诊断记录和 `index.html`。结束后打开 `index.html`
-集中查看。模型在本机 CPU 运行，首次使用会下载并校验 YOLO 权重。默认处理控制框图，
-普通软件截图加 `--profile ui`，电气元件图加 `--profile circuit`。详见
+集中查看。模型在本机 CPU 运行，首次使用会下载并校验 YOLO 权重。默认 `ui` 用于普通软件
+截图，控制框图和电气模型图统一加 `--profile block-diagram`。详见
 [CMD 本地图片标注](#cmd-本地图片标注)。
 
 ## MCP 配置
@@ -192,6 +192,28 @@ python scripts/verify_config_bundle.py
 打包前须先生成 EXE；`--bundle-package` 会将 EXE 复制进包资源目录。
 仓库 CI 和标签发布流程会先在 Windows 编译 EXE，再生成并检查 wheel、源码包，
 确认两者都包含同一份 EXE 后才允许发布。编译产物通过构建工件传递，不提交到 Git。
+
+### 窗口边缘裁剪
+
+学习、前后截图和回放校验会先排除 Windows 的不可见缩放边框，再用本地像素矩阵检测
+接近整窗的闭合矩形。外围安静时检查是否有被遗漏的文字或控件；外围是桌面或其他窗口时，
+额外要求连续外框、近似对称的边距和横贯窗口的标题栏色带变化。边界不确定则保留原图。
+保留可见标题栏和边框，裁剪后的截图原点也会同步调整。已有知识建议重扫以更新图像基准。
+
+MCP 使用 `take_window_screenshot(window_name="新建项目", auto_crop=True)`，同时返回图片、
+`capture_bounds`、`crop_offset` 和尺寸；`auto_crop=False` 保留原始 UIA 外框。
+原有 `take_screenshot` 的全屏和指定区域行为保持不变。
+
+已有图片可直接使用本地算法（需安装 `easy-uiauto[vision]`）：
+
+```python
+from PIL import Image
+from easy_uiauto.visual import crop_window_image
+
+result = crop_window_image(Image.open("window.png"), max_margin=64)
+result["image"].save("window-cropped.png")
+print(result["cropped"], result["rect_in_input"], result["offset"])
+```
 
 ### 命令行配置
 
@@ -350,17 +372,50 @@ Escape 撤销的新建文档/窗口；子探索停止后，父层也不继续发
 ### 图片文件识别与标注
 
 调用 MCP 工具 `analyze_ui_image(image_path="C:/images/screenshot.png")` 可直接分析
-PNG、JPEG、WebP 等图片，无需打开软件或操作桌面。工具使用已配置的视觉接口，返回
+PNG、JPEG、WebP 等图片，无需打开软件或操作桌面。**默认 `engine="local"` 使用本地
+YOLO＋RapidOCR，也是当前推荐组合。** 在本项目 `test1/test2/test3` 软件截图与视觉 API、
+Tesseract＋tessdata_best 的实测对比中，这个组合的文字覆盖和整体标注表现更好；这是本次
+样例的结论，其他界面仍需检查漏检、误框和错字。
+
+图形检测采用微软官方 [OmniParser v2.0 的 icon_detect_v3 权重](https://huggingface.co/microsoft/OmniParser-v2.0/tree/main/icon_detect_v3)
+`model.pt`，架构为 **YOLOv9-E**；文字识别采用 RapidOCR 的 **PP-OCRv6 small ONNX**。
+这套权重没有针对本项目的电路图或 Simulink 图片重新训练。安装本地依赖：
+
+```cmd
+python -m pip install ".[mcp,image]"
+```
+
+本地模式无需 API URL、Key 或远程模型；首次使用会下载并校验 YOLO 权重，之后复用缓存。
+本地依赖缺失时返回安装错误，不会自动上传图片。需要比较远程视觉模型时，显式调用
+`analyze_ui_image(image_path="C:/images/screenshot.png", engine="api")`，该模式才读取
+已配置的视觉 API。`model`、`analysis_scale`、`analysis_context` 仅适用于 API 模式。
+MCP 本地模式默认 `profile="ui"`，控制框图和电气模型图统一选 `block-diagram`。
+独立的 `circuit` 配置已移除，旧调用请改用 `block-diagram`，已有标注的模型图修正也使用该名称。
+YOLO 默认置信度阈值为 **0.1**；MCP 可传 `confidence=0.1`，CMD 可用 `--confidence` 调整。
+
+本地标注默认再对图形框做**矩形轮廓吸附**：灰度阈值 210，候选宽 30～600、高 12～60
+像素，选择 IoU 最高且至少为 0.35 的轮廓，并要求候选宽、高均不超过原框的 1.6 倍。
+额外检查轮廓面积，减少把文字笔画当成矩形；不匹配时保持原框。它用于补全输入框、按钮等
+闭合矩形边框，不替代任意形状控件的检测。文字框和编号保持不变，`detected_rect` 保留
+原始预测，`corrected_rect`、`snap_iou` 和 `geometry_correction` 记录吸附结果；`rect`、
+`bbox`、中心点和归一化坐标同步更新。本地默认保留 1 像素边距。
+MCP 的 `rectangle_snap=False` 或 CMD 的 `--no-rectangle-snap` 可关闭此步骤。
+
+两种模式默认先用本地像素算法裁剪可靠的窗口外框，再执行识别；无法确定外框时保留原图。
+`auto_crop=False` 可保留完整输入。返回 `crop.offset` 和 `input_image_path`，裁剪后的
+坐标加上该偏移即可映射回 EXIF 方向校正后的原图。`image_path` 指向实际识别输入，
+裁剪时为保存的 `analysis-input.png`；后续修正使用这个文件，避免坐标错位。
+工具返回
 `annotated_image` 标注图、`coordinates_json` 坐标文件和编号对应的 `elements`。
 每项包含名称、推测功能、置信度、`bbox`（x、y、宽、高）、`rect`（左上边界包含、右下
-边界不包含）、中心点和归一化坐标。坐标以应用 EXIF 方向后的原图左上角为原点，
+边界不包含）、中心点和归一化坐标。坐标以实际识别输入 `image_path` 的左上角为原点，
 图形使用蓝色框与 `G1…` 标签，文字使用橙色框与 `T1…` 标签，均为未经 UIA 或功能执行
 验证的观察项，不写入应用知识库。`annotation_label` 对应显示编号，原始数字 `id` 供
 修正工具调用。`output_dir` 指定独立结果文件夹的父目录，`max_elements` 限制返回数量，
 超出时明确报告 `truncated`。图片附件需先在 MCP 所在机器上保存为本地文件。
-小图默认自动放大识别（最高 4 倍），区域和控件坐标均回映原图；传入 `analysis_scale=1`
+API 模式的小图默认自动放大识别（最高 4 倍），区域和控件坐标均回映识别输入；传入 `analysis_scale=1`
 可关闭放大，1 到 4 之间的其他值可指定识别倍率。
-`box_padding` 为原图像素边距（默认 2，传 0 关闭）；`detected_rect` 保留模型原始预测，
+`box_padding` 为识别输入的像素边距（本地默认 1，API 默认 2，传 0 关闭）；`detected_rect` 保留原始预测，
 `rect` 和 `bbox` 包含边距，并使已知组合控件的整体框包含附属子元素。
 放大预览 `annotated_preview_image` 会单独绘制 1 像素边框和紧凑编号，避免把线宽和标签
 一起放大。标签始终放在对应框的四边外侧，间隔 2 像素，避让时只沿边调整，不移到远处。
@@ -370,16 +425,23 @@ PNG、JPEG、WebP 等图片，无需打开软件或操作桌面。工具使用�
 不把元件内部的电阻、电容等图案拆成独立控件。
 
 框选不完整时，可调用
+`correct_ui_image_annotations(coordinates_json=".../elements.json", profile="rectangles")`
+对已有结果的全部图形框执行同一套矩形吸附，或用 `refine_ids` 选择指定项；不重新调用
+模型、不改文字、不丢失原 JSON 的来源和坐标元数据。它也可修正显式 API 分析的已有结果。
+
+独立图标也可调用
 `correct_ui_image_annotations(coordinates_json=".../elements.json", refine_ids=[1,3,9])`
 按编号在原图上进行本地像素修正，无需再次调用视觉 API。自动修正适合浅色简单背景上的
 独立图标；连接线或背景复杂、无法可靠分离时会跳过并给出原因。也可传入
 `corrections=[{"id":3,"rect":{"left":110,"top":65,"right":125,"bottom":81}}]`
 直接指定精确边界，右下坐标不包含且不额外加边距。自动修正默认保留 1 像素边距。
+默认流程不会把 `icons` 前景拟合应用到所有控件；它可能把输入框缩成内部文字范围，
+应只对合适的独立图标显式调用并检查修正前后。
 编号、语义、原始 `detected_rect` 和标注样式保持一致，新生成 PNG/JSON，不覆盖旧结果；
 `corrected_rect` 与 `correction.updates` 记录修正内容。新识别结果记录原图哈希，防止修正
 时误用已变化的图片；旧结果仅校验尺寸。修正结果仍是未经 UIA 验证的观察项。
 
-电路图可加 `profile="circuit"`：从原图像素提取矩形外框、双圆变压器、带接地符号的
+模型图修正可加 `profile="block-diagram"`：从原图像素提取矩形外框、双圆变压器、带接地符号的
 负载支路和粗线母线，匹配所选观察项的几何边界，并归并匹配到同一图形的重复结果。
 `discover_missing=true` 可额外补充未匹配的母线，不自动补充其他类型。保留主编号和模型
 原始预测；候选数量、归并及新增编号记录在 `correction` 中。该模式不读取旧标注作为
@@ -396,6 +458,7 @@ PNG、JPEG、WebP 等图片，无需打开软件或操作桌面。工具使用�
 
 ### CMD 本地图片标注
 
+CMD 同样默认并推荐使用 YOLO＋RapidOCR，不读取已配置的视觉 API。
 从仓库运行，不需要启动 Codex 或 MCP 服务：
 
 ```cmd
@@ -413,17 +476,38 @@ annotate-image.cmd "C:\images\input.bmp" "C:\images\results"
 | `controls.png` | 蓝色 G 编号的图形控件标注 |
 | `combined.png` | 文字与图形合并标注 |
 | `original.png` | 应用 EXIF 方向、透明区域铺白后的原图 |
+| `analysis-input.png` | 自动裁剪后的实际识别输入；关闭裁剪时为完整输入 |
 | `elements.json` / `elements.csv` | 文字内容、编号、坐标、来源、所属关系和待复核信息 |
 | `raw-yolo.json` / `raw-ocr.json` | 原始检测与 OCR 输出 |
 | `ocr-recovery.json` | 小文字补检候选、过滤原因和两次识别证据 |
 | `geometry-candidates.json` | 本地几何候选与证据 |
+| `rectangle-snap.json` | 矩形吸附候选、IoU、修正前后坐标和跳过原因 |
+| `ui-fusion.json` | 空白过滤、紧凑边框保护、重复图标补检及 OCR 冲突证据 |
+| `before-snap.png` / `snap-compare.png` | 吸附前标注和红色原框、绿色修正框、蓝色未变框的对比 |
 | `summary.json` / `run.log` | 数量、耗时、成功/失败状态与处理日志 |
 | `index.html` | 三张标注图和资源文件的本地查看页 |
 
-默认 `--profile block-diagram` 复用控制框图实测流程；电气元件图使用
-`--profile circuit`，普通软件截图使用 `--profile ui`。UI 模式保留 YOLO 图形候选，
-移除与 OCR 文字重复的候选，不强制套用控制框图外框。识别结果仍可能漏检、误检或错字，
+默认 `--profile ui` 用于普通软件截图，并与 MCP 本地默认配置一致；控制框图使用
+`--profile block-diagram`，电气模型图也使用此配置。UI 模式保留 YOLO 图形候选，
+先检查候选框及周围 2 像素是否存在可见前景或边框，过滤纯空白假框；带真实边框的空输入框
+仍保留。小方框控件以可见闭合边框为依据，不会仅因 OCR 重叠就删掉图形；框内误读成
+`M`、勾选符号等的短 OCR 项记录为冲突，原始 OCR 输出不变。相同小方框的嵌套预测归并，
+原始 YOLO 编号保存在 `yolo_proposal_ids`。
+
+UI 模式还从当前图片已检测的小图标提取模板，按相关度至少 0.97 补检相同像素图案；
+最多使用 12 个模板，避开已有小控件和正常 OCR 文字，不读取旧标注或参考图坐标。
+补检来源为 `local-template-recovery`，`confidence_kind=template-correlation`，该分数
+不是 YOLO 置信度，也不验证控件语义。过滤、保护和补检证据均写入 `ui-fusion.json`。
+表格网格、残缺行和重复列表区域单独记录为布局证据，不再与其内部文字、图标叠画为独立图形。
+箭头和关闭符号在像素证据匹配时合并重复 OCR；有邻近区域支持的滚动条滑块，以及被中文标签
+末尾误读为 Q/O 的放大镜图形，可在本地分离，原文字和坐标保存在纠正证据中。带浅灰闭合
+边框的长输入框和按钮受保护。密集小控件页面另存 2 倍预览，重新绘制细框和相邻编号，
+HTML 查看器优先显示该预览；坐标仍相对识别输入图。
+其余与正常 OCR 文字重复的候选仍去重，不强制套用控制框图外框。识别结果仍可能漏检、误检或错字，
 几何纠正只支持已实现的图形结构。
+
+默认先自动裁剪可靠的窗口外框；`--no-auto-crop` 保留完整输入。`elements.json` 中
+`crop.offset` 记录相对原图的偏移，标注和后续修正均对应 `analysis-input.png` 的尺寸。
 
 两个图形配置还会检测彩色连通主体，不限定红、蓝、黄等颜色。相接的不同色块、被细黑线
 分割的同一主体会合并；邻近文字和外部连线保持独立，邻接的闭合端口可纳入控件边界。

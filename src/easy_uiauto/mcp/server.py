@@ -13,7 +13,7 @@ import sys
 import time
 from datetime import datetime
 from functools import wraps
-from typing import Optional
+from typing import Literal, Optional
 from urllib import error as urlerror
 from urllib import request as urlrequest
 
@@ -33,7 +33,7 @@ from easy_uiauto.utils import (
     set_top_window,
 )
 
-from .. import __version__
+from .. import __version__, image_cli
 from . import (
     annotation_correction,
     configuration,
@@ -75,7 +75,8 @@ mcp = FastMCP(
         "Use wait_for_control, wait_for_text, and wait_for_window to check effects. "
         "Use scroll for scrolling; mouse_scroll is a compatibility alias. "
         "Call get_capability_readiness to inspect optional dependencies."
-        " For a saved UI image, call analyze_ui_image directly; it does not inspect the desktop."
+        " For a saved UI image, call analyze_ui_image directly; it defaults to local YOLO + RapidOCR"
+        " without inspecting the desktop. Use engine='api' only for requested remote vision."
         " Use correct_ui_image_annotations to adjust saved boxes locally by element ID."
     ),
 )
@@ -809,7 +810,8 @@ def set_mode(mode: str) -> str:
 def list_windows() -> str:
     """List all open windows with their titles, positions, and sizes.
 
-    Returns a JSON array of window objects, each with: title, left, top, width, height.
+    Returns a JSON array with title, left, top, width, height and capture_bounds.
+    capture_bounds is the native visible rectangle before any optional pixel crop.
     Use this first to discover what windows are available.
     """
     try:
@@ -817,12 +819,17 @@ def list_windows() -> str:
         result = []
         for w in windows:
             if w.title and w.visible:
+                bounds = dict(left=w.left, top=w.top, right=w.left + w.width,
+                              bottom=w.top + w.height, width=w.width, height=w.height)
                 result.append({
                     "title": w.title,
                     "left": w.left,
                     "top": w.top,
                     "width": w.width,
                     "height": w.height,
+                    "capture_bounds": native_windows.visible_window_bounds(
+                        int(getattr(w, "_hWnd", 0) or 0), bounds,
+                    ),
                 })
         return json.dumps(result, ensure_ascii=False, indent=2)
     except Exception as e:
@@ -2305,33 +2312,48 @@ async def analyze_ui_image(
     max_elements: int = 1000,
     model: str = "",
     analysis_scale: float = 0,
-    box_padding: int = 2,
+    box_padding: Optional[int] = None,
     analysis_context: str = "",
+    engine: str = "local",
+    profile: Literal["ui", "block-diagram"] = "ui",
+    auto_crop: bool = True,
+    confidence: float = 0.1,
+    rectangle_snap: bool = True,
 ) -> str:
-    """Analyze a saved UI image and return a numbered PNG plus coordinate JSON.
+    """Annotate a saved image with local YOLO + RapidOCR by default (recommended).
 
-    Sends only the supplied image to the configured vision endpoint. No window
-    enumeration, live screenshot, UIA verification, vault update, or UI action is
-    performed. Graphic observations use blue G labels and text uses orange T
+    engine='local' needs the image extra and cached/downloaded model weights,
+    not API credentials. Inference stays local; failures never fall back to an
+    API. engine='api' explicitly sends the image to the configured vision endpoint.
+    Neither engine enumerates windows, captures the desktop, verifies UIA, updates
+    the vault, or performs UI actions. Graphic observations use blue G labels and text uses orange T
     labels, always adjacent to their own box. Numeric element IDs remain stable;
     annotation_label supplies the display ID. Observations are never commands.
-    Coordinates refer to the input image after honoring its EXIF orientation;
-    the annotated PNG has those same dimensions. Image attachments must first be
+    Window-edge cropping precedes recognition by default. Coordinates refer to
+    image_path (the saved cropped input when changed); crop.offset maps them back
+    to the EXIF-oriented original input_image_path. Image attachments must first be
     available as a local file on the MCP server's machine.
 
     Args:
         image_path: Local path to a single-frame image, such as PNG, JPEG or WebP.
         output_dir: Parent output directory; each call creates a separate run folder.
         max_elements: Maximum observations to return, 1 to 3000; truncation is reported.
-        model: Optional vision model override; empty uses the configured model.
-        analysis_scale: 0 automatically enlarges small images up to 4x; 1 disables
+        model: API-only vision model override; empty uses the configured model.
+        analysis_scale: API-only. 0 automatically enlarges small images up to 4x; 1 disables
             enlargement. Other values from 1 to 4 set an explicit scale. Returned
             coordinates always map back to the displayed input image.
         box_padding: Margin around detections, 0 to 20 original-image pixels.
             Raw model bounds remain in detected_rect. Known attached parts are
-            included in their parent's bounds. Default is 2 pixels.
-        analysis_context: Optional scope/granularity guidance, such as identifying
+            included in their parent's bounds. None uses 1 pixel locally or 2 for API.
+        analysis_context: API-only scope/granularity guidance, such as identifying
             whole circuit model components instead of their internal symbols.
+        engine: local (default) uses YOLOv9-E + RapidOCR PP-OCRv6; api opts into remote vision.
+        profile: Local geometry profile: ui (default) or block-diagram for model diagrams.
+        auto_crop: First crop a reliable outer window frame locally; ambiguous images
+            stay unchanged. False keeps the full input. Input and crop offsets are saved.
+        confidence: Local YOLO threshold, default 0.1.
+        rectangle_snap: Local mode fits graphic boxes to nearby closed rectangles
+            using IoU >= 0.35 and at most 1.6x growth per dimension; text stays unchanged.
     """
     async def report_progress(current: int, message: str) -> None:
         if ctx is None:
@@ -2342,14 +2364,30 @@ async def analyze_ui_image(
             pass
 
     try:
-        api_url, api_key, selected_model = _vision_api_settings(model)
+        if engine not in {"local", "api"}:
+            raise ValueError("engine must be local or api")
+        if profile not in {"ui", "block-diagram"}:
+            raise ValueError("profile must be ui or block-diagram")
+        if not 1 <= max_elements <= 3000:
+            raise ValueError("max_elements must be between 1 and 3000")
         await report_progress(0, "Analyzing supplied UI image")
-        result = await asyncio.to_thread(
-            image_analysis.analyze_image,
-            image_path, api_url, api_key, selected_model, __version__, output_dir, max_elements,
-            analysis_scale=analysis_scale,
-            box_padding=box_padding, analysis_context=analysis_context,
-        )
+        if engine == "local":
+            if model or analysis_scale != 0 or analysis_context:
+                raise ValueError("model, analysis_scale and analysis_context require engine='api'")
+            result = await asyncio.to_thread(
+                image_cli.analyze_local_image, image_path, output_dir, profile=profile,
+                max_elements=max_elements, box_padding=1 if box_padding is None else box_padding,
+                auto_crop=auto_crop, progress=lambda _message: None,
+                confidence=confidence, rectangle_snap=rectangle_snap,
+            )
+        else:
+            api_url, api_key, selected_model = _vision_api_settings(model)
+            result = await asyncio.to_thread(
+                image_analysis.analyze_image,
+                image_path, api_url, api_key, selected_model, __version__, output_dir, max_elements,
+                analysis_scale=analysis_scale, box_padding=2 if box_padding is None else box_padding,
+                analysis_context=analysis_context, auto_crop=auto_crop,
+            )
         await report_progress(1, "Saved annotated image and coordinate JSON")
         return json.dumps(result, ensure_ascii=False, indent=2)
     except Exception as error:
@@ -2365,7 +2403,7 @@ async def correct_ui_image_annotations(
     output_dir: str = "",
     search_margin: int = 8,
     box_padding: int = 1,
-    profile: str = "icons",
+    profile: Literal["icons", "block-diagram", "rectangles"] = "icons",
     discover_missing: bool = False,
 ) -> str:
     """Correct numbered saved-image boxes locally and return a new PNG/JSON pair.
@@ -2377,7 +2415,7 @@ async def correct_ui_image_annotations(
     Args:
         coordinates_json: elements.json returned by analyze_ui_image or this tool.
         refine_ids: Existing IDs to fit to nearby pixels. Default icons profile
-            suits isolated icons on light, plain backgrounds. Circuit profile
+            suits isolated icons on light, plain backgrounds. The block-diagram profile
             uses connected symbol structures. Uncertain matches are skipped
             with a reason. Geometry correction does not verify control meaning.
         corrections: Exact original-image rectangles, for example
@@ -2387,7 +2425,10 @@ async def correct_ui_image_annotations(
         output_dir: Parent output folder; each correction creates a new subfolder.
         search_margin: Pixel search radius around existing bounds, 1 to 64.
         box_padding: Padding for pixel fitting, 0 to 20; default one pixel.
-        profile: icons fits isolated icons on plain light backgrounds. circuit
+        profile: rectangles fits existing graphic boxes to closed UI borders
+            (threshold 210, width 30..600, height 12..60, IoU >= 0.35, growth <= 1.6x).
+            With no IDs, rectangles fits all graphic observations. Text stays unchanged.
+            icons fits isolated icons on plain light backgrounds. block-diagram
             also handles connected block diagrams: whole frames, pointed tags,
             ellipses, terminal rings and grounds. Electrical diagrams retain
             paired circles, grounded load branches and busbars. Frame and shadow
@@ -2395,7 +2436,7 @@ async def correct_ui_image_annotations(
             remain unchanged and are listed in correction.needs_review_ids.
             Duplicate observations sharing one candidate retain their primary
             ID; merged IDs and conflicting model captions remain in metadata.
-        discover_missing: With circuit profile, add unassigned geometric busbar
+        discover_missing: With block-diagram profile, add unassigned geometric busbar
             observations. No reference coordinates or model request is used.
     """
     try:
@@ -2459,7 +2500,8 @@ def take_screenshot(
     """Take a screenshot of the current screen.
 
     Returns the screenshot as an image. With no arguments, captures the full screen.
-    Optionally capture a specific region.
+    Optionally capture a specific region. For automatic window-edge cropping and
+    coordinate metadata, use take_window_screenshot instead.
 
     Args:
         region_x: X coordinate of region top-left (0 = left edge).
@@ -2481,6 +2523,40 @@ def take_screenshot(
     except Exception as e:
         # Return error as text - but MCPImage doesn't support that, so raise
         raise RuntimeError(f"Error taking screenshot: {e}")
+
+
+@mcp.tool()
+def take_window_screenshot(window_name: str, auto_crop: bool = True):
+    """Capture a named window and return PNG plus screen-coordinate metadata.
+
+    auto_crop=True uses native visible bounds followed by conservative local
+    rectangle-edge detection when OpenCV is installed. Keep the title bar and
+    border; return the unchanged image if no reliable outer rectangle exists.
+    auto_crop=False captures original UIA bounds. No window activation or remote
+    API request is performed. capture_bounds and crop_offset describe the final
+    image, so image coordinates map back to the correct physical screen point.
+    """
+    window = scanner._find_window(window_name)
+    original = scanner._rect(window)
+    rectangle = scanner._window_rect(window, original) if auto_crop else original
+    if rectangle["width"] <= 1 or rectangle["height"] <= 1:
+        raise ValueError("The window has no visible screenshot bounds")
+    screenshot = scanner._screenshot_window(rectangle)
+    method = "dwm-visible-frame" if rectangle != original else "original"
+    if auto_crop:
+        initial = rectangle
+        screenshot, rectangle = scanner._trim_window_capture(screenshot, rectangle, window)
+        if rectangle != initial:
+            method = "rectangle-edge"
+    buffer = io.BytesIO()
+    screenshot.save(buffer, format="PNG")
+    metadata = {"window_name": str(getattr(window, "Name", "") or window_name),
+                "original_bounds": original, "capture_bounds": rectangle,
+                "crop_offset": {"x": rectangle["left"] - original["left"],
+                                "y": rectangle["top"] - original["top"]},
+                "image_size": {"width": screenshot.width, "height": screenshot.height},
+                "method": method, "cropped": rectangle != original}
+    return [json.dumps(metadata, ensure_ascii=False), MCPImage(data=buffer.getvalue(), format="png")]
 
 
 # ---------------------------------------------------------------------------

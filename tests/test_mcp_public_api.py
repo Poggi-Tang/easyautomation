@@ -59,7 +59,7 @@ def test_async_image_tool_can_be_awaited_without_context(monkeypatch, tmp_path):
             "annotated_image": str(tmp_path / "sample.png"),
         },
     )
-    outcome = json.loads(asyncio.run(analyze_ui_image("sample.png")))
+    outcome = json.loads(asyncio.run(analyze_ui_image("sample.png", engine="api")))
     assert outcome["ok"] is True
 
 

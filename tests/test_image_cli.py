@@ -51,6 +51,9 @@ def test_cli_exports_all_three_layers_and_matching_resources(
             "elements.csv", "raw-yolo.json", "raw-ocr.json", "ocr-recovery.json",
             "geometry-candidates.json",
             "index.html", "summary.json", "run.log"} <= set(result["resources"])
+    assert {"rectangle-snap.json", "before-snap.png", "snap-compare.png"} <= set(result["resources"])
+    assert result["confidence_threshold"] == 0.1
+    assert result["rectangle_snap"]["enabled"] is True
     assert json.loads((folder / "elements.json").read_text(encoding="utf-8")) == result
     with (folder / "elements.csv").open(encoding="utf-8-sig", newline="") as stream:
         rows = list(csv.DictReader(stream))
@@ -89,6 +92,94 @@ def test_runtime_failure_leaves_an_explicit_failure_report(monkeypatch, tmp_path
     assert not list(output.glob("*/combined.png"))
 
 
+def test_element_limit_matches_saved_layers_and_coordinates(local_engines, tmp_path):
+    source = tmp_path / "input.png"
+    image = Image.new("RGB", (240, 160), "white")
+    ImageDraw.Draw(image).rectangle((30, 40, 150, 120), outline="black")
+    image.save(source)
+    result = image_cli.analyze_local_image(source, tmp_path / "out", profile="ui",
+                                           max_elements=1, progress=lambda _s: None)
+    assert result["detected_element_count"] == 2 and result["truncated"] is True
+    assert result["element_count"] == result["graphic_count"] == 1
+    assert result["text_count"] == 0
+    assert len(result["layers"]["combined"]["annotation_layout"]["labels"]) == 1
+    assert not result["layers"]["text"]["annotation_layout"]["labels"]
+    saved = json.loads(Path(result["coordinates_json"]).read_text(encoding="utf-8"))
+    assert saved == result and len(saved["elements"]) == 1
+
+
+@pytest.mark.parametrize("engine", ["local", "api"])
+def test_window_crop_precedes_recognition_and_retains_correction_coordinates(
+        local_engines, monkeypatch, tmp_path, engine):
+    from easy_uiauto.mcp import annotation_correction, image_analysis, scanner
+
+    source = tmp_path / "window.png"
+    image = Image.new("RGB", (480, 320), "white")
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((16, 16, 463, 303), fill=(0, 61, 116))
+    draw.rectangle((17, 17, 462, 302), fill="white")
+    draw.rectangle((17, 17, 462, 40), fill=(209, 224, 239))
+    draw.text((24, 23), "Window", fill="black")
+    image.save(source)
+    original_bytes = source.read_bytes()
+    seen = []
+
+    def detect(cropped, *_args, **_kwargs):
+        seen.append(cropped.size)
+        assert cropped.getpixel((0, 0)) == (0, 61, 116)
+        if engine == "local":
+            return local_engines[0]
+        return scanner._validate_segments({"controls": [
+            {"semantic_name": "Control", "left": 30, "top": 40, "width": 120,
+             "height": 80, "confidence": 0.9}]}, *cropped.size)
+
+    if engine == "local":
+        monkeypatch.setattr(image_detection, "run_yolo", detect)
+        result = image_cli.analyze_local_image(source, tmp_path / "out", profile="ui",
+                                               progress=lambda _s: None)
+    else:
+        monkeypatch.setattr(scanner, "segment_interface", detect)
+        result = image_analysis.analyze_image(str(source), "url", "key", "model", "v",
+                                              str(tmp_path / "out"), auto_crop=True,
+                                              analysis_scale=1)
+    assert seen == [(448, 288)]
+    assert result["crop"]["offset"] == {"x": 16, "y": 16}
+    assert result["coordinate_system"]["original_image_offset"] == {"x": 16, "y": 16}
+    assert result["input_image_path"] == str(source)
+    assert Path(result["image_path"]).name == "analysis-input.png"
+    assert (result["image_width"], result["image_height"]) == (448, 288)
+    corrected = annotation_correction.correct_annotations(result["coordinates_json"],
+        corrections=[{"id": 1, "rect": dict(left=10, top=50, right=35, bottom=80)}])
+    assert corrected["correction"]["source_validation"] == "sha256"
+    assert corrected["elements"][0]["rect"]["left"] == 10
+    assert corrected["crop"]["offset"] == {"x": 16, "y": 16}
+    assert source.read_bytes() == original_bytes
+
+
+def test_cli_can_keep_the_entire_input():
+    options = image_cli.build_parser().parse_args(["in.png", "out", "--no-auto-crop"])
+    assert options.no_auto_crop is True
+
+
+def test_cli_defaults_and_opt_out_for_rectangle_snapping():
+    defaults = image_cli.build_parser().parse_args(["in.png", "out"])
+    assert defaults.confidence == 0.1 and defaults.no_rectangle_snap is False
+    assert defaults.profile == "ui"
+    options = image_cli.build_parser().parse_args(["in.png", "out", "--no-rectangle-snap"])
+    assert options.no_rectangle_snap is True
+
+
+def test_removed_circuit_profile_is_rejected_before_reading_inputs(tmp_path):
+    with pytest.raises(SystemExit) as error:
+        image_cli.build_parser().parse_args(['in.png','out','--profile','circuit'])
+    assert error.value.code == 2
+    with pytest.raises(ValueError, match='profile'):
+        image_cli.analyze_local_image(tmp_path/'missing.png',tmp_path/'out',profile='circuit')
+    with pytest.raises(ValueError, match='profile'):
+        image_detection.combine_detections(Image.new('RGB',(10,10)),{}, {},profile='circuit')
+    assert not (tmp_path/'out').exists()
+
+
 @pytest.mark.parametrize("confidence", [0, 1, float("nan"), float("inf")])
 def test_invalid_threshold_fails_before_loading_image_or_models(tmp_path, confidence):
     output = tmp_path / "out"
@@ -113,6 +204,9 @@ def test_model_checksum_rejects_corrupt_cache_and_offline_never_downloads(monkey
 
 def test_ui_profile_keeps_graphic_owner_but_deduplicates_yolo_text():
     image = Image.new("RGB", (240, 160), "white")
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((10, 10, 199, 139), outline="black")
+    draw.text((20, 50), "literal label", fill="black")
     yolo = dict(boxes=[[10, 10, 200, 140], [20, 50, 80, 65]], scores=[0.9, 0.8])
     ocr = dict(boxes=[[[20, 50], [80, 50], [80, 65], [20, 65]]],
                texts=["literal label"], scores=[0.99])
@@ -208,6 +302,7 @@ def test_recovered_text_requires_agreement_and_confidence(texts, scores, accepte
 
 def test_recovery_provenance_and_existing_text_are_preserved_when_combining():
     image = Image.new("RGB", (240, 160), "white")
+    ImageDraw.Draw(image).rectangle((10, 10, 199, 139), outline="black")
     yolo = dict(boxes=[[10, 10, 200, 140]], scores=[0.9])
     old_quad = [[20, 50], [80, 50], [80, 65], [20, 65]]
     new_quad = [[90, 50], [95, 50], [95, 58], [90, 58]]

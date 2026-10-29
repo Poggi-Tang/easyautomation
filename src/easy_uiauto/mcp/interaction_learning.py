@@ -45,7 +45,9 @@ def snapshot_top_level_windows() -> list[dict]:
     """Return a cheap desktop-level window inventory for popup detection."""
     windows = []
     for entry in native_windows.enumerate_windows(visible_only=True):
-        rectangle = entry["bounds"]
+        rectangle = native_windows.visible_window_bounds(
+            entry["handle"], entry["bounds"], class_name=entry["class_name"],
+        )
         if rectangle["width"] <= 1 or rectangle["height"] <= 1:
             continue
         windows.append({key: entry[key] for key in (
@@ -107,8 +109,9 @@ def _control_properties(control) -> dict:
 def capture_snapshot(window_name: str, action_location: dict | None = None) -> dict:
     """Capture full pixels, top-level windows, and the operated control state."""
     window = scanner._find_window(window_name)
-    window_rect = scanner._rect(window)
+    window_rect = scanner._window_rect(window)
     target_image = scanner._screenshot_window(window_rect)
+    target_image, window_rect = scanner._trim_window_capture(target_image, window_rect, window)
     with Controller.suspend_highlights():
         desktop_image, desktop_origin = _capture_virtual_desktop()
     action_control = None

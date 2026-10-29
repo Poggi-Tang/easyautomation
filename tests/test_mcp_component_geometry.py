@@ -1,4 +1,4 @@
-"""Circuit correction from synthetic pixels, with wires and changed layouts."""
+"""Model-component correction from synthetic pixels with changed layouts."""
 
 import asyncio
 import hashlib
@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 from PIL import Image, ImageDraw
 
-from easy_uiauto.mcp import annotation_correction, circuit_geometry, image_analysis, scanner, server
+from easy_uiauto.mcp import annotation_correction, component_geometry, image_analysis, scanner, server
 
 
 def circuit_image(scale=1, offset=(0, 0)):
@@ -81,7 +81,7 @@ def saved_circuit(tmp_path, scale=1, offset=(0, 0)):
         x1, x2 = (x1 + offset[0]) * scale, (x2 + offset[0]) * scale
         y1, y2 = (y1 + offset[1]) * scale, (y2 + offset[1]) * scale
         elements.append({"id": index, "semantic_name": name, "observed_value": f"caption-{index}",
-                         "rect": circuit_geometry.rect(x1, y1, x2 - x1, y2 - y1),
+                         "rect": component_geometry.rect(x1, y1, x2 - x1, y2 - y1),
                          "status": "observed", "uia_verified": False, "executable": False})
     data = {"ok": True, "image_path": str(image_path), "image_width": image.width,
             "image_height": image.height, "box_padding": 2, "element_count": len(elements),
@@ -96,7 +96,7 @@ def saved_circuit(tmp_path, scale=1, offset=(0, 0)):
 def test_structural_correction_works_after_translation_and_scaling(tmp_path, scale, offset):
     path, old = saved_circuit(tmp_path, scale, offset)
     result = annotation_correction.correct_annotations(
-        str(path), refine_ids=list(range(1, 8)), profile="circuit", discover_missing=True)
+        str(path), refine_ids=list(range(1, 8)), profile="block-diagram", discover_missing=True)
     report = result["correction"]
     assert report["candidate_counts"] == {
         "block": 1, "busbar": 2, "line": 1, "load": 2, "transformer": 1}
@@ -115,31 +115,31 @@ def test_structural_correction_works_after_translation_and_scaling(tmp_path, sca
     assert transformer["rect"]["right"] >= (262 + offset[0]) * scale
     assert all(not e["executable"] and not e["uia_verified"] for e in result["elements"])
     added = next(e for e in result["elements"] if e["id"] in report["added_element_ids"])
-    assert added["source"] == "local-circuit-geometry"
+    assert added["source"] == "local-component-geometry"
     assert report["api_requests"] == 0
 
 
-def test_circuit_repeat_does_not_duplicate_recovered_busbars(tmp_path):
+def test_component_repeat_does_not_duplicate_recovered_busbars(tmp_path):
     path, _old = saved_circuit(tmp_path)
     first = annotation_correction.correct_annotations(
-        str(path), refine_ids=list(range(1, 8)), profile="circuit", discover_missing=True)
+        str(path), refine_ids=list(range(1, 8)), profile="block-diagram", discover_missing=True)
     second = annotation_correction.correct_annotations(
         first["coordinates_json"], refine_ids=[e["id"] for e in first["elements"]],
-        profile="circuit", discover_missing=True)
+        profile="block-diagram", discover_missing=True)
     assert second["correction"]["added_count"] == second["correction"]["merged_count"] == 0
     assert [(e["id"], e["rect"]) for e in first["elements"]] == [
         (e["id"], e["rect"]) for e in second["elements"]]
 
 
 def test_component_kind_does_not_confuse_a_line_caption_with_its_busbars():
-    assert circuit_geometry.kind({"semantic_name": "线路-母线A-母线B"}) == "line"
-    assert circuit_geometry.kind({"semantic_name": "Line connection", "entity_type": "busbar"}) \
+    assert component_geometry.kind({"semantic_name": "线路-母线A-母线B"}) == "line"
+    assert component_geometry.kind({"semantic_name": "Line connection", "entity_type": "busbar"}) \
         == "busbar"
 
 
 def test_partial_selection_keeps_other_annotations_and_discovery_is_opt_in(tmp_path):
     path, old = saved_circuit(tmp_path)
-    result = annotation_correction.correct_annotations(str(path), refine_ids=[4], profile="circuit")
+    result = annotation_correction.correct_annotations(str(path), refine_ids=[4], profile="block-diagram")
     assert result["element_count"] == 7 and result["correction"]["added_count"] == 0
     assert result["elements"][0] == {**old["elements"][0], "annotation_label": "G1",
                                      "annotation_color": "#1565c0"}
@@ -153,14 +153,14 @@ def test_plain_wire_has_no_symbol_candidate_and_no_fabricated_correction(tmp_pat
     image.save(old["image_path"])
     old["source_image_sha256"] = hashlib.sha256(Path(old["image_path"]).read_bytes()).hexdigest()
     path.write_text(json.dumps(old), encoding="utf-8")
-    result = annotation_correction.correct_annotations(str(path), refine_ids=[1], profile="circuit")
+    result = annotation_correction.correct_annotations(str(path), refine_ids=[1], profile="block-diagram")
     assert result["correction"]["skipped_count"] == 1
     assert result["elements"] == [{**e, "annotation_label": f"G{i}",
                                    "annotation_color": "#1565c0"}
                                   for i, e in enumerate(old["elements"], 1)]
 
 
-def test_mcp_circuit_profile_has_no_api_or_reference_dependency(monkeypatch, tmp_path):
+def test_mcp_component_profile_has_no_api_or_reference_dependency(monkeypatch, tmp_path):
     path, _old = saved_circuit(tmp_path)
 
     def forbidden(*_args, **_kwargs):
@@ -169,7 +169,7 @@ def test_mcp_circuit_profile_has_no_api_or_reference_dependency(monkeypatch, tmp
     monkeypatch.setattr(scanner.urlrequest, "urlopen", forbidden)
     monkeypatch.setattr(server, "_vision_api_settings", forbidden)
     result = json.loads(asyncio.run(server.correct_ui_image_annotations(
-        str(path), refine_ids=list(range(1, 8)), profile="circuit", discover_missing=True)))
+        str(path), refine_ids=list(range(1, 8)), profile="block-diagram", discover_missing=True)))
     assert result["ok"] and result["element_count"] == 7
     schema = next(t.inputSchema for t in asyncio.run(server.mcp.list_tools())
                   if t.name == "correct_ui_image_annotations")

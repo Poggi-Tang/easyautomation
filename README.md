@@ -22,7 +22,7 @@ The project is useful for Windows test automation, RPA, agent tooling, and
 building reusable operation knowledge for desktop software. It is Windows-only
 and currently released as a `0.x` project.
 
-It also annotates saved images locally with YOLO + OCR: provide an image path and
+Saved-image annotation defaults to the recommended **YOLO + RapidOCR**: provide an image path and
 an output directory to receive separate text, graphic and combined annotation
 images, coordinates, recognition evidence and a local HTML viewer.
 
@@ -48,7 +48,7 @@ images, coordinates, recognition evidence and a local HTML viewer.
   commands instead of rediscovering coordinates for every task.
 - **Control overlays**: number every learned or executable control in one
   click-through overlay, save annotated page images, and preview operation targets.
-- **Local image annotation**: use CPU-based YOLO + OCR without a vision API;
+- **Local image annotation**: default to CPU-based YOLO + RapidOCR without a vision API;
   export blue `G` graphics and orange `T` text with one-pixel boxes, adjacent IDs,
   local geometry correction and automatic small-text recovery.
 - **Effect learning**: compare before/after screenshots, inspect changed UIA
@@ -71,7 +71,7 @@ images, coordinates, recognition evidence and a local HTML viewer.
 | Recording and replay | Stable | Produces reusable structured actions |
 | MCP tools and client setup | Beta | Codex and Claude Code installers included |
 | Visual-first scan and generated UI CLI | Beta | Requires an OpenAI-compatible vision endpoint |
-| Local image annotation CLI | Experimental | CPU YOLO + OCR; no API key; supports UI, control-block and electrical-diagram profiles |
+| Local image annotation | Experimental | Default and recommended YOLO + RapidOCR; no API key; MCP and CMD support UI, control-block and electrical-diagram profiles |
 | Before/after effect learning | Beta | Stores local evidence and learned success conditions |
 | Recursive workflow exploration | Experimental | Restricted to reversible commands and bounded depth |
 
@@ -108,8 +108,8 @@ Each run creates a result subdirectory containing `text.png`, `controls.png`,
 `combined.png`, `elements.json`, `elements.csv`, diagnostics and `index.html`.
 Open `index.html` after completion to view the results. Models run on the local
 CPU; the YOLO weights are downloaded and verified on first use. The default profile
-is `block-diagram`; use `--profile ui` for ordinary software screenshots or
-`--profile circuit` for electrical symbols. See
+is `ui` for ordinary software screenshots; use `--profile block-diagram` for
+control and electrical model diagrams. See
 [local image annotation from CMD](#local-image-annotation-from-cmd) for details.
 
 ## MCP Setup
@@ -298,6 +298,23 @@ build the wheel and sdist and verify that both contain the same EXE before
 publication. Compiled binaries travel as build artifacts and are not checked
 into Git.
 
+### Window Edge Cropping
+
+Window learning, interaction screenshots and replay verification exclude native
+invisible resize borders, then optionally find a near-full closed rectangle with
+local pixel-matrix edge detection. Quiet outer backgrounds are checked for omitted
+text strokes; busy exteriors require a continuous frame, balanced capture margins
+and a broad title-bar transition. Ambiguous images stay unchanged. Captured
+pixels and their screen origin change together. Rescan existing knowledge to
+refresh the image reference and normalized geometry.
+
+MCP `take_window_screenshot(window_name="New Project", auto_crop=True)` returns
+both PNG and `capture_bounds`, `crop_offset` and size metadata. Set `auto_crop=False`
+for the original UIA frame. Existing `take_screenshot` region captures are unchanged.
+For a saved Pillow image, use `easy_uiauto.visual.crop_window_image(image)` with
+the local `vision` dependencies; its result includes `image`, `rect_in_input`,
+`offset` and `cropped`. This algorithm does not call a remote model.
+
 ## Learn an Application
 
 The package includes two Codex skills:
@@ -398,21 +415,63 @@ is slower and produces more records.
 ### Saved UI images
 
 Call MCP tool `analyze_ui_image(image_path="C:/images/screenshot.png")` to analyze a
-saved PNG, JPEG, or WebP without opening or controlling an application. It uses the
-configured vision endpoint and returns `annotated_image`, `coordinates_json`, and
+saved PNG, JPEG, or WebP without opening or controlling an application.
+**The default `engine="local"` uses YOLO + RapidOCR, the recommended combination.**
+In the project's `test1/test2/test3` software-screenshot comparison against the
+configured vision API and Tesseract with tessdata_best, this combination provided
+better text coverage and overall annotations. This is evidence from these examples,
+not an accuracy guarantee for other interfaces.
+
+Graphic detection uses Microsoft's official [OmniParser v2.0 icon_detect_v3 weights](https://huggingface.co/microsoft/OmniParser-v2.0/tree/main/icon_detect_v3),
+`model.pt`, with the **YOLOv9-E** architecture. Text recognition uses RapidOCR's
+**PP-OCRv6 small ONNX** models. These weights were not retrained on this project's
+circuit or Simulink images. Install the local dependencies from the checkout:
+
+```cmd
+python -m pip install ".[mcp,image]"
+```
+
+Local inference needs no API URL, key, or remote model. The first run downloads and
+verifies the YOLO weights; later runs reuse the cache. Missing local dependencies
+produce an installation error without uploading the image. For remote comparison,
+explicitly call `analyze_ui_image(image_path="C:/images/screenshot.png", engine="api")`.
+Only that mode reads the configured vision API; `model`, `analysis_scale`, and
+`analysis_context` are API-only options. MCP local mode defaults to `profile="ui"`;
+select `block-diagram` for control and electrical model diagrams.
+The separate `circuit` profile has been removed; update existing calls to `block-diagram`.
+The default YOLO confidence threshold is **0.1**. Override it with MCP `confidence`
+or the CMD `--confidence` option.
+
+Local annotation also enables **rectangle-contour snapping** for graphic boxes:
+grayscale threshold 210, candidate width 30..600 and height 12..60 pixels, highest
+IoU at least 0.35, and candidate width/height no greater than 1.6x the old box.
+A contour-area check rejects sparse text strokes. Unmatched boxes are retained.
+This completes closed rectangular borders such as input fields and buttons; it
+does not replace arbitrary-shape detection. Text and IDs stay unchanged.
+`detected_rect` retains the prediction; `corrected_rect`, `snap_iou`, and
+`geometry_correction` record the fit, with `rect`, `bbox`, center and normalized
+coordinates updated together. The local default keeps a one-pixel margin.
+Use MCP `rectangle_snap=False` or CMD `--no-rectangle-snap` to disable this pass.
+
+Both modes first crop a reliable outer window frame locally. Ambiguous images stay
+unchanged; `auto_crop=False` keeps the full input. `crop.offset` maps coordinates
+back to the EXIF-oriented original `input_image_path`. The returned `image_path`
+identifies the actual recognition input, saved as `analysis-input.png` when cropped,
+so subsequent corrections use the matching image and coordinate system.
+The tool returns `annotated_image`, `coordinates_json`, and
 numbered `elements` with meaning, confidence, `bbox` (`x`, `y`, `width`, `height`),
 `rect` (left/top inclusive, right/bottom exclusive), center, and normalized coordinates.
-All element coordinates refer to the displayed input image after EXIF orientation.
+All element coordinates refer to the actual recognition input at `image_path`.
 Graphics use blue boxes and `G1…` labels; text uses orange boxes and `T1…` labels.
 `annotation_label` maps each display label to its original numeric `id`, which
 correction tools continue to use. These remain observations without UIA or execution
 verification, and no application knowledge is written. `output_dir` selects a parent
 directory for a unique run folder; `max_elements` limits output with explicit
 `truncated` reporting. Attachments must be accessible as local files to the server.
-Small inputs are automatically enlarged up to 4x for recognition, with all regions
-and elements mapped back to original-image coordinates. `analysis_scale=1` disables
+In API mode, small inputs are automatically enlarged up to 4x for recognition, with all regions
+and elements mapped back to recognition-input coordinates. `analysis_scale=1` disables
 enlargement; values from 1 to 4 set an explicit scale.
-`box_padding` adds a margin in original pixels (default 2, set 0 to disable).
+`box_padding` adds a margin in recognition-input pixels (local default 1, API default 2; set 0 to disable).
 `detected_rect` retains the model's raw mapped bounds; the returned `rect` and
 `bbox` include that margin and any known attached subcomponents. The enlarged
 `annotated_preview_image` is drawn separately with one-pixel outlines and compact
@@ -433,11 +492,20 @@ shapes are skipped with reasons. For exact bounds, pass
 `corrections=[{"id":3,"rect":{"left":110,"top":65,"right":125,"bottom":81}}]`.
 Explicit rectangles receive no added padding. Pixel fitting defaults to a one-pixel
 margin. IDs, semantics, raw `detected_rect`, and the annotation style are preserved.
+The default pipeline does not apply `icons` foreground fitting to every control:
+it can shrink an input-field box to its text. Request it only for suitable isolated
+icons and inspect the before/after result.
 New PNG/JSON files retain the previous outputs; `corrected_rect` and
 `correction.updates` record changes. New analyses include a source image hash so
 correction rejects changed images. Legacy results validate dimensions only.
 
-For connected circuit symbols, add `profile="circuit"`. This uses original pixels
+For existing rectangular UI controls, use
+`correct_ui_image_annotations(coordinates_json=".../elements.json", profile="rectangles")`.
+It applies the same rectangle snapping to all graphics, or selected `refine_ids`,
+without another model request or changing text. It retains the full original JSON
+metadata and can also refine explicitly requested API results.
+
+For connected model components, add `profile="block-diagram"`. This uses original pixels
 to detect rectangular frames, paired circles, grounded load branches and thick
 busbars, then fits selected observations and merges shared geometry candidates.
 `discover_missing=true` additionally recovers unassigned busbars; it does not add
@@ -460,6 +528,7 @@ requires a text detector/OCR or review, not a closed circuit-symbol outline.
 
 ### Local image annotation from CMD
 
+CMD also defaults to the recommended YOLO + RapidOCR without reading vision API settings.
 Run directly from the checkout without starting Codex or an MCP server:
 
 ```cmd
@@ -475,18 +544,47 @@ its path. Open `index.html` there to view all three layers and resource links:
 - `controls.png`: blue `G` graphic controls.
 - `combined.png`: both layers with matching display IDs.
 - `original.png`: EXIF-oriented input composited against white.
+- `analysis-input.png`: the actual recognition input after optional window cropping.
 - `elements.json` / `elements.csv`: text, IDs, coordinates, provenance and relations.
 - `raw-yolo.json` / `raw-ocr.json`: original detector and OCR outputs.
 - `ocr-recovery.json`: small-text candidates, rejection reasons and recognition evidence.
 - `geometry-candidates.json`: original-pixel shape candidates and evidence.
+- `rectangle-snap.json`: candidate rectangles, IoU, before/after bounds and skipped reasons.
+- `ui-fusion.json`: blank-region rejection, compact-border protection, repeated-icon recovery and OCR conflicts.
+- `before-snap.png` / `snap-compare.png`: before fitting and red original / green fitted / blue unchanged boxes.
 - `summary.json` / `run.log`: counts, timings and success/failure diagnostics.
 
-The default `--profile block-diagram` uses the tested control-diagram pipeline.
-Use `--profile circuit` for electrical symbol diagrams or `--profile ui` for ordinary
-software screenshots. UI mode retains YOLO graphic proposals while removing duplicate
-text proposals; it does not force diagram outlines onto arbitrary icons. Results can
+The default `--profile ui` handles ordinary software screenshots, matching MCP
+local mode. Use `--profile block-diagram` for control and electrical model diagrams.
+UI mode checks proposal pixels and a two-pixel context,
+rejecting regions without visible foreground or borders while retaining bordered
+empty inputs. Compact closed control borders protect graphics from OCR deduplication;
+suspect OCR glyphs such as M/check marks inside them are recorded as conflicts without
+changing raw OCR output. Nested predictions of one compact border are merged with
+all original `yolo_proposal_ids` retained.
+
+UI mode also extracts up to 12 templates from already detected small icons in the
+current image and recovers matching patterns at correlation >=0.97, excluding existing
+small controls and normal OCR text. It uses no reviewed annotations or reference-image
+coordinates. Recovered observations use `local-template-recovery` and
+`confidence_kind=template-correlation`, which is not a YOLO probability or semantic
+verification. Inspect `ui-fusion.json` for all filtering, protection and recovery evidence.
+UI layout lines separate table cells, row fragments and repeated list regions from
+their atomic text/icon observations; the original region proposals remain in the
+report. Pixel-fitted arrows and close symbols retire their duplicate OCR glyphs.
+Supported scroll thumbs and a magnifier merged into a CJK caption can be separated
+locally, with original text and bounds retained in correction evidence. Wide light
+input borders and button borders protect those controls from text-only filtering.
+Dense small-control pages also receive a separately rendered 2x preview; coordinates
+remain relative to the analysis input and the viewer opens the readable preview.
+Other duplicate text proposals are removed; UI mode does not force diagram outlines
+onto arbitrary icons. Results can
 still contain missed regions, false positives and OCR errors. Diagram fitting supports
 the implemented outline families only.
+
+Reliable outer window frames are cropped before recognition by default. Use
+`--no-auto-crop` to retain the full input. `crop.offset` in `elements.json` records
+the origin in the original image; annotations and corrections match `analysis-input.png`.
 
 Both diagram profiles also detect connected color foreground without selecting
 specific hues. Touching color patches and narrow dark dividers form one body;

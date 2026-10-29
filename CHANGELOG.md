@@ -6,6 +6,8 @@ The format is based on Keep a Changelog and is maintained automatically by Seman
 
 ## [Unreleased]
 
+## [0.9.9] - 2026-10-29
+
 ### Added
 
 - Add a standalone Windows Tk configuration EXE and `easy_uiauto_config` GUI
@@ -17,6 +19,42 @@ The format is based on Keep a Changelog and is maintained automatically by Seman
 - Bundle the Windows x64 configuration EXE in wheels and source distributions,
   launch it through `easy_uiauto_config`, and verify package contents in CI and
   the tag publication workflow before uploading distributions.
+- Add conservative local rectangle-edge cropping for window images, preserve
+  physical coordinate offsets, and use Windows visible frame bounds to exclude
+  invisible resize margins. Expose `crop_window_image` and
+  `take_window_screenshot`, including final capture bounds and crop offsets.
+
+### Changed
+
+- Separate grid/list layout proposals from atomic UI controls, fit compact icons,
+  merge independently confirmed symbolic OCR duplicates, and recover supported
+  scroll thumbs and magnifier details. Protect long shallow input/button borders
+  and provide dense UI previews with readable adjacent labels.
+- Validate UI proposal pixels before keeping blank regions, protect compact
+  bordered controls from OCR deduplication, and recover repeated small icons
+  from same-image templates. Audit filtering, merged YOLO IDs, OCR conflicts and
+  template scores in `ui-fusion.json` while retaining raw model outputs.
+- Align the CMD/Python image entry point's default profile with MCP's `ui` profile;
+  control and electrical model diagrams share the `block-diagram` profile.
+- Raise the default local YOLO threshold to 0.1 and enable closed-rectangle snapping
+  for graphic boxes. Preserve raw predictions, stable labels and all coordinate
+  representations; export before/after images and fitting diagnostics. Add
+  `profile="rectangles"` for refining saved results without another model request.
+- Recommend YOLOv9-E + RapidOCR PP-OCRv6 for saved-image annotations based on the
+  project's screenshot comparison. Make `analyze_ui_image` local by default;
+  retain configured remote vision behind explicit `engine="api"`.
+- Crop reliable window frames before image annotation by default, save the actual
+  recognition input and original-image offsets, and expose opt-out flags. Keep
+  generic icon foreground correction explicit to avoid shrinking input fields.
+- Document exact official model weights, local dependency installation, both
+  engines, and matching MCP/CLI usage in the English and Chinese READMEs and skill.
+
+### Removed
+
+- Remove the separate `circuit` profile from CMD, Python and MCP image analysis
+  and correction. Use `block-diagram` for both control and electrical model
+  diagrams. Retain shared component geometry under `component_geometry` and
+  advertise only supported profile values in MCP schemas.
 
 ## [0.9.8] - 2026-10-28
 

@@ -4,7 +4,7 @@ import pytest
 from PIL import Image, ImageDraw
 
 from easy_uiauto import image_detection, image_geometry
-from easy_uiauto.mcp import circuit_geometry, diagram_geometry
+from easy_uiauto.mcp import component_geometry, diagram_geometry
 
 
 def _empty_ocr():
@@ -115,12 +115,12 @@ def test_partial_yolo_prediction_does_not_create_a_second_graphic():
 
 def test_busbar_detail_is_not_ground_but_separate_ground_is_retained(monkeypatch):
     def box(x, y, w, h):
-        return circuit_geometry.rect(x, y, w, h)
+        return component_geometry.rect(x, y, w, h)
 
     candidates = [dict(kind="busbar", rect=box(30, 20, 15, 100), evidence="bar"),
                   dict(kind="ground", rect=box(31, 25, 10, 8), evidence="bar detail"),
                   dict(kind="ground", rect=box(90, 120, 14, 12), evidence="ground")]
-    monkeypatch.setattr(circuit_geometry, "candidates", lambda *_a, **_kw: candidates)
+    monkeypatch.setattr(component_geometry, "candidates", lambda *_a, **_kw: candidates)
     result = image_detection.combine_detections(Image.new("RGB", (200, 160), "white"),
                                                  dict(boxes=[], scores=[]), _empty_ocr())
     assert [g["geometry_kind"] for g in result["elements"]] == ["busbar", "ground"]

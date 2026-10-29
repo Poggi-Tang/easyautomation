@@ -6,7 +6,7 @@ import json
 import pytest
 from PIL import Image, ImageDraw
 
-from easy_uiauto.mcp import annotation_correction, circuit_geometry, image_analysis
+from easy_uiauto.mcp import annotation_correction, component_geometry, image_analysis
 
 
 def diagram(tmp_path, scale=1, offset=(0, 0)):
@@ -64,7 +64,7 @@ def diagram(tmp_path, scale=1, offset=(0, 0)):
         y1, y2 = (y1 + oy) * scale, (y2 + oy) * scale
         elements.append(dict(id=i, semantic_name=name, observed_value=f"value-{i}",
                              entity_type="ui-element", status="observed", uia_verified=False,
-                             executable=False, rect=circuit_geometry.rect(
+                             executable=False, rect=component_geometry.rect(
                                  x1, y1, x2 - x1, y2 - y1)))
     data = dict(ok=True, image_path=str(source), image_width=im.width, image_height=im.height,
                 source_image_sha256=hashlib.sha256(source.read_bytes()).hexdigest(),
@@ -78,7 +78,7 @@ def diagram(tmp_path, scale=1, offset=(0, 0)):
 def test_block_geometry_completes_outlines_without_discovering_shadows(tmp_path, scale, offset):
     p, old = diagram(tmp_path, scale, offset)
     result = annotation_correction.correct_annotations(
-        str(p), refine_ids=list(range(1, 9)), profile="circuit", discover_missing=True)
+        str(p), refine_ids=list(range(1, 9)), profile="block-diagram", discover_missing=True)
     report = result["correction"]
     assert report["diagram_family"] == "block"
     assert report["candidate_counts"]["busbar"] == 2
@@ -97,11 +97,11 @@ def test_block_geometry_completes_outlines_without_discovering_shadows(tmp_path,
 def test_small_wrong_box_outside_large_frame_is_not_absorbed(tmp_path):
     p, data = diagram(tmp_path)
     item = data["elements"][0]
-    item["rect"] = item["detected_rect"] = circuit_geometry.rect(230, 145, 15, 10)
+    item["rect"] = item["detected_rect"] = component_geometry.rect(230, 145, 15, 10)
     data["elements"] = image_analysis.complete_element_bounds(
         data["elements"], data["image_width"], data["image_height"])
     p.write_text(json.dumps(data), encoding="utf-8")
-    result = annotation_correction.correct_annotations(str(p), refine_ids=[1], profile="circuit")
+    result = annotation_correction.correct_annotations(str(p), refine_ids=[1], profile="block-diagram")
     assert result["correction"]["skipped_count"] == 1
     assert result["elements"][0]["detected_rect"] == data["elements"][0]["detected_rect"]
     assert result["elements"][0]["rect"] == data["elements"][0]["rect"]
@@ -112,10 +112,10 @@ def test_small_wrong_box_outside_large_frame_is_not_absorbed(tmp_path):
 def test_block_correction_is_idempotent(tmp_path):
     p, _ = diagram(tmp_path)
     first = annotation_correction.correct_annotations(
-        str(p), refine_ids=list(range(1, 9)), profile="circuit", discover_missing=True)
+        str(p), refine_ids=list(range(1, 9)), profile="block-diagram", discover_missing=True)
     second = annotation_correction.correct_annotations(
         first["coordinates_json"], refine_ids=[e["id"] for e in first["elements"]],
-        profile="circuit", discover_missing=True)
+        profile="block-diagram", discover_missing=True)
     assert second["correction"]["added_count"] == second["correction"]["merged_count"] == 0
     assert [(e["id"], e["rect"]) for e in first["elements"]] == [
         (e["id"], e["rect"]) for e in second["elements"]]
@@ -125,12 +125,12 @@ def test_text_control_is_retained_and_not_fitted_to_a_graphic_frame(tmp_path):
     p, data = diagram(tmp_path)
     data["elements"][0]["entity_type"] = "text-label"
     p.write_text(json.dumps(data), encoding="utf-8")
-    result = annotation_correction.correct_annotations(str(p), refine_ids=[1], profile="circuit")
+    result = annotation_correction.correct_annotations(str(p), refine_ids=[1], profile="block-diagram")
     assert result["elements"][0] == {**data["elements"][0], "annotation_label": "T1",
                                      "annotation_color": "#c65d00"}
     assert result["correction"]["text_control_ids"] == [1]
     assert "Text control retained" in result["correction"]["updates"][0]["detail"]
-    assert circuit_geometry.kind({"entity_type": "text-label", "semantic_name": "Busbar label"}) \
+    assert component_geometry.kind({"entity_type": "text-label", "semantic_name": "Busbar label"}) \
         == ""
-    assert circuit_geometry.kind({"entity_type": "text-label", "semantic_name": "PowerPort_3ph"}) \
+    assert component_geometry.kind({"entity_type": "text-label", "semantic_name": "PowerPort_3ph"}) \
         == ""

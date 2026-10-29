@@ -7,6 +7,7 @@ from .mcp.visual_segmentation import (
     detect_screen_rectangles,
     normalize_screen_rect,
 )
+from .mcp.window_crop import crop_window_image
 
 
 def segment_screen_rect(
@@ -55,4 +56,4 @@ def segment_image(
     )
 
 
-__all__ = ["normalize_screen_rect", "segment_image", "segment_screen_rect"]
+__all__ = ["normalize_screen_rect", "segment_image", "segment_screen_rect", "crop_window_image"]
