@@ -128,8 +128,11 @@ def extract_zip(archive: Path, destination: Path) -> None:
 
 def run(command: list[str], *, log: Path, env=None, timeout=1800, accepted=(0,)) -> str:
     log.parent.mkdir(parents=True, exist_ok=True)
+    command = [str(x) for x in command]
+    if Path(command[0]).name.lower() in {"python", "python.exe", "python3", "python3.exe"}:
+        command[1:1] = ["-X", "utf8"]
     result = subprocess.run(
-        [str(x) for x in command], stdin=subprocess.DEVNULL, capture_output=True,
+        command, stdin=subprocess.DEVNULL, capture_output=True,
         text=True, encoding="utf-8", errors="replace", timeout=timeout, env=env,
     )
     output = result.stdout + result.stderr
@@ -182,6 +185,8 @@ def project_wheel(version: str, cache: Path, wheel: Path | None) -> Path:
 
 OFFLINE_PS = r'''param([string]$Target = "", [ValidateSet("auto","codex","claude","none")][string]$Client = "auto", [switch]$NoIntegrate)
 $ErrorActionPreference = "Stop"
+$OutputEncoding = [Text.UTF8Encoding]::new()
+[Console]::OutputEncoding = $OutputEncoding
 $bundleRoot = $PSScriptRoot
 $manifest = Get-Content -LiteralPath (Join-Path $bundleRoot "manifest.json") -Raw -Encoding UTF8 | ConvertFrom-Json
 foreach ($entry in $manifest.files.PSObject.Properties) {
@@ -191,7 +196,7 @@ foreach ($entry in $manifest.files.PSObject.Properties) {
 }
 $bootstrapRoot = Join-Path ([IO.Path]::GetTempPath()) ("easy-uiauto-" + [Guid]::NewGuid().ToString("N"))
 Expand-Archive -LiteralPath (Join-Path $bundleRoot "payload/python.zip") -DestinationPath $bootstrapRoot
-$arguments = @("-I", (Join-Path $bundleRoot "deployment.py"), "install-offline", $bundleRoot, "--client", $Client)
+$arguments = @("-I", "-X", "utf8", (Join-Path $bundleRoot "deployment.py"), "install-offline", $bundleRoot, "--client", $Client)
 if ($Target) { $arguments += @("--target", $Target) }
 if ($NoIntegrate) { $arguments += "--no-integrate" }
 try {
@@ -341,7 +346,7 @@ def write_launchers(target: Path) -> None:
                "easy_uiauto_config": "easy_uiauto.mcp.config_launcher"}
     for name, module in modules.items():
         (target / f"{name}.cmd").write_text(
-            f'@echo off\r\n"%~dp0python\\python.exe" -I -m {module} %*\r\nexit /b %errorlevel%\r\n', encoding="ascii")
+            f'@echo off\r\n"%~dp0python\\python.exe" -I -X utf8 -m {module} %*\r\nexit /b %errorlevel%\r\n', encoding="ascii")
     (target / "activate.cmd").write_text(
         '@echo off\r\nset "PATH=%~dp0;%~dp0python;%~dp0python\\Scripts;%~dp0tesseract;%PATH%"\r\n', encoding="ascii")
 
@@ -479,6 +484,7 @@ def install_bundle(root: Path, target: Path, *, client="auto", no_integrate=Fals
     print("[3/5] Installing all Python dependencies from local wheels", flush=True)
     env = dict(os.environ, PIP_NO_INDEX="1", PIP_DISABLE_PIP_VERSION_CHECK="1")
     run([python, "-I", "-m", "pip", "--isolated", "install", "--no-index", "--no-deps", "--no-compile",
+         "--progress-bar", "off", "--no-warn-script-location",
          "--require-hashes", "--find-links", root / "wheelhouse", "-r", root / "requirements.lock"],
         env=env, log=log)
     write_launchers(target)
@@ -493,6 +499,9 @@ def install_bundle(root: Path, target: Path, *, client="auto", no_integrate=Fals
 
 
 def main(argv=None) -> int:
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="backslashreplace")
     parser = argparse.ArgumentParser(description=__doc__)
     actions = parser.add_subparsers(dest="action", required=True)
     for name in ("install", "download"):

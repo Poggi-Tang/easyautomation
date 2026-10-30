@@ -6,6 +6,14 @@ The format is based on Keep a Changelog and is maintained automatically by Seman
 
 ## [Unreleased]
 
+## [0.9.12] - 2026-10-30
+
+### Fixed
+
+- Force UTF-8 in Windows setup subprocesses and launchers so Chinese paths also
+  work on English Windows. Disable pip progress rendering during offline setup.
+- Validate complete offline installation and inference before publishing packages.
+
 ## [0.9.11] - 2026-10-30
 
 ### Added

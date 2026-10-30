@@ -204,6 +204,17 @@ def test_bootstrap_is_standalone_and_offline_entry_has_no_downloads():
     assert "Expand-Archive" in deployment.OFFLINE_PS
 
 
+def test_python_children_force_utf8_even_in_isolated_mode(monkeypatch, tmp_path):
+    commands = []
+    def capture(command, **kwargs):
+        commands.append(command)
+        return SimpleNamespace(returncode=0, stdout="中文", stderr="")
+    monkeypatch.setattr(deployment.subprocess, "run", capture)
+    result = deployment.run(["C:/runtime/python.exe", "-I", "-m", "pip", "check"], log=tmp_path / "setup.log")
+    assert commands[0][:4] == ["C:/runtime/python.exe", "-X", "utf8", "-I"]
+    assert result == "中文"
+
+
 def test_model_directory_can_be_configured(monkeypatch, tmp_path):
     from easy_uiauto.image_detection import default_weights
 

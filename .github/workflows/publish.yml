@@ -30,15 +30,9 @@ jobs:
       - name: Run tests
         run: pytest -q
 
-  publish:
+  build:
     needs: [test, config-exe]
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      id-token: write
-    environment:
-      name: pypi
-      url: https://pypi.org/p/easy-uiauto
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -73,15 +67,11 @@ jobs:
           name: release-distributions
           path: dist/*
           if-no-files-found: error
-      - name: Publish
-        uses: pypa/gh-action-pypi-publish@release/v1
 
   offline-bundle:
-    needs: publish
+    needs: build
     runs-on: windows-latest
     timeout-minutes: 60
-    permissions:
-      contents: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -96,13 +86,13 @@ jobs:
         run: |
           $version = $env:GITHUB_REF_NAME.Substring(1)
           $wheel = (Get-ChildItem dist -Filter *.whl).FullName
-          python src/easy_uiauto/deployment.py download offline --version $version --wheel $wheel
+          python -X utf8 src/easy_uiauto/deployment.py download offline --version $version --wheel $wheel
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Verify offline installation and inference
         shell: pwsh
         run: |
           $bundle = (Get-ChildItem offline -Directory).FullName
-          python src/easy_uiauto/deployment.py install-offline $bundle --target "$env:RUNNER_TEMP/完整安装 smoke" --no-integrate
+          python -X utf8 src/easy_uiauto/deployment.py install-offline $bundle --target "$env:RUNNER_TEMP/完整安装 smoke" --no-integrate
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Build standalone installation launchers
         run: python scripts/build_deployment_bootstrap.py --output-dir deployment
@@ -119,17 +109,57 @@ jobs:
         with:
           name: configuration-exe
           path: deployment
-      - name: Publish GitHub release assets
-        shell: pwsh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: complete-offline-assets
+          path: |
+            deployment/*
+            offline/*.zip*
+          compression-level: 0
+          if-no-files-found: error
+
+  publish:
+    needs: [build, offline-bundle]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+    environment:
+      name: pypi
+      url: https://pypi.org/p/easy-uiauto
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-distributions
+          path: dist
+      - uses: actions/download-artifact@v4
+        with:
+          name: complete-offline-assets
+          path: release-assets
+      - name: Stage GitHub release assets
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release view $env:GITHUB_REF_NAME
-          if ($LASTEXITCODE -ne 0) {
-            python -c "import pathlib, os; text=pathlib.Path('CHANGELOG.md').read_text(encoding='utf-8'); section=text.split('## ['+os.environ['GITHUB_REF_NAME'][1:]+']',1)[1]; pathlib.Path('release-notes.md').write_text(section.split('\n',1)[1].split('\n## [',1)[0].strip()+'\n',encoding='utf-8')"
-            gh release create $env:GITHUB_REF_NAME --title $env:GITHUB_REF_NAME --notes-file release-notes.md
-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          }
-          $assets = @((Get-ChildItem dist -File).FullName) + @((Get-ChildItem deployment -File).FullName) + @((Get-ChildItem offline -File).FullName)
-          gh release upload $env:GITHUB_REF_NAME @assets --clobber
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python - <<'PY'
+          import os, pathlib, subprocess
+          tag = os.environ['GITHUB_REF_NAME']
+          if subprocess.run(['gh', 'release', 'view', tag], capture_output=True).returncode:
+              text = pathlib.Path('CHANGELOG.md').read_text(encoding='utf-8')
+              lines = text.split('## [' + tag[1:] + ']', 1)[1].splitlines()[1:]
+              end = next((i for i, line in enumerate(lines) if line.startswith('## [')), len(lines))
+              pathlib.Path('release-notes.md').write_text('\n'.join(lines[:end]).strip() + '\n', encoding='utf-8')
+              subprocess.run(['gh', 'release', 'create', tag, '--draft', '--title', tag,
+                              '--notes-file', 'release-notes.md'], check=True)
+          assets = sorted(p for root in ('dist', 'release-assets') for p in pathlib.Path(root).rglob('*') if p.is_file())
+          subprocess.run(['gh', 'release', 'upload', tag, *map(str, assets), '--clobber'], check=True)
+          PY
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit "$GITHUB_REF_NAME" --draft=false --latest

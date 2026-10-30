@@ -8,11 +8,13 @@ param(
     [switch]$NoIntegrate
 )
 $ErrorActionPreference = "Stop"
+$OutputEncoding = [Text.UTF8Encoding]::new()
+[Console]::OutputEncoding = $OutputEncoding
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 if (-not [Environment]::Is64BitOperatingSystem -or $env:PROCESSOR_ARCHITECTURE -eq "ARM64") {
     throw "This installer supports Windows x64 only."
 }
-$packageVersion = "0.9.11"
+$packageVersion = "0.9.12"
 $repositoryManifest = Join-Path (Split-Path -Parent $PSScriptRoot) "pyproject.toml"
 $repositorySource = Join-Path (Split-Path -Parent $PSScriptRoot) "src\easy_uiauto\deployment.py"
 if ((Test-Path -LiteralPath $repositoryManifest) -and (Test-Path -LiteralPath $repositorySource)) {
@@ -50,7 +52,7 @@ if (Test-Path -LiteralPath $repositorySource) {
         if ((Get-FileHash -LiteralPath $deploymentFile -Algorithm SHA256).Hash.ToLowerInvariant() -ne $deploymentSha256) { throw "Setup script checksum mismatch" }
     }
 }
-$setupArguments = @("-I", $deploymentFile, $Action, "--version", $packageVersion, "--cache", $cacheRoot)
+$setupArguments = @("-I", "-X", "utf8", $deploymentFile, $Action, "--version", $packageVersion, "--cache", $cacheRoot)
 if ($Wheel) { $setupArguments += @("--wheel", $Wheel) }
 if ($Action -eq "download") {
     if (-not $Output) { $Output = Join-Path $env:USERPROFILE "Downloads\easy-uiauto-offline" }
