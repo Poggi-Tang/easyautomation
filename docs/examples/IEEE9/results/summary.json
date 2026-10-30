@@ -1,0 +1,1724 @@
+{
+  "ok": true,
+  "engine": "local",
+  "image_path": "../IEEE9.bmp",
+  "input_image_path": "../IEEE9.bmp",
+  "crop": {
+    "enabled": true,
+    "cropped": false,
+    "rect_in_input": {
+      "left": 0,
+      "top": 0,
+      "right": 2308,
+      "bottom": 1173,
+      "width": 2308,
+      "height": 1173
+    },
+    "screen_rect": {
+      "left": 0,
+      "top": 0,
+      "right": 2308,
+      "bottom": 1173,
+      "width": 2308,
+      "height": 1173
+    },
+    "offset": {
+      "x": 0,
+      "y": 0
+    },
+    "confidence": 0.0,
+    "evidence": "no-reliable-rectangle",
+    "method": "unchanged"
+  },
+  "coordinate_system": {
+    "origin": "top-left",
+    "units": "pixels",
+    "reference": "display-oriented-input",
+    "bounds": "left/top inclusive, right/bottom exclusive",
+    "original_image_offset": {
+      "x": 0,
+      "y": 0
+    },
+    "screen_coordinates": false
+  },
+  "output_directory": ".",
+  "image_width": 2308,
+  "image_height": 1173,
+  "profile": "block-diagram",
+  "element_count": 144,
+  "graphic_count": 42,
+  "text_count": 102,
+  "yolo_raw_count": 30,
+  "detected_element_count": 144,
+  "truncated": false,
+  "local_only": true,
+  "api_requests": 0,
+  "confidence_threshold": 0.1,
+  "rectangle_snap": {
+    "enabled": true,
+    "method": "rectangle-contour",
+    "candidate_count": 22,
+    "candidates": [
+      {
+        "left": 705,
+        "top": 109,
+        "right": 742,
+        "bottom": 150,
+        "width": 37,
+        "height": 41
+      },
+      {
+        "left": 1591,
+        "top": 109,
+        "right": 1628,
+        "bottom": 150,
+        "width": 37,
+        "height": 41
+      },
+      {
+        "left": 502,
+        "top": 121,
+        "right": 556,
+        "bottom": 150,
+        "width": 54,
+        "height": 29
+      },
+      {
+        "left": 564,
+        "top": 121,
+        "right": 635,
+        "bottom": 150,
+        "width": 71,
+        "height": 29
+      },
+      {
+        "left": 1698,
+        "top": 121,
+        "right": 1786,
+        "bottom": 150,
+        "width": 88,
+        "height": 29
+      },
+      {
+        "left": 1794,
+        "top": 121,
+        "right": 1865,
+        "bottom": 150,
+        "width": 71,
+        "height": 29
+      },
+      {
+        "left": 502,
+        "top": 149,
+        "right": 556,
+        "bottom": 178,
+        "width": 54,
+        "height": 29
+      },
+      {
+        "left": 564,
+        "top": 149,
+        "right": 635,
+        "bottom": 178,
+        "width": 71,
+        "height": 29
+      },
+      {
+        "left": 705,
+        "top": 149,
+        "right": 742,
+        "bottom": 189,
+        "width": 37,
+        "height": 40
+      },
+      {
+        "left": 1591,
+        "top": 149,
+        "right": 1628,
+        "bottom": 189,
+        "width": 37,
+        "height": 40
+      },
+      {
+        "left": 1698,
+        "top": 149,
+        "right": 1786,
+        "bottom": 178,
+        "width": 88,
+        "height": 29
+      },
+      {
+        "left": 1794,
+        "top": 149,
+        "right": 1865,
+        "bottom": 178,
+        "width": 71,
+        "height": 29
+      },
+      {
+        "left": 1712,
+        "top": 691,
+        "right": 1814,
+        "bottom": 725,
+        "width": 102,
+        "height": 34
+      },
+      {
+        "left": 1842,
+        "top": 775,
+        "right": 1944,
+        "bottom": 809,
+        "width": 102,
+        "height": 34
+      },
+      {
+        "left": 1526,
+        "top": 776,
+        "right": 1571,
+        "bottom": 808,
+        "width": 45,
+        "height": 32
+      },
+      {
+        "left": 1724,
+        "top": 843,
+        "right": 1825,
+        "bottom": 877,
+        "width": 101,
+        "height": 34
+      },
+      {
+        "left": 1137,
+        "top": 970,
+        "right": 1177,
+        "bottom": 1029,
+        "width": 40,
+        "height": 59
+      },
+      {
+        "left": 1176,
+        "top": 970,
+        "right": 1217,
+        "bottom": 1029,
+        "width": 41,
+        "height": 59
+      },
+      {
+        "left": 1391,
+        "top": 991,
+        "right": 1436,
+        "bottom": 1023,
+        "width": 45,
+        "height": 32
+      },
+      {
+        "left": 1475,
+        "top": 1013,
+        "right": 1509,
+        "bottom": 1051,
+        "width": 34,
+        "height": 38
+      },
+      {
+        "left": 1176,
+        "top": 1037,
+        "right": 1206,
+        "bottom": 1063,
+        "width": 30,
+        "height": 26
+      },
+      {
+        "left": 1391,
+        "top": 1058,
+        "right": 1436,
+        "bottom": 1090,
+        "width": 45,
+        "height": 32
+      }
+    ],
+    "parameters": {
+      "threshold": 210,
+      "min_width": 30,
+      "max_width": 600,
+      "min_height": 12,
+      "max_height": 60,
+      "min_iou": 0.35,
+      "max_growth": 1.6,
+      "min_rectangularity": 0.7,
+      "box_padding": 1
+    },
+    "updates": [
+      {
+        "id": 1,
+        "annotation_label": "G1",
+        "method": "rectangle-contour",
+        "before": {
+          "left": 592,
+          "top": 12,
+          "right": 632,
+          "bottom": 60,
+          "width": 40,
+          "height": 48
+        },
+        "candidate_rect": {
+          "left": 705,
+          "top": 109,
+          "right": 742,
+          "bottom": 150,
+          "width": 37,
+          "height": 41
+        },
+        "iou": 0.0,
+        "matched": false,
+        "applied": false,
+        "detail": "No rectangular contour reaches IoU 0.35",
+        "after": {
+          "left": 592,
+          "top": 12,
+          "right": 632,
+          "bottom": 60,
+          "width": 40,
+          "height": 48
+        }
+      },
+      {
+        "id": 2,
+        "annotation_label": "G2",
+        "method": "rectangle-contour",
+        "before": {
+          "left": 1016,
+          "top": 12,
+          "right": 1056,
+          "bottom": 60,
+          "width": 40,
+          "height": 48
+        },
+        "candidate_rect": {
+          "left": 705,
+          "top": 109,
+          "right": 742,
+          "bottom": 150,
+          "width": 37,
+          "height": 41
+        },
+        "iou": 0.0,
+        "matched": false,
+        "applied": false,
+        "detail": "No rectangular contour reaches IoU 0.35",
+        "after": {
+          "left": 1016,
+          "top": 12,
+          "right": 1056,
+          "bottom": 60,
+          "width": 40,
+          "height": 48
+        }
+      },
+      {
+        "id": 3,
+        "annotation_label": "G3",
+        "method": "rectangle-contour",
+        "before": {
+          "left": 1709,
+          "top": 12,
+          "right": 1749,
+          "bottom": 60,
+          "width": 40,
+          "height": 48
+        },
+        "candidate_rect": {
+          "left": 705,
+          "top": 109,
+          "right": 742,
+          "bottom": 150,
+          "width": 37,
+          "height": 41
+        },
+        "iou": 0.0,
+        "matched": false,
+        "applied": false,
+        "detail": "No rectangular contour reaches IoU 0.35",
+        "after": {
+          "left": 1709,
+          "top": 12,
+          "right": 1749,
+          "bottom": 60,
+          "width": 40,
+          "height": 48
+        }
+      },
+      {
+        "id": 4,
+        "annotation_label": "G4",
+        "method": "rectangle-contour",
+        "before": {
+          "left": 1111,
+          "top": 87,
+          "right": 1137,
+          "bottom": 211,
+          "width": 26,
+          "height": 124
+        },
+        "candidate_rect": {
+          "left": 705,
+          "top": 109,
+          "right": 742,
+          "bottom": 150,
+          "width": 37,
+          "height": 41
+        },
+        "iou": 0.0,
+        "matched": false,
+        "applied": false,
+        "detail": "No rectangular contour reaches IoU 0.35",
+        "after": {
+          "left": 1111,
+          "top": 87,
+          "right": 1137,
+          "bottom": 211,
+          "width": 26,
+          "height": 124
+        }
+      },
+      {
+        "id": 5,
+        "annotation_label": "G5",
+        "method": "rectangle-contour",
+        "before": {
+          "left": 733,
+          "top": 91,
+          "right": 759,
+          "bottom": 325,
+          "width": 26,
+          "height": 234
+        },
+        "candidate_rect": {
+          "left": 705,
+          "top": 109,
+          "right": 742,
+          "bottom": 150,
+          "width": 37,
+          "height": 41
+        },
+        "iou": 0.051,
+        "matched": false,
+        "applied": false,
+        "detail": "No rectangular contour reaches IoU 0.35",
+        "after": {
+          "left": 733,
+          "top": 91,
+          "right": 759,
+          "bottom": 325,
+          "width": 26,
+          "height": 234
+        }
+      },
+      {
+        "id": 6,
+        "annotation_label": "G6",
+        "method": "rectangle-contour",
+        "before": {
+          "left": 1574,
+          "top": 91,
+          "right": 1600,
+          "bottom": 325,
+          "width": 26,
+          "height": 234
+        },
+        "candidate_rect": {
+          "left": 1591,
+          "top": 109,
+          "right": 1628,
+          "bottom": 150,
+          "width": 37,
+          "height": 41
+        },
+        "iou": 0.051,
+        "matched": false,
+        "applied": false,
+        "detail": "No rectangular contour reaches IoU 0.35",
+        "after": {
+          "left": 1574,
+          "top": 91,
+          "right": 1600,
+          "bottom": 325,
+          "width": 26,
+          "height": 234
+        }
+      },
+      {
+        "id": 7,
+        "annotation_label": "G7",
+        "method": "rectangle-contour",
+        "before": {
+          "left": 1777,
+          "top": 99,
+          "right": 1803,
+          "bottom": 199,
+          "width": 26,
+          "height": 100
+        },
+        "candidate_rect": {
+          "left": 1794,
+          "top": 121,
+          "right": 1865,
+          "bottom": 150,
+          "width": 71,
+          "height": 29
+        },
+        "iou": 0.0593,
+        "matched": false,
+        "applied": false,
+        "detail": "No rectangular contour reaches IoU 0.35",
+        "after": {
+          "left": 1777,
+          "top": 99,
+          "right": 1803,
+          "bottom": 199,
+          "width": 26,
+          "height": 100
+        }
+      },
+      {
+        "id": 8,
+        "annotation_label": "G8",
+        "method": "rectangle-contour",
+        "before": {
+          "left": 633,
+          "top": 103,
+          "right": 705,
+          "bottom": 196,
+          "width": 72,
+          "height": 93
+        },
+        "candidate_rect": {
+          "left": 564,
+          "top": 121,
+          "right": 635,
+          "bottom": 150,
+          "width": 71,
+          "height": 29
+        },
+        "iou": 0.0067,
+        "matched": false,
+        "applied": false,
+        "detail": "No rectangular contour reaches IoU 0.35",
+        "after": {
+          "left": 633,
+          "top": 103,
+          "right": 705,
+          "bottom": 196,
+          "width": 72,
+          "height": 93
+        }
+      },
+      {
+        "id": 9,
+        "annotation_label": "G9",
+        "method": "rectangle-contour",
+        "before": {
+          "left": 1625,
+          "top": 103,
+          "right": 1698,
+          "bottom": 196,
+          "width": 73,
+          "height": 93
+        },
+        "candidate_rect": {
+          "left": 1591,
+          "top": 109,
+          "right": 1628,
+          "bottom": 150,
+          "width": 37,
+          "height": 41
+        },
+        "iou": 0.015,
+        "matched": false,
+        "applied": false,
+        "detail": "No rectangular contour reaches IoU 0.35",
+        "after": {
+          "left": 1625,
+          "top": 103,
+          "right": 1698,
+          "bottom": 196,
+          "width": 73,
+          "height": 93
+        }
+      },
+      {
+        "id": 10,
+        "annotation_label": "G10",
+        "method": "rectangle-contour",
+        "before": {
+          "left": 547,
+          "top": 105,
+          "right": 573,
+          "bottom": 193,
+          "width": 26,
+          "height": 88
+        },
+        "candidate_rect": {
+          "left": 502,
+          "top": 121,
+          "right": 556,
+          "bottom": 150,
+          "width": 54,
+          "height": 29
+        },
+        "iou": 0.0726,
+        "matched": false,
+        "applied": false,
+        "detail": "No rectangular contour reaches IoU 0.35",
+        "after": {
+          "left": 547,
+          "top": 105,
+          "right": 573,
+          "bottom": 193,
+          "width": 26,
+          "height": 88
+        }
+      },
+      {
+        "id": 11,
+        "annotation_label": "G11",
+        "method": "rectangle-contour",
+        "before": {
+          "left": 401,
+          "top": 107,
+          "right": 502,
+          "bottom": 191,
+          "width": 101,
+          "height": 84
+        },
+        "candidate_rect": {
+          "left": 705,
+          "top": 109,
+          "right": 742,
+          "bottom": 150,
+          "width": 37,
+          "height": 41
+        },
+        "iou": 0.0,
+        "matched": false,
+        "applied": false,
+        "detail": "No rectangular contour reaches IoU 0.35",
+        "after": {
+          "left": 401,
+          "top": 107,
+          "right": 502,
+          "bottom": 191,
+          "width": 101,
+          "height": 84
+        }
+      },
+      {
+        "id": 12,
+        "annotation_label": "G12",
+        "method": "rectangle-contour",
+        "before": {
+          "left": 1858,
+          "top": 107,
+          "right": 1963,
+          "bottom": 191,
+          "width": 105,
+          "height": 84
+        },
+        "candidate_rect": {
+          "left": 1794,
+          "top": 121,
+          "right": 1865,
+          "bottom": 150,
+          "width": 71,
+          "height": 29
+        },
+        "iou": 0.019,
+        "matched": false,
+        "applied": false,
+        "detail": "No rectangular contour reaches IoU 0.35",
+        "after": {
+          "left": 1858,
+          "top": 107,
+          "right": 1963,
+          "bottom": 191,
+          "width": 105,
+          "height": 84
+        }
+      },
+      {
+        "id": 13,
+        "annotation_label": "G13",
+        "method": "rectangle-contour",
+        "before": {
+          "left": 871,
+          "top": 134,
+          "right": 1014,
+          "bottom": 165,
+          "width": 143,
+          "height": 31
+        },
+        "candidate_rect": {
+          "left": 705,
+          "top": 109,
+          "right": 742,
+          "bottom": 150,
+          "width": 37,
+          "height": 41
+        },
+        "iou": 0.0,
+        "matched": false,
+        "applied": false,
+        "detail": "No rectangular contour reaches IoU 0.35",
+        "after": {
+          "left": 871,
+          "top": 134,
+          "right": 1014,
+          "bottom": 165,
+          "width": 143,
+          "height": 31
+        }
+      },
+      {
+        "id": 14,
+        "annotation_label": "G14",
+        "method": "rectangle-contour",
+        "before": {
+          "left": 1277,
+          "top": 134,
+          "right": 1431,
+          "bottom": 165,
+          "width": 154,
+          "height": 31
+        },
+        "candidate_rect": {
+          "left": 705,
+          "top": 109,
+          "right": 742,
+          "bottom": 150,
+          "width": 37,
+          "height": 41
+        },
+        "iou": 0.0,
+        "matched": false,
+        "applied": false,
+        "detail": "No rectangular contour reaches IoU 0.35",
+        "after": {
+          "left": 1277,
+          "top": 134,
+          "right": 1431,
+          "bottom": 165,
+          "width": 154,
+          "height": 31
+        }
+      },
+      {
+        "id": 15,
+        "annotation_label": "G15",
+        "method": "rectangle-contour",
+        "before": {
+          "left": 1153,
+          "top": 273,
+          "right": 1222,
+          "bottom": 343,
+          "width": 69,
+          "height": 70
+        },
+        "candidate_rect": {
+          "left": 705,
+          "top": 109,
+          "right": 742,
+          "bottom": 150,
+          "width": 37,
+          "height": 41
+        },
+        "iou": 0.0,
+        "matched": false,
+        "applied": false,
+        "detail": "No rectangular contour reaches IoU 0.35",
+        "after": {
+          "left": 1153,
+          "top": 273,
+          "right": 1222,
+          "bottom": 343,
+          "width": 69,
+          "height": 70
+        }
+      },
+      {
+        "id": 16,
+        "annotation_label": "G16",
+        "method": "rectangle-contour",
+        "before": {
+          "left": 981,
+          "top": 307,
+          "right": 1011,
+          "bottom": 438,
+          "width": 30,
+          "height": 131
+        },
+        "candidate_rect": {
+          "left": 705,
+          "top": 109,
+          "right": 742,
+          "bottom": 150,
+          "width": 37,
+          "height": 41
+        },
+        "iou": 0.0,
+        "matched": false,
+        "applied": false,
+        "detail": "No rectangular contour reaches IoU 0.35",
+        "after": {
+          "left": 981,
+          "top": 307,
+          "right": 1011,
+          "bottom": 438,
+          "width": 30,
+          "height": 131
+        }
+      },
+      {
+        "id": 17,
+        "annotation_label": "G17",
+        "method": "rectangle-contour",
+        "before": {
+          "left": 1314,
+          "top": 312,
+          "right": 1344,
+          "bottom": 438,
+          "width": 30,
+          "height": 126
+        },
+        "candidate_rect": {
+          "left": 705,
+          "top": 109,
+          "right": 742,
+          "bottom": 150,
+          "width": 37,
+          "height": 41
+        },
+        "iou": 0.0,
+        "matched": false,
+        "applied": false,
+        "detail": "No rectangular contour reaches IoU 0.35",
+        "after": {
+          "left": 1314,
+          "top": 312,
+          "right": 1344,
+          "bottom": 438,
+          "width": 30,
+          "height": 126
+        }
+      },
+      {
+        "id": 18,
+        "annotation_label": "G18",
+        "method": "rectangle-contour",
+        "before": {
+          "left": 801,
+          "top": 346,
+          "right": 841,
+          "bottom": 393,
+          "width": 40,
+          "height": 47
+        },
+        "candidate_rect": {
+          "left": 705,
+          "top": 109,
+          "right": 742,
+          "bottom": 150,
+          "width": 37,
+          "height": 41
+        },
+        "iou": 0.0,
+        "matched": false,
+        "applied": false,
+        "detail": "No rectangular contour reaches IoU 0.35",
+        "after": {
+          "left": 801,
+          "top": 346,
+          "right": 841,
+          "bottom": 393,
+          "width": 40,
+          "height": 47
+        }
+      },
+      {
+        "id": 19,
+        "annotation_label": "G19",
+        "method": "rectangle-contour",
+        "before": {
+          "left": 1422,
+          "top": 346,
+          "right": 1462,
+          "bottom": 393,
+          "width": 40,
+          "height": 47
+        },
+        "candidate_rect": {
+          "left": 705,
+          "top": 109,
+          "right": 742,
+          "bottom": 150,
+          "width": 37,
+          "height": 41
+        },
+        "iou": 0.0,
+        "matched": false,
+        "applied": false,
+        "detail": "No rectangular contour reaches IoU 0.35",
+        "after": {
+          "left": 1422,
+          "top": 346,
+          "right": 1462,
+          "bottom": 393,
+          "width": 40,
+          "height": 47
+        }
+      },
+      {
+        "id": 20,
+        "annotation_label": "G20",
+        "method": "rectangle-contour",
+        "before": {
+          "left": 345,
+          "top": 406,
+          "right": 520,
+          "bottom": 523,
+          "width": 175,
+          "height": 117
+        },
+        "candidate_rect": {
+          "left": 705,
+          "top": 109,
+          "right": 742,
+          "bottom": 150,
+          "width": 37,
+          "height": 41
+        },
+        "iou": 0.0,
+        "matched": false,
+        "applied": false,
+        "detail": "No rectangular contour reaches IoU 0.35",
+        "after": {
+          "left": 345,
+          "top": 406,
+          "right": 520,
+          "bottom": 523,
+          "width": 175,
+          "height": 117
+        }
+      },
+      {
+        "id": 21,
+        "annotation_label": "G21",
+        "method": "rectangle-contour",
+        "before": {
+          "left": 936,
+          "top": 486,
+          "right": 1056,
+          "bottom": 509,
+          "width": 120,
+          "height": 23
+        },
+        "candidate_rect": {
+          "left": 705,
+          "top": 109,
+          "right": 742,
+          "bottom": 150,
+          "width": 37,
+          "height": 41
+        },
+        "iou": 0.0,
+        "matched": false,
+        "applied": false,
+        "detail": "No rectangular contour reaches IoU 0.35",
+        "after": {
+          "left": 936,
+          "top": 486,
+          "right": 1056,
+          "bottom": 509,
+          "width": 120,
+          "height": 23
+        }
+      },
+      {
+        "id": 22,
+        "annotation_label": "G22",
+        "method": "rectangle-contour",
+        "before": {
+          "left": 1269,
+          "top": 486,
+          "right": 1389,
+          "bottom": 509,
+          "width": 120,
+          "height": 23
+        },
+        "candidate_rect": {
+          "left": 705,
+          "top": 109,
+          "right": 742,
+          "bottom": 150,
+          "width": 37,
+          "height": 41
+        },
+        "iou": 0.0,
+        "matched": false,
+        "applied": false,
+        "detail": "No rectangular contour reaches IoU 0.35",
+        "after": {
+          "left": 1269,
+          "top": 486,
+          "right": 1389,
+          "bottom": 509,
+          "width": 120,
+          "height": 23
+        }
+      },
+      {
+        "id": 23,
+        "annotation_label": "G23",
+        "method": "rectangle-contour",
+        "before": {
+          "left": 739,
+          "top": 487,
+          "right": 779,
+          "bottom": 534,
+          "width": 40,
+          "height": 47
+        },
+        "candidate_rect": {
+          "left": 705,
+          "top": 109,
+          "right": 742,
+          "bottom": 150,
+          "width": 37,
+          "height": 41
+        },
+        "iou": 0.0,
+        "matched": false,
+        "applied": false,
+        "detail": "No rectangular contour reaches IoU 0.35",
+        "after": {
+          "left": 739,
+          "top": 487,
+          "right": 779,
+          "bottom": 534,
+          "width": 40,
+          "height": 47
+        }
+      },
+      {
+        "id": 24,
+        "annotation_label": "G24",
+        "method": "rectangle-contour",
+        "before": {
+          "left": 1529,
+          "top": 498,
+          "right": 1569,
+          "bottom": 546,
+          "width": 40,
+          "height": 48
+        },
+        "candidate_rect": {
+          "left": 705,
+          "top": 109,
+          "right": 742,
+          "bottom": 150,
+          "width": 37,
+          "height": 41
+        },
+        "iou": 0.0,
+        "matched": false,
+        "applied": false,
+        "detail": "No rectangular contour reaches IoU 0.35",
+        "after": {
+          "left": 1529,
+          "top": 498,
+          "right": 1569,
+          "bottom": 546,
+          "width": 40,
+          "height": 48
+        }
+      },
+      {
+        "id": 25,
+        "annotation_label": "G25",
+        "method": "rectangle-contour",
+        "before": {
+          "left": 1099,
+          "top": 622,
+          "right": 1130,
+          "bottom": 748,
+          "width": 31,
+          "height": 126
+        },
+        "candidate_rect": {
+          "left": 705,
+          "top": 109,
+          "right": 742,
+          "bottom": 150,
+          "width": 37,
+          "height": 41
+        },
+        "iou": 0.0,
+        "matched": false,
+        "applied": false,
+        "detail": "No rectangular contour reaches IoU 0.35",
+        "after": {
+          "left": 1099,
+          "top": 622,
+          "right": 1130,
+          "bottom": 748,
+          "width": 31,
+          "height": 126
+        }
+      },
+      {
+        "id": 26,
+        "annotation_label": "G26",
+        "method": "rectangle-contour",
+        "before": {
+          "left": 1218,
+          "top": 622,
+          "right": 1248,
+          "bottom": 748,
+          "width": 30,
+          "height": 126
+        },
+        "candidate_rect": {
+          "left": 705,
+          "top": 109,
+          "right": 742,
+          "bottom": 150,
+          "width": 37,
+          "height": 41
+        },
+        "iou": 0.0,
+        "matched": false,
+        "applied": false,
+        "detail": "No rectangular contour reaches IoU 0.35",
+        "after": {
+          "left": 1218,
+          "top": 622,
+          "right": 1248,
+          "bottom": 748,
+          "width": 30,
+          "height": 126
+        }
+      },
+      {
+        "id": 27,
+        "annotation_label": "G27",
+        "method": "rectangle-contour",
+        "before": {
+          "left": 820,
+          "top": 656,
+          "right": 889,
+          "bottom": 727,
+          "width": 69,
+          "height": 71
+        },
+        "candidate_rect": {
+          "left": 705,
+          "top": 109,
+          "right": 742,
+          "bottom": 150,
+          "width": 37,
+          "height": 41
+        },
+        "iou": 0.0,
+        "matched": false,
+        "applied": false,
+        "detail": "No rectangular contour reaches IoU 0.35",
+        "after": {
+          "left": 820,
+          "top": 656,
+          "right": 889,
+          "bottom": 727,
+          "width": 69,
+          "height": 71
+        }
+      },
+      {
+        "id": 28,
+        "annotation_label": "G28",
+        "method": "rectangle-contour",
+        "before": {
+          "left": 1458,
+          "top": 656,
+          "right": 1527,
+          "bottom": 727,
+          "width": 69,
+          "height": 71
+        },
+        "candidate_rect": {
+          "left": 705,
+          "top": 109,
+          "right": 742,
+          "bottom": 150,
+          "width": 37,
+          "height": 41
+        },
+        "iou": 0.0,
+        "matched": false,
+        "applied": false,
+        "detail": "No rectangular contour reaches IoU 0.35",
+        "after": {
+          "left": 1458,
+          "top": 656,
+          "right": 1527,
+          "bottom": 727,
+          "width": 69,
+          "height": 71
+        }
+      },
+      {
+        "id": 29,
+        "annotation_label": "G29",
+        "method": "rectangle-contour",
+        "before": {
+          "left": 1710,
+          "top": 688,
+          "right": 1816,
+          "bottom": 727,
+          "width": 106,
+          "height": 39
+        },
+        "candidate_rect": {
+          "left": 1712,
+          "top": 691,
+          "right": 1814,
+          "bottom": 725,
+          "width": 102,
+          "height": 34
+        },
+        "iou": 0.8389,
+        "matched": true,
+        "applied": true,
+        "detail": "Snap to the highest-IoU closed rectangle within the growth limit",
+        "after": {
+          "left": 1711,
+          "top": 690,
+          "right": 1815,
+          "bottom": 726,
+          "width": 104,
+          "height": 36
+        }
+      },
+      {
+        "id": 30,
+        "annotation_label": "G30",
+        "method": "rectangle-contour",
+        "before": {
+          "left": 1642,
+          "top": 768,
+          "right": 1652,
+          "bottom": 815,
+          "width": 10,
+          "height": 47
+        },
+        "candidate_rect": {
+          "left": 705,
+          "top": 109,
+          "right": 742,
+          "bottom": 150,
+          "width": 37,
+          "height": 41
+        },
+        "iou": 0.0,
+        "matched": false,
+        "applied": false,
+        "detail": "No rectangular contour reaches IoU 0.35",
+        "after": {
+          "left": 1642,
+          "top": 768,
+          "right": 1652,
+          "bottom": 815,
+          "width": 10,
+          "height": 47
+        }
+      },
+      {
+        "id": 31,
+        "annotation_label": "G31",
+        "method": "rectangle-contour",
+        "before": {
+          "left": 1840,
+          "top": 773,
+          "right": 1946,
+          "bottom": 812,
+          "width": 106,
+          "height": 39
+        },
+        "candidate_rect": {
+          "left": 1842,
+          "top": 775,
+          "right": 1944,
+          "bottom": 809,
+          "width": 102,
+          "height": 34
+        },
+        "iou": 0.8389,
+        "matched": true,
+        "applied": true,
+        "detail": "Snap to the highest-IoU closed rectangle within the growth limit",
+        "after": {
+          "left": 1841,
+          "top": 774,
+          "right": 1945,
+          "bottom": 810,
+          "width": 104,
+          "height": 36
+        }
+      },
+      {
+        "id": 32,
+        "annotation_label": "G32",
+        "method": "rectangle-contour",
+        "before": {
+          "left": 1524,
+          "top": 774,
+          "right": 1573,
+          "bottom": 811,
+          "width": 49,
+          "height": 37
+        },
+        "candidate_rect": {
+          "left": 1526,
+          "top": 776,
+          "right": 1571,
+          "bottom": 808,
+          "width": 45,
+          "height": 32
+        },
+        "iou": 0.7943,
+        "matched": true,
+        "applied": true,
+        "detail": "Snap to the highest-IoU closed rectangle within the growth limit",
+        "after": {
+          "left": 1525,
+          "top": 775,
+          "right": 1572,
+          "bottom": 809,
+          "width": 47,
+          "height": 34
+        }
+      },
+      {
+        "id": 33,
+        "annotation_label": "G33",
+        "method": "rectangle-contour",
+        "before": {
+          "left": 1056,
+          "top": 812,
+          "right": 1291,
+          "bottom": 838,
+          "width": 235,
+          "height": 26
+        },
+        "candidate_rect": {
+          "left": 705,
+          "top": 109,
+          "right": 742,
+          "bottom": 150,
+          "width": 37,
+          "height": 41
+        },
+        "iou": 0.0,
+        "matched": false,
+        "applied": false,
+        "detail": "No rectangular contour reaches IoU 0.35",
+        "after": {
+          "left": 1056,
+          "top": 812,
+          "right": 1291,
+          "bottom": 838,
+          "width": 235,
+          "height": 26
+        }
+      },
+      {
+        "id": 34,
+        "annotation_label": "G34",
+        "method": "rectangle-contour",
+        "before": {
+          "left": 949,
+          "top": 840,
+          "right": 997,
+          "bottom": 880,
+          "width": 48,
+          "height": 40
+        },
+        "candidate_rect": {
+          "left": 705,
+          "top": 109,
+          "right": 742,
+          "bottom": 150,
+          "width": 37,
+          "height": 41
+        },
+        "iou": 0.0,
+        "matched": false,
+        "applied": false,
+        "detail": "No rectangular contour reaches IoU 0.35",
+        "after": {
+          "left": 949,
+          "top": 840,
+          "right": 997,
+          "bottom": 880,
+          "width": 48,
+          "height": 40
+        }
+      },
+      {
+        "id": 35,
+        "annotation_label": "G35",
+        "method": "rectangle-contour",
+        "before": {
+          "left": 1721,
+          "top": 841,
+          "right": 1828,
+          "bottom": 879,
+          "width": 107,
+          "height": 38
+        },
+        "candidate_rect": {
+          "left": 1724,
+          "top": 843,
+          "right": 1825,
+          "bottom": 877,
+          "width": 101,
+          "height": 34
+        },
+        "iou": 0.8446,
+        "matched": true,
+        "applied": true,
+        "detail": "Snap to the highest-IoU closed rectangle within the growth limit",
+        "after": {
+          "left": 1723,
+          "top": 842,
+          "right": 1826,
+          "bottom": 878,
+          "width": 103,
+          "height": 36
+        }
+      },
+      {
+        "id": 36,
+        "annotation_label": "G36",
+        "method": "rectangle-contour",
+        "before": {
+          "left": 1112,
+          "top": 892,
+          "right": 1241,
+          "bottom": 970,
+          "width": 129,
+          "height": 78
+        },
+        "candidate_rect": {
+          "left": 705,
+          "top": 109,
+          "right": 742,
+          "bottom": 150,
+          "width": 37,
+          "height": 41
+        },
+        "iou": 0.0,
+        "matched": false,
+        "applied": false,
+        "detail": "No rectangular contour reaches IoU 0.35",
+        "after": {
+          "left": 1112,
+          "top": 892,
+          "right": 1241,
+          "bottom": 970,
+          "width": 129,
+          "height": 78
+        }
+      },
+      {
+        "id": 37,
+        "annotation_label": "G37",
+        "method": "rectangle-contour",
+        "before": {
+          "left": 949,
+          "top": 975,
+          "right": 997,
+          "bottom": 1015,
+          "width": 48,
+          "height": 40
+        },
+        "candidate_rect": {
+          "left": 705,
+          "top": 109,
+          "right": 742,
+          "bottom": 150,
+          "width": 37,
+          "height": 41
+        },
+        "iou": 0.0,
+        "matched": false,
+        "applied": false,
+        "detail": "No rectangular contour reaches IoU 0.35",
+        "after": {
+          "left": 949,
+          "top": 975,
+          "right": 997,
+          "bottom": 1015,
+          "width": 48,
+          "height": 40
+        }
+      },
+      {
+        "id": 38,
+        "annotation_label": "G38",
+        "method": "rectangle-contour",
+        "before": {
+          "left": 1389,
+          "top": 989,
+          "right": 1438,
+          "bottom": 1025,
+          "width": 49,
+          "height": 36
+        },
+        "candidate_rect": {
+          "left": 1391,
+          "top": 991,
+          "right": 1436,
+          "bottom": 1023,
+          "width": 45,
+          "height": 32
+        },
+        "iou": 0.8163,
+        "matched": true,
+        "applied": true,
+        "detail": "Snap to the highest-IoU closed rectangle within the growth limit",
+        "after": {
+          "left": 1390,
+          "top": 990,
+          "right": 1437,
+          "bottom": 1024,
+          "width": 47,
+          "height": 34
+        }
+      },
+      {
+        "id": 39,
+        "annotation_label": "G39",
+        "method": "rectangle-contour",
+        "before": {
+          "left": 1473,
+          "top": 1011,
+          "right": 1512,
+          "bottom": 1053,
+          "width": 39,
+          "height": 42
+        },
+        "candidate_rect": {
+          "left": 1475,
+          "top": 1013,
+          "right": 1509,
+          "bottom": 1051,
+          "width": 34,
+          "height": 38
+        },
+        "iou": 0.7888,
+        "matched": true,
+        "applied": true,
+        "detail": "Snap to the highest-IoU closed rectangle within the growth limit",
+        "after": {
+          "left": 1474,
+          "top": 1012,
+          "right": 1510,
+          "bottom": 1052,
+          "width": 36,
+          "height": 40
+        }
+      },
+      {
+        "id": 40,
+        "annotation_label": "G40",
+        "method": "rectangle-contour",
+        "before": {
+          "left": 1131,
+          "top": 1022,
+          "right": 1221,
+          "bottom": 1045,
+          "width": 90,
+          "height": 23
+        },
+        "candidate_rect": {
+          "left": 1176,
+          "top": 1037,
+          "right": 1206,
+          "bottom": 1063,
+          "width": 30,
+          "height": 26
+        },
+        "iou": 0.092,
+        "matched": false,
+        "applied": false,
+        "detail": "No rectangular contour reaches IoU 0.35",
+        "after": {
+          "left": 1131,
+          "top": 1022,
+          "right": 1221,
+          "bottom": 1045,
+          "width": 90,
+          "height": 23
+        }
+      },
+      {
+        "id": 41,
+        "annotation_label": "G41",
+        "method": "rectangle-contour",
+        "before": {
+          "left": 1389,
+          "top": 1056,
+          "right": 1438,
+          "bottom": 1093,
+          "width": 49,
+          "height": 37
+        },
+        "candidate_rect": {
+          "left": 1391,
+          "top": 1058,
+          "right": 1436,
+          "bottom": 1090,
+          "width": 45,
+          "height": 32
+        },
+        "iou": 0.7943,
+        "matched": true,
+        "applied": true,
+        "detail": "Snap to the highest-IoU closed rectangle within the growth limit",
+        "after": {
+          "left": 1390,
+          "top": 1057,
+          "right": 1437,
+          "bottom": 1091,
+          "width": 47,
+          "height": 34
+        }
+      },
+      {
+        "id": 42,
+        "annotation_label": "G42",
+        "method": "rectangle-contour",
+        "before": {
+          "left": 1134,
+          "top": 1057,
+          "right": 1219,
+          "bottom": 1162,
+          "width": 85,
+          "height": 105
+        },
+        "candidate_rect": {
+          "left": 1176,
+          "top": 1037,
+          "right": 1206,
+          "bottom": 1063,
+          "width": 30,
+          "height": 26
+        },
+        "iou": 0.0189,
+        "matched": false,
+        "applied": false,
+        "detail": "No rectangular contour reaches IoU 0.35",
+        "after": {
+          "left": 1134,
+          "top": 1057,
+          "right": 1219,
+          "bottom": 1162,
+          "width": 85,
+          "height": 105
+        }
+      }
+    ],
+    "matched_count": 7,
+    "applied_count": 7,
+    "skipped_count": 35,
+    "elapsed_seconds": 0.0363
+  },
+  "ui_fusion": {
+    "enabled": false
+  },
+  "template_recovered_graphics": 0,
+  "blank_rejected_graphics": 0,
+  "detail_recovery": {
+    "enabled": false,
+    "reason": "Native-scale UI detail recovery disabled",
+    "added_count": 0
+  },
+  "inference_execution": {
+    "parallel": false,
+    "thread_budget": 4,
+    "yolo_threads": 4,
+    "ocr_threads": 4,
+    "rectangular_inference": false,
+    "wall_seconds": 33.88
+  },
+  "yolo_supported_graphics": 5,
+  "geometry_recovered_graphics": 37,
+  "needs_review_labels": [
+    "T20",
+    "T21",
+    "T22",
+    "T24",
+    "T27",
+    "T28",
+    "T29",
+    "T30",
+    "T31",
+    "T32",
+    "T34",
+    "T36",
+    "T38",
+    "T39",
+    "T40",
+    "T98"
+  ],
+  "color_candidate_count": 22,
+  "color_supported_graphics": 22,
+  "unmatched_yolo_graphics": 0,
+  "fusion_seconds": 2.736,
+  "ocr_base_text_count": 99,
+  "ocr_recovery_count": 3,
+  "ocr_recovery_seconds": 1.04,
+  "model_id": "microsoft/OmniParser-v2.0/icon_detect_v3",
+  "model_sha256": "11c6cbb77f22569fab22d86c76407a83ec81ab89dbfe28279854822d6e3fb00c",
+  "ocr_engine": "RapidOCR PP-OCRv6 small ONNX CPU",
+  "yolo_seconds": 20.662,
+  "ocr_seconds": 12.858,
+  "elapsed_seconds": 47.807,
+  "resources": [
+    "analysis-input.png",
+    "before-snap.png",
+    "before-snap.preview.png",
+    "combined.png",
+    "combined.preview.png",
+    "controls.png",
+    "detail-recovery.json",
+    "elements.csv",
+    "elements.json",
+    "geometry-candidates.json",
+    "index.html",
+    "ocr-recovery.json",
+    "original.png",
+    "raw-ocr.json",
+    "raw-yolo.json",
+    "rectangle-snap.json",
+    "run.log",
+    "snap-compare.png",
+    "summary.json",
+    "text.png",
+    "text.preview.png",
+    "ui-fusion.json"
+  ],
+  "notes": [
+    "All boxes are observations; detection and OCR may miss or misread content.",
+    "OCR recognition scores do not validate bounding boxes or control functions.",
+    "Diagram geometry supports known outline families, not every circuit symbol."
+  ],
+  "viewer": "index.html"
+}

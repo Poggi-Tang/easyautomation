@@ -1,8 +1,10 @@
 """UI fusion must retain real controls, reject blank predictions and audit recovery."""
 
 from PIL import Image, ImageDraw
+import pytest
 
 from easy_uiauto import image_detection
+from easy_uiauto.ui_image_fusion import UIEvidence, _rect
 
 
 def _ocr(boxes=(), texts=()):
@@ -22,6 +24,44 @@ def test_pure_blank_is_rejected_but_empty_bordered_input_is_retained():
     assert result['graphic_count']==1 and result['blank_rejected_graphics']==1
     assert result['elements'][0]['yolo_proposal_ids']==[1]
     assert 'No foreground or border' in result['ui_fusion']['rejected_yolo'][0]['reason']
+
+
+@pytest.mark.parametrize('line',[(68,50,68,170),(171,50,171,170),
+                                  (40,78,200,78),(40,141,200,141)])
+def test_a_nearby_panel_line_cannot_validate_a_blank_prediction(line):
+    image=Image.new('RGB',(260,210),'white')
+    ImageDraw.Draw(image).line(line,fill=(191,191,191))
+    result=_combine(image,[(70,80,170,140)])
+    assert result['graphic_count']==0
+    rejected=result['ui_fusion']['rejected_yolo'][0]
+    assert rejected['inside_foreground_pixels']==0
+    assert rejected['context_foreground_pixels']>0
+    assert rejected['pixel_support']=='none'
+
+
+@pytest.mark.parametrize('outer,inner',[
+    ((20,20,220,50),(21,21,220,50)),
+    ((20,20,35,35),(21,21,35,35)),
+    ((20,20,900,50),(21,21,900,50)),
+])
+@pytest.mark.parametrize('gray',[220,245])
+def test_empty_inputs_and_checkboxes_keep_their_matching_closed_border(outer,inner,gray):
+    image=Image.new('RGB',(max(260,outer[2]+20),180),'white')
+    ImageDraw.Draw(image).rectangle(outer,outline=(gray,gray,gray))
+    evidence=UIEvidence(image).pixels(_rect(inner[0],inner[1],inner[2]-inner[0],inner[3]-inner[1]))
+    assert evidence['accepted'] and evidence['inside_foreground_pixels']==0
+    assert evidence['pixel_support']=='closed-border-context'
+    assert evidence['context_closed_border']
+    result=_combine(image,[inner])
+    assert result['graphic_count']==1
+
+
+def test_three_external_sides_do_not_count_as_a_closed_input():
+    image=Image.new('RGB',(260,180),'white')
+    ImageDraw.Draw(image).line([(20,50),(20,20),(220,20),(220,50)],fill=(220,220,220))
+    evidence=UIEvidence(image).pixels(_rect(21,21,199,29))
+    assert not evidence['accepted'] and evidence['inside_foreground_pixels']==0
+    assert evidence['context_foreground_pixels']>0 and evidence['context_closed_border'] is None
 
 
 def test_checkbox_is_not_deleted_when_ocr_misreads_it_as_m():
@@ -191,3 +231,71 @@ def test_scroll_thumb_needs_both_filled_pixel_evidence_and_a_nearby_region():
     details=result['ui_fusion']['geometry_additions']
     assert len(details)==1 and details[0]['geometry_kind']=='scrollbar-thumb'
     assert details[0]['rect']['left'] < 160
+
+
+def test_low_contrast_toolbar_icons_are_not_deleted_as_low_score_ocr_letters():
+    image=Image.new('RGB',(180,80),'white')
+    draw=ImageDraw.Draw(image)
+    for x in (20,60,100):
+        draw.polygon([(x+3,23),(x+16,30),(x+3,37)],outline=(210,210,210))
+    ocr=_ocr([(20,20,40,40),(60,20,80,40),(100,20,120,40)],['D','D','D'])
+    ocr['scores']=[0.7]*3
+    result=_combine(image,[(19,19,41,41),(59,19,81,41),(99,19,121,41)],ocr)
+    assert result['graphic_count']==3 and result['text_count']==0
+    assert result['ui_fusion']['compact_icon_rows'][0]['distinct_controls']==3
+    assert all(e['rect']['width']>=12 for e in result['elements'])
+
+
+def test_confident_numeric_text_rows_do_not_become_toolbar_icons():
+    image=Image.new('RGB',(180,80),'white')
+    draw=ImageDraw.Draw(image)
+    for x,t in zip((20,60,100),('1','2','3')):
+        draw.text((x,23),t,fill='black')
+    result=_combine(image,[(18,18,40,40),(58,18,80,40),(98,18,120,40)],
+                    _ocr([(20,20,30,38),(60,20,70,38),(100,20,110,38)],['1','2','3']))
+    assert not result['ui_fusion']['compact_icon_rows']
+    assert result['graphic_count']==0 and result['text_count']==3
+
+
+def test_a_closed_character_inside_an_ocr_word_is_not_a_checkbox():
+    image=Image.new('RGB',(180,80),'white')
+    draw=ImageDraw.Draw(image)
+    draw.text((20,20),'Word',fill='black')
+    draw.rectangle((85,22,96,33),outline='black')
+    result=_combine(image,[(83,20,99,36)],_ocr([(20,19,110,38)],['命令窗口']))
+    assert result['graphic_count']==0 and result['text_count']==1
+
+
+def test_partial_text_prediction_does_not_survive_as_a_graphic_fragment():
+    image=Image.new('RGB',(160,80),'white')
+    ImageDraw.Draw(image).text((20,20),'Long label',fill='black')
+    result=_combine(image,[(18,18,40,37)],_ocr([(19,19,95,36)],['Long label']))
+    assert result['graphic_count']==0 and result['text_count']==1
+
+
+def test_repeated_tree_prefixes_are_separated_from_the_caption():
+    image=Image.new('RGB',(240,180),'white')
+    draw=ImageDraw.Draw(image)
+    for y in (20,60,100):
+        draw.line([(20,y+5),(25,y+10),(30,y+5)],fill='black')
+        draw.rectangle((42,y,56,y+14),outline='black')
+        draw.text((70,y),'Node',fill='black')
+    result=_combine(image,[(15,y-3,140,y+20) for y in (20,60,100)],
+        _ocr([(18,y-3,140,y+20) for y in (20,60,100)],['节点1','节点2','节点3']))
+    kinds=[e.get('geometry_kind') for e in result['elements']]
+    assert kinds.count('tree-chevron')==3 and kinds.count('tree-prefix-icon')==3
+    texts=[e for e in result['elements'] if e['entity_type']=='text-label']
+    assert all(t['rect']['left']>=68 for t in texts)
+    assert [t['observed_value'] for t in texts]==['节点1','节点2','节点3']
+
+
+def test_prefix_search_symbol_is_separated_without_rewriting_the_raw_ocr():
+    image=Image.new('RGB',(180,90),'white')
+    draw=ImageDraw.Draw(image)
+    draw.ellipse((22,20,34,32),outline='black',width=2)
+    draw.line((32,30,38,36),fill='black',width=2)
+    ocr=_ocr([(19,18,130,39)],['Q搜索'])
+    result=_combine(image,[(15,15,140,45)],ocr)
+    assert any(e.get('geometry_kind')=='magnifier-icon' for e in result['elements'])
+    assert next(e for e in result['elements'] if e['entity_type']=='text-label')['observed_value']=='搜索'
+    assert ocr['texts']==['Q搜索']

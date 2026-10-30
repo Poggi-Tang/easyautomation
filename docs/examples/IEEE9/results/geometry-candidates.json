@@ -1,0 +1,1689 @@
+[
+  {
+    "kind": "busbar",
+    "rect": {
+      "left": 1112,
+      "top": 88,
+      "right": 1136,
+      "bottom": 210,
+      "width": 24,
+      "height": 122
+    },
+    "evidence": "Long thick stroke outside component frames",
+    "candidate_id": 1,
+    "fusion_status": "accepted"
+  },
+  {
+    "kind": "busbar",
+    "rect": {
+      "left": 734,
+      "top": 92,
+      "right": 758,
+      "bottom": 324,
+      "width": 24,
+      "height": 232
+    },
+    "evidence": "Long thick stroke outside component frames",
+    "candidate_id": 2,
+    "fusion_status": "accepted"
+  },
+  {
+    "kind": "busbar",
+    "rect": {
+      "left": 1575,
+      "top": 92,
+      "right": 1599,
+      "bottom": 324,
+      "width": 24,
+      "height": 232
+    },
+    "evidence": "Long thick stroke outside component frames",
+    "candidate_id": 3,
+    "fusion_status": "accepted"
+  },
+  {
+    "kind": "busbar",
+    "rect": {
+      "left": 1778,
+      "top": 100,
+      "right": 1802,
+      "bottom": 198,
+      "width": 24,
+      "height": 98
+    },
+    "evidence": "Long thick stroke outside component frames",
+    "candidate_id": 4,
+    "fusion_status": "accepted"
+  },
+  {
+    "kind": "busbar",
+    "rect": {
+      "left": 548,
+      "top": 106,
+      "right": 572,
+      "bottom": 192,
+      "width": 24,
+      "height": 86
+    },
+    "evidence": "Long thick stroke outside component frames",
+    "candidate_id": 5,
+    "fusion_status": "accepted"
+  },
+  {
+    "kind": "busbar",
+    "rect": {
+      "left": 937,
+      "top": 487,
+      "right": 1055,
+      "bottom": 508,
+      "width": 118,
+      "height": 21
+    },
+    "evidence": "Long thick stroke outside component frames",
+    "candidate_id": 6,
+    "fusion_status": "accepted"
+  },
+  {
+    "kind": "busbar",
+    "rect": {
+      "left": 1270,
+      "top": 487,
+      "right": 1388,
+      "bottom": 508,
+      "width": 118,
+      "height": 21
+    },
+    "evidence": "Long thick stroke outside component frames",
+    "candidate_id": 7,
+    "fusion_status": "accepted"
+  },
+  {
+    "kind": "busbar",
+    "rect": {
+      "left": 1057,
+      "top": 813,
+      "right": 1290,
+      "bottom": 837,
+      "width": 233,
+      "height": 24
+    },
+    "evidence": "Long thick stroke outside component frames",
+    "candidate_id": 8,
+    "fusion_status": "accepted"
+  },
+  {
+    "kind": "busbar",
+    "rect": {
+      "left": 1132,
+      "top": 1023,
+      "right": 1220,
+      "bottom": 1044,
+      "width": 88,
+      "height": 21
+    },
+    "evidence": "Long thick stroke outside component frames",
+    "candidate_id": 9,
+    "fusion_status": "accepted"
+  },
+  {
+    "kind": "frame",
+    "rect": {
+      "left": 634,
+      "top": 104,
+      "right": 704,
+      "bottom": 195,
+      "width": 70,
+      "height": 91
+    },
+    "evidence": "Closed frame outline in original pixels",
+    "candidate_id": 10,
+    "fusion_status": "accepted"
+  },
+  {
+    "kind": "frame",
+    "rect": {
+      "left": 1626,
+      "top": 104,
+      "right": 1697,
+      "bottom": 195,
+      "width": 71,
+      "height": 91
+    },
+    "evidence": "Closed frame outline in original pixels",
+    "candidate_id": 11,
+    "fusion_status": "accepted"
+  },
+  {
+    "kind": "frame",
+    "rect": {
+      "left": 402,
+      "top": 108,
+      "right": 501,
+      "bottom": 190,
+      "width": 99,
+      "height": 82
+    },
+    "evidence": "Closed frame outline in original pixels",
+    "candidate_id": 12,
+    "color_evidence": {
+      "kind": "color-body",
+      "rect": {
+        "left": 404,
+        "top": 110,
+        "right": 499,
+        "bottom": 189,
+        "width": 95,
+        "height": 79
+      },
+      "color_rect": {
+        "left": 404,
+        "top": 110,
+        "right": 499,
+        "bottom": 189,
+        "width": 95,
+        "height": 79
+      },
+      "attached_port_rects": [],
+      "provider": "color-foreground",
+      "color_pixel_count": 7334,
+      "silhouette_fraction": 0.9759,
+      "evidence": "Connected color foreground with a compact exterior; adjacent closed ports"
+    },
+    "fusion_status": "accepted"
+  },
+  {
+    "kind": "frame",
+    "rect": {
+      "left": 1859,
+      "top": 108,
+      "right": 1962,
+      "bottom": 190,
+      "width": 103,
+      "height": 82
+    },
+    "evidence": "Closed frame outline in original pixels",
+    "candidate_id": 13,
+    "color_evidence": {
+      "kind": "color-body",
+      "rect": {
+        "left": 1859,
+        "top": 110,
+        "right": 1960,
+        "bottom": 189,
+        "width": 101,
+        "height": 79
+      },
+      "color_rect": {
+        "left": 1865,
+        "top": 110,
+        "right": 1960,
+        "bottom": 189,
+        "width": 95,
+        "height": 79
+      },
+      "attached_port_rects": [
+        {
+          "left": 1859,
+          "top": 118,
+          "right": 1865,
+          "bottom": 124,
+          "width": 6,
+          "height": 6
+        },
+        {
+          "left": 1859,
+          "top": 118,
+          "right": 1865,
+          "bottom": 124,
+          "width": 6,
+          "height": 6
+        },
+        {
+          "left": 1859,
+          "top": 175,
+          "right": 1865,
+          "bottom": 180,
+          "width": 6,
+          "height": 5
+        }
+      ],
+      "provider": "color-foreground",
+      "color_pixel_count": 7291,
+      "silhouette_fraction": 0.9769,
+      "evidence": "Connected color foreground with a compact exterior; adjacent closed ports"
+    },
+    "fusion_status": "accepted"
+  },
+  {
+    "kind": "frame",
+    "rect": {
+      "left": 499,
+      "top": 120,
+      "right": 557,
+      "bottom": 179,
+      "width": 58,
+      "height": 59
+    },
+    "evidence": "Continuous exterior frame around internal divider",
+    "candidate_id": 14,
+    "fusion_status": "rejected",
+    "rejection_reason": "No independent control evidence"
+  },
+  {
+    "kind": "frame",
+    "rect": {
+      "left": 561,
+      "top": 120,
+      "right": 636,
+      "bottom": 179,
+      "width": 75,
+      "height": 59
+    },
+    "evidence": "Continuous exterior frame around internal divider",
+    "candidate_id": 15,
+    "fusion_status": "rejected",
+    "rejection_reason": "No independent control evidence"
+  },
+  {
+    "kind": "frame",
+    "rect": {
+      "left": 1695,
+      "top": 120,
+      "right": 1787,
+      "bottom": 179,
+      "width": 92,
+      "height": 59
+    },
+    "evidence": "Continuous exterior frame around internal divider",
+    "candidate_id": 16,
+    "fusion_status": "rejected",
+    "rejection_reason": "No independent control evidence"
+  },
+  {
+    "kind": "frame",
+    "rect": {
+      "left": 1791,
+      "top": 120,
+      "right": 1866,
+      "bottom": 179,
+      "width": 75,
+      "height": 59
+    },
+    "evidence": "Continuous exterior frame around internal divider",
+    "candidate_id": 17,
+    "fusion_status": "rejected",
+    "rejection_reason": "No independent control evidence"
+  },
+  {
+    "kind": "frame",
+    "rect": {
+      "left": 346,
+      "top": 407,
+      "right": 519,
+      "bottom": 522,
+      "width": 173,
+      "height": 115
+    },
+    "evidence": "Closed frame outline in original pixels",
+    "candidate_id": 18,
+    "color_evidence": {
+      "kind": "color-body",
+      "rect": {
+        "left": 348,
+        "top": 409,
+        "right": 517,
+        "bottom": 520,
+        "width": 169,
+        "height": 111
+      },
+      "color_rect": {
+        "left": 348,
+        "top": 409,
+        "right": 517,
+        "bottom": 520,
+        "width": 169,
+        "height": 111
+      },
+      "attached_port_rects": [],
+      "provider": "color-foreground",
+      "color_pixel_count": 18759,
+      "silhouette_fraction": 0.9851,
+      "evidence": "Connected color foreground with a compact exterior; adjacent closed ports"
+    },
+    "fusion_status": "accepted"
+  },
+  {
+    "kind": "frame",
+    "rect": {
+      "left": 1711,
+      "top": 689,
+      "right": 1815,
+      "bottom": 726,
+      "width": 104,
+      "height": 37
+    },
+    "evidence": "Closed frame outline in original pixels",
+    "candidate_id": 19,
+    "fusion_status": "accepted"
+  },
+  {
+    "kind": "frame",
+    "rect": {
+      "left": 1841,
+      "top": 774,
+      "right": 1945,
+      "bottom": 811,
+      "width": 104,
+      "height": 37
+    },
+    "evidence": "Closed frame outline in original pixels",
+    "candidate_id": 20,
+    "fusion_status": "accepted"
+  },
+  {
+    "kind": "frame",
+    "rect": {
+      "left": 1722,
+      "top": 842,
+      "right": 1827,
+      "bottom": 878,
+      "width": 105,
+      "height": 36
+    },
+    "evidence": "Closed frame outline in original pixels",
+    "candidate_id": 21,
+    "fusion_status": "accepted"
+  },
+  {
+    "kind": "frame",
+    "rect": {
+      "left": 1113,
+      "top": 893,
+      "right": 1240,
+      "bottom": 969,
+      "width": 127,
+      "height": 76
+    },
+    "evidence": "Closed frame outline in original pixels",
+    "candidate_id": 22,
+    "fusion_status": "accepted"
+  },
+  {
+    "kind": "frame",
+    "rect": {
+      "left": 1474,
+      "top": 1012,
+      "right": 1511,
+      "bottom": 1052,
+      "width": 37,
+      "height": 40
+    },
+    "evidence": "Closed frame outline in original pixels",
+    "candidate_id": 23,
+    "fusion_status": "accepted"
+  },
+  {
+    "kind": "frame",
+    "rect": {
+      "left": 1135,
+      "top": 1058,
+      "right": 1218,
+      "bottom": 1161,
+      "width": 83,
+      "height": 103
+    },
+    "evidence": "Closed frame outline in original pixels",
+    "candidate_id": 24,
+    "color_evidence": {
+      "kind": "color-body",
+      "rect": {
+        "left": 1137,
+        "top": 1058,
+        "right": 1216,
+        "bottom": 1159,
+        "width": 79,
+        "height": 101
+      },
+      "color_rect": {
+        "left": 1137,
+        "top": 1063,
+        "right": 1216,
+        "bottom": 1159,
+        "width": 79,
+        "height": 96
+      },
+      "attached_port_rects": [
+        {
+          "left": 1146,
+          "top": 1058,
+          "right": 1151,
+          "bottom": 1064,
+          "width": 5,
+          "height": 6
+        },
+        {
+          "left": 1174,
+          "top": 1058,
+          "right": 1179,
+          "bottom": 1064,
+          "width": 5,
+          "height": 6
+        },
+        {
+          "left": 1202,
+          "top": 1058,
+          "right": 1207,
+          "bottom": 1064,
+          "width": 5,
+          "height": 6
+        }
+      ],
+      "provider": "color-foreground",
+      "color_pixel_count": 7364,
+      "silhouette_fraction": 0.9759,
+      "evidence": "Connected color foreground with a compact exterior; adjacent closed ports"
+    },
+    "fusion_status": "accepted"
+  },
+  {
+    "kind": "ground",
+    "rect": {
+      "left": 1115,
+      "top": 105,
+      "right": 1131,
+      "bottom": 114,
+      "width": 16,
+      "height": 9
+    },
+    "evidence": "Three aligned diminishing ground bars",
+    "candidate_id": 25,
+    "fusion_status": "rejected",
+    "rejection_reason": "Detail of a busbar"
+  },
+  {
+    "kind": "ground",
+    "rect": {
+      "left": 551,
+      "top": 116,
+      "right": 567,
+      "bottom": 125,
+      "width": 16,
+      "height": 9
+    },
+    "evidence": "Three aligned diminishing ground bars",
+    "candidate_id": 26,
+    "fusion_status": "rejected",
+    "rejection_reason": "Detail of a busbar"
+  },
+  {
+    "kind": "ground",
+    "rect": {
+      "left": 1780,
+      "top": 116,
+      "right": 1797,
+      "bottom": 125,
+      "width": 17,
+      "height": 9
+    },
+    "evidence": "Three aligned diminishing ground bars",
+    "candidate_id": 27,
+    "fusion_status": "rejected",
+    "rejection_reason": "Detail of a busbar"
+  },
+  {
+    "kind": "ground",
+    "rect": {
+      "left": 551,
+      "top": 173,
+      "right": 567,
+      "bottom": 181,
+      "width": 16,
+      "height": 8
+    },
+    "evidence": "Three aligned diminishing ground bars",
+    "candidate_id": 28,
+    "fusion_status": "rejected",
+    "rejection_reason": "Detail of a busbar"
+  },
+  {
+    "kind": "tag",
+    "rect": {
+      "left": 1525,
+      "top": 775,
+      "right": 1572,
+      "bottom": 810,
+      "width": 47,
+      "height": 35
+    },
+    "evidence": "Closed tag outline in original pixels",
+    "candidate_id": 29,
+    "fusion_status": "accepted"
+  },
+  {
+    "kind": "tag",
+    "rect": {
+      "left": 1102,
+      "top": 826,
+      "right": 1178,
+      "bottom": 895,
+      "width": 76,
+      "height": 69
+    },
+    "evidence": "Closed tag outline in original pixels",
+    "candidate_id": 30,
+    "fusion_status": "rejected",
+    "rejection_reason": "Unconfirmed pointed outline"
+  },
+  {
+    "kind": "tag",
+    "rect": {
+      "left": 1175,
+      "top": 826,
+      "right": 1252,
+      "bottom": 895,
+      "width": 77,
+      "height": 69
+    },
+    "evidence": "Closed tag outline in original pixels",
+    "candidate_id": 31,
+    "fusion_status": "rejected",
+    "rejection_reason": "Unconfirmed pointed outline"
+  },
+  {
+    "kind": "tag",
+    "rect": {
+      "left": 1390,
+      "top": 990,
+      "right": 1437,
+      "bottom": 1024,
+      "width": 47,
+      "height": 34
+    },
+    "evidence": "Closed tag outline in original pixels",
+    "candidate_id": 32,
+    "fusion_status": "accepted"
+  },
+  {
+    "kind": "tag",
+    "rect": {
+      "left": 1390,
+      "top": 1057,
+      "right": 1437,
+      "bottom": 1092,
+      "width": 47,
+      "height": 35
+    },
+    "evidence": "Closed tag outline in original pixels",
+    "candidate_id": 33,
+    "fusion_status": "accepted"
+  },
+  {
+    "kind": "color-body",
+    "rect": {
+      "left": 593,
+      "top": 13,
+      "right": 631,
+      "bottom": 59,
+      "width": 38,
+      "height": 46
+    },
+    "color_rect": {
+      "left": 593,
+      "top": 13,
+      "right": 631,
+      "bottom": 54,
+      "width": 38,
+      "height": 41
+    },
+    "attached_port_rects": [
+      {
+        "left": 610,
+        "top": 54,
+        "right": 615,
+        "bottom": 59,
+        "width": 5,
+        "height": 5
+      }
+    ],
+    "provider": "color-foreground",
+    "color_pixel_count": 1529,
+    "silhouette_fraction": 0.9323,
+    "evidence": "Connected color foreground with a compact exterior; adjacent closed ports",
+    "candidate_id": 34,
+    "fusion_status": "accepted"
+  },
+  {
+    "kind": "color-body",
+    "rect": {
+      "left": 1017,
+      "top": 13,
+      "right": 1055,
+      "bottom": 59,
+      "width": 38,
+      "height": 46
+    },
+    "color_rect": {
+      "left": 1017,
+      "top": 13,
+      "right": 1055,
+      "bottom": 54,
+      "width": 38,
+      "height": 41
+    },
+    "attached_port_rects": [
+      {
+        "left": 1033,
+        "top": 54,
+        "right": 1038,
+        "bottom": 59,
+        "width": 5,
+        "height": 5
+      }
+    ],
+    "provider": "color-foreground",
+    "color_pixel_count": 1556,
+    "silhouette_fraction": 0.9493,
+    "evidence": "Connected color foreground with a compact exterior; adjacent closed ports",
+    "candidate_id": 35,
+    "fusion_status": "accepted"
+  },
+  {
+    "kind": "color-body",
+    "rect": {
+      "left": 1710,
+      "top": 13,
+      "right": 1748,
+      "bottom": 59,
+      "width": 38,
+      "height": 46
+    },
+    "color_rect": {
+      "left": 1710,
+      "top": 13,
+      "right": 1748,
+      "bottom": 54,
+      "width": 38,
+      "height": 41
+    },
+    "attached_port_rects": [
+      {
+        "left": 1726,
+        "top": 53,
+        "right": 1732,
+        "bottom": 59,
+        "width": 6,
+        "height": 6
+      },
+      {
+        "left": 1727,
+        "top": 54,
+        "right": 1732,
+        "bottom": 59,
+        "width": 5,
+        "height": 5
+      }
+    ],
+    "provider": "color-foreground",
+    "color_pixel_count": 1529,
+    "silhouette_fraction": 0.9323,
+    "evidence": "Connected color foreground with a compact exterior; adjacent closed ports",
+    "candidate_id": 36,
+    "fusion_status": "accepted"
+  },
+  {
+    "kind": "color-body",
+    "rect": {
+      "left": 872,
+      "top": 135,
+      "right": 1013,
+      "bottom": 164,
+      "width": 141,
+      "height": 29
+    },
+    "color_rect": {
+      "left": 877,
+      "top": 139,
+      "right": 1009,
+      "bottom": 153,
+      "width": 132,
+      "height": 14
+    },
+    "attached_port_rects": [
+      {
+        "left": 1007,
+        "top": 158,
+        "right": 1013,
+        "bottom": 164,
+        "width": 6,
+        "height": 6
+      },
+      {
+        "left": 1007,
+        "top": 146,
+        "right": 1013,
+        "bottom": 152,
+        "width": 6,
+        "height": 6
+      },
+      {
+        "left": 1007,
+        "top": 135,
+        "right": 1013,
+        "bottom": 141,
+        "width": 6,
+        "height": 6
+      },
+      {
+        "left": 1007,
+        "top": 135,
+        "right": 1013,
+        "bottom": 141,
+        "width": 6,
+        "height": 6
+      },
+      {
+        "left": 872,
+        "top": 147,
+        "right": 877,
+        "bottom": 152,
+        "width": 5,
+        "height": 5
+      },
+      {
+        "left": 1008,
+        "top": 147,
+        "right": 1013,
+        "bottom": 152,
+        "width": 5,
+        "height": 5
+      },
+      {
+        "left": 1007,
+        "top": 158,
+        "right": 1013,
+        "bottom": 163,
+        "width": 6,
+        "height": 5
+      }
+    ],
+    "provider": "color-foreground",
+    "color_pixel_count": 1633,
+    "silhouette_fraction": 0.8065,
+    "evidence": "Connected color foreground with a compact exterior; adjacent closed ports",
+    "candidate_id": 37,
+    "fusion_status": "accepted"
+  },
+  {
+    "kind": "color-body",
+    "rect": {
+      "left": 1278,
+      "top": 135,
+      "right": 1430,
+      "bottom": 164,
+      "width": 152,
+      "height": 29
+    },
+    "color_rect": {
+      "left": 1283,
+      "top": 139,
+      "right": 1426,
+      "bottom": 153,
+      "width": 143,
+      "height": 14
+    },
+    "attached_port_rects": [
+      {
+        "left": 1278,
+        "top": 158,
+        "right": 1284,
+        "bottom": 164,
+        "width": 6,
+        "height": 6
+      },
+      {
+        "left": 1278,
+        "top": 146,
+        "right": 1284,
+        "bottom": 152,
+        "width": 6,
+        "height": 6
+      },
+      {
+        "left": 1278,
+        "top": 135,
+        "right": 1284,
+        "bottom": 141,
+        "width": 6,
+        "height": 6
+      },
+      {
+        "left": 1278,
+        "top": 135,
+        "right": 1284,
+        "bottom": 141,
+        "width": 6,
+        "height": 6
+      },
+      {
+        "left": 1425,
+        "top": 135,
+        "right": 1430,
+        "bottom": 141,
+        "width": 5,
+        "height": 6
+      },
+      {
+        "left": 1278,
+        "top": 147,
+        "right": 1283,
+        "bottom": 152,
+        "width": 5,
+        "height": 5
+      },
+      {
+        "left": 1426,
+        "top": 147,
+        "right": 1430,
+        "bottom": 152,
+        "width": 4,
+        "height": 5
+      },
+      {
+        "left": 1278,
+        "top": 158,
+        "right": 1284,
+        "bottom": 163,
+        "width": 6,
+        "height": 5
+      },
+      {
+        "left": 1425,
+        "top": 158,
+        "right": 1430,
+        "bottom": 163,
+        "width": 5,
+        "height": 5
+      }
+    ],
+    "provider": "color-foreground",
+    "color_pixel_count": 1771,
+    "silhouette_fraction": 0.8079,
+    "evidence": "Connected color foreground with a compact exterior; adjacent closed ports",
+    "candidate_id": 38,
+    "fusion_status": "accepted"
+  },
+  {
+    "kind": "color-body",
+    "rect": {
+      "left": 1154,
+      "top": 274,
+      "right": 1221,
+      "bottom": 342,
+      "width": 67,
+      "height": 68
+    },
+    "color_rect": {
+      "left": 1154,
+      "top": 278,
+      "right": 1221,
+      "bottom": 342,
+      "width": 67,
+      "height": 64
+    },
+    "attached_port_rects": [
+      {
+        "left": 1163,
+        "top": 274,
+        "right": 1168,
+        "bottom": 278,
+        "width": 5,
+        "height": 4
+      },
+      {
+        "left": 1185,
+        "top": 274,
+        "right": 1191,
+        "bottom": 278,
+        "width": 6,
+        "height": 4
+      },
+      {
+        "left": 1208,
+        "top": 274,
+        "right": 1213,
+        "bottom": 278,
+        "width": 5,
+        "height": 4
+      }
+    ],
+    "provider": "color-foreground",
+    "color_pixel_count": 2211,
+    "silhouette_fraction": 0.4931,
+    "evidence": "Connected color foreground with a compact exterior; adjacent closed ports",
+    "candidate_id": 39,
+    "fusion_status": "accepted"
+  },
+  {
+    "kind": "color-body",
+    "rect": {
+      "left": 982,
+      "top": 308,
+      "right": 1010,
+      "bottom": 437,
+      "width": 28,
+      "height": 129
+    },
+    "color_rect": {
+      "left": 986,
+      "top": 312,
+      "right": 1000,
+      "bottom": 432,
+      "width": 14,
+      "height": 120
+    },
+    "attached_port_rects": [
+      {
+        "left": 1004,
+        "top": 431,
+        "right": 1010,
+        "bottom": 437,
+        "width": 6,
+        "height": 6
+      },
+      {
+        "left": 993,
+        "top": 431,
+        "right": 999,
+        "bottom": 437,
+        "width": 6,
+        "height": 6
+      },
+      {
+        "left": 982,
+        "top": 431,
+        "right": 988,
+        "bottom": 437,
+        "width": 6,
+        "height": 6
+      },
+      {
+        "left": 982,
+        "top": 308,
+        "right": 987,
+        "bottom": 313,
+        "width": 5,
+        "height": 5
+      },
+      {
+        "left": 993,
+        "top": 308,
+        "right": 999,
+        "bottom": 312,
+        "width": 6,
+        "height": 4
+      },
+      {
+        "left": 1005,
+        "top": 308,
+        "right": 1010,
+        "bottom": 313,
+        "width": 5,
+        "height": 5
+      },
+      {
+        "left": 982,
+        "top": 431,
+        "right": 987,
+        "bottom": 437,
+        "width": 5,
+        "height": 6
+      },
+      {
+        "left": 1005,
+        "top": 431,
+        "right": 1010,
+        "bottom": 437,
+        "width": 5,
+        "height": 6
+      },
+      {
+        "left": 993,
+        "top": 432,
+        "right": 999,
+        "bottom": 437,
+        "width": 6,
+        "height": 5
+      }
+    ],
+    "provider": "color-foreground",
+    "color_pixel_count": 1582,
+    "silhouette_fraction": 0.8634,
+    "evidence": "Connected color foreground with a compact exterior; adjacent closed ports",
+    "candidate_id": 40,
+    "fusion_status": "accepted"
+  },
+  {
+    "kind": "color-body",
+    "rect": {
+      "left": 1315,
+      "top": 313,
+      "right": 1343,
+      "bottom": 437,
+      "width": 28,
+      "height": 124
+    },
+    "color_rect": {
+      "left": 1318,
+      "top": 318,
+      "right": 1334,
+      "bottom": 433,
+      "width": 16,
+      "height": 115
+    },
+    "attached_port_rects": [
+      {
+        "left": 1337,
+        "top": 431,
+        "right": 1343,
+        "bottom": 437,
+        "width": 6,
+        "height": 6
+      },
+      {
+        "left": 1315,
+        "top": 313,
+        "right": 1320,
+        "bottom": 319,
+        "width": 5,
+        "height": 6
+      },
+      {
+        "left": 1326,
+        "top": 313,
+        "right": 1332,
+        "bottom": 318,
+        "width": 6,
+        "height": 5
+      },
+      {
+        "left": 1337,
+        "top": 313,
+        "right": 1343,
+        "bottom": 319,
+        "width": 6,
+        "height": 6
+      },
+      {
+        "left": 1315,
+        "top": 431,
+        "right": 1320,
+        "bottom": 437,
+        "width": 5,
+        "height": 6
+      },
+      {
+        "left": 1337,
+        "top": 431,
+        "right": 1343,
+        "bottom": 437,
+        "width": 6,
+        "height": 6
+      },
+      {
+        "left": 1326,
+        "top": 433,
+        "right": 1332,
+        "bottom": 437,
+        "width": 6,
+        "height": 4
+      }
+    ],
+    "provider": "color-foreground",
+    "color_pixel_count": 1743,
+    "silhouette_fraction": 0.8783,
+    "evidence": "Connected color foreground with a compact exterior; adjacent closed ports",
+    "candidate_id": 41,
+    "fusion_status": "accepted"
+  },
+  {
+    "kind": "color-body",
+    "rect": {
+      "left": 802,
+      "top": 347,
+      "right": 840,
+      "bottom": 392,
+      "width": 38,
+      "height": 45
+    },
+    "color_rect": {
+      "left": 802,
+      "top": 352,
+      "right": 840,
+      "bottom": 392,
+      "width": 38,
+      "height": 40
+    },
+    "attached_port_rects": [
+      {
+        "left": 818,
+        "top": 347,
+        "right": 824,
+        "bottom": 353,
+        "width": 6,
+        "height": 6
+      },
+      {
+        "left": 819,
+        "top": 347,
+        "right": 824,
+        "bottom": 352,
+        "width": 5,
+        "height": 5
+      }
+    ],
+    "provider": "color-foreground",
+    "color_pixel_count": 1494,
+    "silhouette_fraction": 0.9326,
+    "evidence": "Connected color foreground with a compact exterior; adjacent closed ports",
+    "candidate_id": 42,
+    "fusion_status": "accepted"
+  },
+  {
+    "kind": "color-body",
+    "rect": {
+      "left": 1423,
+      "top": 347,
+      "right": 1461,
+      "bottom": 392,
+      "width": 38,
+      "height": 45
+    },
+    "color_rect": {
+      "left": 1423,
+      "top": 352,
+      "right": 1461,
+      "bottom": 392,
+      "width": 38,
+      "height": 40
+    },
+    "attached_port_rects": [
+      {
+        "left": 1439,
+        "top": 347,
+        "right": 1445,
+        "bottom": 353,
+        "width": 6,
+        "height": 6
+      },
+      {
+        "left": 1439,
+        "top": 347,
+        "right": 1444,
+        "bottom": 352,
+        "width": 5,
+        "height": 5
+      }
+    ],
+    "provider": "color-foreground",
+    "color_pixel_count": 1520,
+    "silhouette_fraction": 0.9493,
+    "evidence": "Connected color foreground with a compact exterior; adjacent closed ports",
+    "candidate_id": 43,
+    "fusion_status": "accepted"
+  },
+  {
+    "kind": "color-body",
+    "rect": {
+      "left": 740,
+      "top": 488,
+      "right": 778,
+      "bottom": 533,
+      "width": 38,
+      "height": 45
+    },
+    "color_rect": {
+      "left": 740,
+      "top": 493,
+      "right": 778,
+      "bottom": 533,
+      "width": 38,
+      "height": 40
+    },
+    "attached_port_rects": [
+      {
+        "left": 756,
+        "top": 488,
+        "right": 762,
+        "bottom": 494,
+        "width": 6,
+        "height": 6
+      },
+      {
+        "left": 756,
+        "top": 488,
+        "right": 762,
+        "bottom": 493,
+        "width": 6,
+        "height": 5
+      }
+    ],
+    "provider": "color-foreground",
+    "color_pixel_count": 1494,
+    "silhouette_fraction": 0.9326,
+    "evidence": "Connected color foreground with a compact exterior; adjacent closed ports",
+    "candidate_id": 44,
+    "fusion_status": "accepted"
+  },
+  {
+    "kind": "color-body",
+    "rect": {
+      "left": 1530,
+      "top": 499,
+      "right": 1568,
+      "bottom": 545,
+      "width": 38,
+      "height": 46
+    },
+    "color_rect": {
+      "left": 1530,
+      "top": 504,
+      "right": 1568,
+      "bottom": 545,
+      "width": 38,
+      "height": 41
+    },
+    "attached_port_rects": [
+      {
+        "left": 1546,
+        "top": 499,
+        "right": 1552,
+        "bottom": 505,
+        "width": 6,
+        "height": 6
+      }
+    ],
+    "provider": "color-foreground",
+    "color_pixel_count": 1531,
+    "silhouette_fraction": 0.9332,
+    "evidence": "Connected color foreground with a compact exterior; adjacent closed ports",
+    "candidate_id": 45,
+    "fusion_status": "accepted"
+  },
+  {
+    "kind": "color-body",
+    "rect": {
+      "left": 1100,
+      "top": 623,
+      "right": 1129,
+      "bottom": 747,
+      "width": 29,
+      "height": 124
+    },
+    "color_rect": {
+      "left": 1103,
+      "top": 628,
+      "right": 1119,
+      "bottom": 743,
+      "width": 16,
+      "height": 115
+    },
+    "attached_port_rects": [
+      {
+        "left": 1123,
+        "top": 741,
+        "right": 1129,
+        "bottom": 747,
+        "width": 6,
+        "height": 6
+      },
+      {
+        "left": 1100,
+        "top": 741,
+        "right": 1106,
+        "bottom": 747,
+        "width": 6,
+        "height": 6
+      },
+      {
+        "left": 1101,
+        "top": 623,
+        "right": 1106,
+        "bottom": 629,
+        "width": 5,
+        "height": 6
+      },
+      {
+        "left": 1112,
+        "top": 623,
+        "right": 1117,
+        "bottom": 628,
+        "width": 5,
+        "height": 5
+      },
+      {
+        "left": 1123,
+        "top": 623,
+        "right": 1129,
+        "bottom": 629,
+        "width": 6,
+        "height": 6
+      },
+      {
+        "left": 1101,
+        "top": 742,
+        "right": 1106,
+        "bottom": 747,
+        "width": 5,
+        "height": 5
+      },
+      {
+        "left": 1112,
+        "top": 743,
+        "right": 1117,
+        "bottom": 747,
+        "width": 5,
+        "height": 4
+      },
+      {
+        "left": 1123,
+        "top": 742,
+        "right": 1129,
+        "bottom": 747,
+        "width": 6,
+        "height": 5
+      }
+    ],
+    "provider": "color-foreground",
+    "color_pixel_count": 1742,
+    "silhouette_fraction": 0.8777,
+    "evidence": "Connected color foreground with a compact exterior; adjacent closed ports",
+    "candidate_id": 46,
+    "fusion_status": "accepted"
+  },
+  {
+    "kind": "color-body",
+    "rect": {
+      "left": 1219,
+      "top": 623,
+      "right": 1247,
+      "bottom": 747,
+      "width": 28,
+      "height": 124
+    },
+    "color_rect": {
+      "left": 1222,
+      "top": 628,
+      "right": 1238,
+      "bottom": 743,
+      "width": 16,
+      "height": 115
+    },
+    "attached_port_rects": [
+      {
+        "left": 1241,
+        "top": 741,
+        "right": 1247,
+        "bottom": 747,
+        "width": 6,
+        "height": 6
+      },
+      {
+        "left": 1219,
+        "top": 741,
+        "right": 1225,
+        "bottom": 747,
+        "width": 6,
+        "height": 6
+      },
+      {
+        "left": 1219,
+        "top": 623,
+        "right": 1224,
+        "bottom": 629,
+        "width": 5,
+        "height": 6
+      },
+      {
+        "left": 1230,
+        "top": 623,
+        "right": 1236,
+        "bottom": 628,
+        "width": 6,
+        "height": 5
+      },
+      {
+        "left": 1242,
+        "top": 623,
+        "right": 1247,
+        "bottom": 629,
+        "width": 5,
+        "height": 6
+      },
+      {
+        "left": 1219,
+        "top": 742,
+        "right": 1224,
+        "bottom": 747,
+        "width": 5,
+        "height": 5
+      },
+      {
+        "left": 1230,
+        "top": 743,
+        "right": 1236,
+        "bottom": 747,
+        "width": 6,
+        "height": 4
+      },
+      {
+        "left": 1242,
+        "top": 742,
+        "right": 1247,
+        "bottom": 747,
+        "width": 5,
+        "height": 5
+      }
+    ],
+    "provider": "color-foreground",
+    "color_pixel_count": 1742,
+    "silhouette_fraction": 0.8777,
+    "evidence": "Connected color foreground with a compact exterior; adjacent closed ports",
+    "candidate_id": 47,
+    "fusion_status": "accepted"
+  },
+  {
+    "kind": "color-body",
+    "rect": {
+      "left": 821,
+      "top": 657,
+      "right": 888,
+      "bottom": 726,
+      "width": 67,
+      "height": 69
+    },
+    "color_rect": {
+      "left": 821,
+      "top": 662,
+      "right": 888,
+      "bottom": 726,
+      "width": 67,
+      "height": 64
+    },
+    "attached_port_rects": [
+      {
+        "left": 830,
+        "top": 657,
+        "right": 835,
+        "bottom": 662,
+        "width": 5,
+        "height": 5
+      },
+      {
+        "left": 852,
+        "top": 657,
+        "right": 858,
+        "bottom": 662,
+        "width": 6,
+        "height": 5
+      },
+      {
+        "left": 875,
+        "top": 657,
+        "right": 880,
+        "bottom": 662,
+        "width": 5,
+        "height": 5
+      }
+    ],
+    "provider": "color-foreground",
+    "color_pixel_count": 2211,
+    "silhouette_fraction": 0.4931,
+    "evidence": "Connected color foreground with a compact exterior; adjacent closed ports",
+    "candidate_id": 48,
+    "fusion_status": "accepted"
+  },
+  {
+    "kind": "color-body",
+    "rect": {
+      "left": 1459,
+      "top": 657,
+      "right": 1526,
+      "bottom": 726,
+      "width": 67,
+      "height": 69
+    },
+    "color_rect": {
+      "left": 1459,
+      "top": 662,
+      "right": 1526,
+      "bottom": 726,
+      "width": 67,
+      "height": 64
+    },
+    "attached_port_rects": [
+      {
+        "left": 1467,
+        "top": 657,
+        "right": 1473,
+        "bottom": 662,
+        "width": 6,
+        "height": 5
+      },
+      {
+        "left": 1490,
+        "top": 657,
+        "right": 1495,
+        "bottom": 662,
+        "width": 5,
+        "height": 5
+      },
+      {
+        "left": 1512,
+        "top": 657,
+        "right": 1518,
+        "bottom": 662,
+        "width": 6,
+        "height": 5
+      }
+    ],
+    "provider": "color-foreground",
+    "color_pixel_count": 2211,
+    "silhouette_fraction": 0.4931,
+    "evidence": "Connected color foreground with a compact exterior; adjacent closed ports",
+    "candidate_id": 49,
+    "fusion_status": "accepted"
+  },
+  {
+    "kind": "color-body",
+    "rect": {
+      "left": 950,
+      "top": 841,
+      "right": 996,
+      "bottom": 879,
+      "width": 46,
+      "height": 38
+    },
+    "color_rect": {
+      "left": 950,
+      "top": 841,
+      "right": 991,
+      "bottom": 879,
+      "width": 41,
+      "height": 38
+    },
+    "attached_port_rects": [
+      {
+        "left": 990,
+        "top": 857,
+        "right": 996,
+        "bottom": 863,
+        "width": 6,
+        "height": 6
+      },
+      {
+        "left": 991,
+        "top": 857,
+        "right": 996,
+        "bottom": 863,
+        "width": 5,
+        "height": 6
+      }
+    ],
+    "provider": "color-foreground",
+    "color_pixel_count": 1529,
+    "silhouette_fraction": 0.9323,
+    "evidence": "Connected color foreground with a compact exterior; adjacent closed ports",
+    "candidate_id": 50,
+    "fusion_status": "accepted"
+  },
+  {
+    "kind": "color-body",
+    "rect": {
+      "left": 950,
+      "top": 976,
+      "right": 996,
+      "bottom": 1014,
+      "width": 46,
+      "height": 38
+    },
+    "color_rect": {
+      "left": 950,
+      "top": 976,
+      "right": 991,
+      "bottom": 1014,
+      "width": 41,
+      "height": 38
+    },
+    "attached_port_rects": [
+      {
+        "left": 991,
+        "top": 993,
+        "right": 996,
+        "bottom": 998,
+        "width": 5,
+        "height": 5
+      }
+    ],
+    "provider": "color-foreground",
+    "color_pixel_count": 1530,
+    "silhouette_fraction": 0.9326,
+    "evidence": "Connected color foreground with a compact exterior; adjacent closed ports",
+    "candidate_id": 51,
+    "fusion_status": "accepted"
+  },
+  {
+    "kind": "solid-bar",
+    "rect": {
+      "left": 1643,
+      "top": 769,
+      "right": 1651,
+      "bottom": 814,
+      "width": 8,
+      "height": 45
+    },
+    "provider": "neutral-foreground",
+    "evidence": "Filled neutral bar, separated from thin connecting wires",
+    "candidate_id": 52,
+    "fusion_status": "accepted"
+  }
+]

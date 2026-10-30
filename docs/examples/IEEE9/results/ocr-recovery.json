@@ -1,0 +1,347 @@
+{
+  "enabled": true,
+  "full_box_threshold": 0.5,
+  "local_box_threshold": 0.2,
+  "minimum_best_recognition_score": 0.95,
+  "minimum_each_recognition_score": 0.9,
+  "candidate_count": 4,
+  "accepted": [
+    {
+      "detector_quad": [
+        [
+          1135.0,
+          957.0
+        ],
+        [
+          1142.0,
+          957.0
+        ],
+        [
+          1142.0,
+          964.0
+        ],
+        [
+          1135.0,
+          964.0
+        ]
+      ],
+      "detector_score": 0.25434375762939454,
+      "frame_rect": {
+        "left": 1113,
+        "top": 893,
+        "right": 1240,
+        "bottom": 969,
+        "width": 127,
+        "height": 76
+      },
+      "patch_rect": {
+        "left": 1132,
+        "top": 954,
+        "right": 1145,
+        "bottom": 965
+      },
+      "ink_rect": {
+        "left": 1134,
+        "top": 957,
+        "right": 1142,
+        "bottom": 964,
+        "width": 8,
+        "height": 7
+      },
+      "text": "A",
+      "recognition_score": 0.9997,
+      "enlarged_text": "A",
+      "enlarged_recognition_score": 0.9978
+    },
+    {
+      "detector_quad": [
+        [
+          1686.0,
+          175.0
+        ],
+        [
+          1691.0,
+          175.0
+        ],
+        [
+          1691.0,
+          181.0
+        ],
+        [
+          1686.0,
+          181.0
+        ]
+      ],
+      "detector_score": 0.2892676517367363,
+      "frame_rect": {
+        "left": 1626,
+        "top": 104,
+        "right": 1697,
+        "bottom": 195,
+        "width": 71,
+        "height": 91
+      },
+      "patch_rect": {
+        "left": 1683,
+        "top": 172,
+        "right": 1693,
+        "bottom": 184
+      },
+      "ink_rect": {
+        "left": 1685,
+        "top": 173,
+        "right": 1692,
+        "bottom": 181,
+        "width": 7,
+        "height": 8
+      },
+      "text": "C",
+      "recognition_score": 0.9931,
+      "enlarged_text": "C",
+      "enlarged_recognition_score": 0.98365
+    },
+    {
+      "detector_quad": [
+        [
+          638.0,
+          173.0
+        ],
+        [
+          646.0,
+          173.0
+        ],
+        [
+          646.0,
+          181.0
+        ],
+        [
+          638.0,
+          181.0
+        ]
+      ],
+      "detector_score": 0.3314572978350851,
+      "frame_rect": {
+        "left": 634,
+        "top": 104,
+        "right": 704,
+        "bottom": 195,
+        "width": 70,
+        "height": 91
+      },
+      "patch_rect": {
+        "left": 638,
+        "top": 170,
+        "right": 649,
+        "bottom": 184
+      },
+      "ink_rect": {
+        "left": 639,
+        "top": 173,
+        "right": 645,
+        "bottom": 181,
+        "width": 6,
+        "height": 8
+      },
+      "text": "C",
+      "recognition_score": 0.97256,
+      "enlarged_text": "C",
+      "enlarged_recognition_score": 0.90918
+    }
+  ],
+  "rejected": [
+    {
+      "detector_quad": [
+        [
+          1166.0,
+          1080.0
+        ],
+        [
+          1186.0,
+          1080.0
+        ],
+        [
+          1186.0,
+          1096.0
+        ],
+        [
+          1166.0,
+          1096.0
+        ]
+      ],
+      "detector_score": 0.4090367335081101,
+      "frame_rect": {
+        "left": 1135,
+        "top": 1062,
+        "right": 1218,
+        "bottom": 1161,
+        "width": 83,
+        "height": 99
+      },
+      "patch_rect": {
+        "left": 1163,
+        "top": 1077,
+        "right": 1189,
+        "bottom": 1099
+      },
+      "reason": "Ink touches crop boundary; may be a connected wire or frame stroke"
+    },
+    {
+      "detector_quad": [
+        [
+          1207.0,
+          903.0
+        ],
+        [
+          1217.0,
+          903.0
+        ],
+        [
+          1217.0,
+          911.0
+        ],
+        [
+          1207.0,
+          911.0
+        ]
+      ],
+      "detector_score": 0.32410747185349464,
+      "frame_rect": {
+        "left": 1113,
+        "top": 893,
+        "right": 1240,
+        "bottom": 969,
+        "width": 127,
+        "height": 76
+      },
+      "patch_rect": {
+        "left": 1204,
+        "top": 900,
+        "right": 1220,
+        "bottom": 914
+      },
+      "reason": "Ink touches crop boundary; may be a connected wire or frame stroke"
+    },
+    {
+      "detector_quad": [
+        [
+          1215.0,
+          897.0
+        ],
+        [
+          1221.0,
+          897.0
+        ],
+        [
+          1221.0,
+          902.0
+        ],
+        [
+          1215.0,
+          902.0
+        ]
+      ],
+      "detector_score": 0.39630599319934845,
+      "frame_rect": {
+        "left": 1113,
+        "top": 893,
+        "right": 1240,
+        "bottom": 969,
+        "width": 127,
+        "height": 76
+      },
+      "patch_rect": {
+        "left": 1212,
+        "top": 897,
+        "right": 1224,
+        "bottom": 905
+      },
+      "reason": "Ink touches crop boundary; may be a connected wire or frame stroke"
+    },
+    {
+      "detector_quad": [
+        [
+          1665.0,
+          170.0
+        ],
+        [
+          1681.0,
+          170.0
+        ],
+        [
+          1681.0,
+          181.0
+        ],
+        [
+          1665.0,
+          181.0
+        ]
+      ],
+      "detector_score": 0.3331550129999717,
+      "frame_rect": {
+        "left": 1626,
+        "top": 104,
+        "right": 1697,
+        "bottom": 195,
+        "width": 71,
+        "height": 91
+      },
+      "patch_rect": {
+        "left": 1662,
+        "top": 167,
+        "right": 1684,
+        "bottom": 184
+      },
+      "reason": "Ink touches crop boundary; may be a connected wire or frame stroke"
+    },
+    {
+      "detector_quad": [
+        [
+          1631.0,
+          119.0
+        ],
+        [
+          1637.0,
+          119.0
+        ],
+        [
+          1637.0,
+          126.0
+        ],
+        [
+          1631.0,
+          126.0
+        ]
+      ],
+      "detector_score": 0.3680798063675562,
+      "frame_rect": {
+        "left": 1626,
+        "top": 104,
+        "right": 1697,
+        "bottom": 195,
+        "width": 71,
+        "height": 91
+      },
+      "patch_rect": {
+        "left": 1630,
+        "top": 116,
+        "right": 1640,
+        "bottom": 129
+      },
+      "ink_rect": {
+        "left": 1632,
+        "top": 119,
+        "right": 1636,
+        "bottom": 125,
+        "width": 4,
+        "height": 6
+      },
+      "text": "a",
+      "recognition_score": 0.80297,
+      "enlarged_text": "à",
+      "enlarged_recognition_score": 0.51178,
+      "reason": "Recognition confidence/agreement"
+    }
+  ],
+  "added_count": 3,
+  "elapsed_seconds": 1.04
+}

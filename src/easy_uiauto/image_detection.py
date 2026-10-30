@@ -130,19 +130,29 @@ def nms(boxes, scores, threshold=0.45):
     return keep
 
 
-def run_yolo(image, weights, *, threads=4, confidence=DEFAULT_CONFIDENCE):
+def _yolo_input_size(image_size, *, rectangular=False, content_bottom=None):
+    """Keep the detector scale while removing unused stride-aligned padding."""
+    width, height = image_size
+    scale = min(MODEL_SIZE / width, MODEL_SIZE / height)
+    resized = (max(1, round(width * scale)), max(1, round(height * scale)))
+    if not rectangular:
+        return resized, (MODEL_SIZE, MODEL_SIZE)
+    used_height = resized[1]
+    if content_bottom is not None:
+        used_height = min(used_height, max(1, math.ceil(content_bottom * resized[1] / height)))
+    return resized, (math.ceil(resized[0] / 32) * 32, math.ceil(used_height / 32) * 32)
+
+
+def _predict_yolo(image, model, confidence, *, rectangular=False, content_bottom=None):
     import numpy as np
     import torch
     from PIL import Image
 
-    torch.set_num_threads(threads)
     started = time.perf_counter()
-    model = torch.jit.load(str(weights), map_location="cpu").eval()
-    loaded = time.perf_counter()
-    scale = min(MODEL_SIZE / image.width, MODEL_SIZE / image.height)
     # Track rounded resize ratios separately to preserve original pixel coordinates.
-    size = (max(1, round(image.width * scale)), max(1, round(image.height * scale)))
-    canvas = Image.new("RGB", (MODEL_SIZE, MODEL_SIZE), (114, 114, 114))
+    size, canvas_size = _yolo_input_size(image.size, rectangular=rectangular,
+                                        content_bottom=content_bottom)
+    canvas = Image.new("RGB", canvas_size, (114, 114, 114))
     canvas.paste(image.resize(size, Image.Resampling.BILINEAR), (0, 0))
     tensor = torch.from_numpy(np.array(canvas)).permute(2, 0, 1).float()[None] / 255
     forward_start = time.perf_counter()
@@ -170,13 +180,103 @@ def run_yolo(image, weights, *, threads=4, confidence=DEFAULT_CONFIDENCE):
     boxes[:, 0::2] = np.clip(boxes[:, 0::2], 0, image.width)
     boxes[:, 1::2] = np.clip(boxes[:, 1::2], 0, image.height)
     valid = ((boxes[:, 2] - boxes[:, 0]) > 2) & ((boxes[:, 3] - boxes[:, 1]) > 2)
-    return dict(model_id=MODEL_ID, architecture="YOLOv9-E", model_sha256=MODEL_SHA256,
-                device="cpu", threads=threads, input_size=MODEL_SIZE,
-                confidence_threshold=confidence, nms_iou_threshold=0.45,
-                load_seconds=round(loaded - started, 3),
-                forward_seconds=round(forward_seconds, 3),
+    return dict(forward_seconds=forward_seconds, tensor_shape=list(tensor.shape),
+                resized_image_size=list(size),
                 elapsed_seconds=round(time.perf_counter() - started, 3),
                 boxes=boxes[valid].tolist(), scores=scores[valid].tolist())
+
+
+def run_yolo(image, weights, *, threads=4, confidence=DEFAULT_CONFIDENCE,
+             recover_details=False, progress=None, rectangular=False):
+    """Keep the whole-image pass and optionally inspect native-scale UI patches."""
+    import torch
+
+    torch.set_num_threads(threads)
+    started=time.perf_counter()
+    model=torch.jit.load(str(weights),map_location='cpu').eval()
+    loaded=time.perf_counter()
+    whole=_predict_yolo(image,model,confidence,rectangular=rectangular)
+    boxes,scores=whole['boxes'],whole['scores']
+    forward=whole['forward_seconds']
+    detail=dict(enabled=False,reason='Native-scale UI detail recovery disabled',added_count=0)
+    passes=1
+    input_shapes=[whole.get('tensor_shape')]
+    if recover_details:
+        from . import image_details
+
+        planning=time.perf_counter()
+        detail=image_details.plan(image,MODEL_SIZE)
+        detail['planning_seconds']=round(time.perf_counter()-planning,4)
+        if detail['enabled']:
+            if progress:
+                progress(f"YOLO detail recovery: {len(detail['regions'])} native-scale content regions in one extra pass")
+            atlas=image_details.render_atlas(image,detail)
+            bottom=max(r['atlas_rect'][3] for r in detail['regions'])+detail.get(
+                'parameters',{}).get('gutter',16)
+            extra=_predict_yolo(atlas,model,confidence,rectangular=rectangular,
+                                content_bottom=bottom)
+            boxes,scores=image_details.merge_predictions(boxes,scores,extra['boxes'],extra['scores'],detail)
+            detail['inference_seconds']=extra['elapsed_seconds']
+            detail['tensor_shape']=extra.get('tensor_shape')
+            input_shapes.append(extra.get('tensor_shape'))
+            forward+=extra['forward_seconds']
+            passes+=1
+    return dict(model_id=MODEL_ID,architecture='YOLOv9-E',model_sha256=MODEL_SHA256,
+                device='cpu',threads=threads,input_size=MODEL_SIZE,
+                confidence_threshold=confidence,nms_iou_threshold=0.45,
+                load_seconds=round(loaded-started,3),forward_seconds=round(forward,3),
+                elapsed_seconds=round(time.perf_counter()-started,3),
+                rectangular_inference=rectangular,input_shapes=input_shapes,
+                inference_passes=passes,whole_image_count=len(whole['boxes']),
+                detail_recovery=detail,boxes=boxes,scores=scores)
+
+
+def run_detectors(image, weights, *, threads=4, confidence=DEFAULT_CONFIDENCE,
+                  runtime_dir='', recover_details=False, recover_small_text=True,
+                  rectangular=False, parallel=True, progress=None):
+    """Share one CPU thread budget; deliver all progress on the caller thread."""
+    from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
+    from queue import Empty, SimpleQueue
+
+    parallel = bool(parallel and threads > 1)
+    yolo_threads, ocr_threads = (threads - 1, 1) if parallel else (threads, threads)
+    messages = SimpleQueue()
+    report = messages.put if parallel else progress
+    yolo_options = dict(threads=yolo_threads, confidence=confidence,
+                        recover_details=recover_details, rectangular=rectangular, progress=report)
+    ocr_options = dict(threads=ocr_threads, runtime_dir=runtime_dir,
+                       recover_small_text=recover_small_text, progress=report)
+    if progress:
+        progress(f"Inference schedule: {'parallel' if parallel else 'sequential'}; "
+                 f"YOLO {yolo_threads} threads, OCR {ocr_threads} threads")
+    started = time.perf_counter()
+    if parallel:
+        results = {}
+        with ThreadPoolExecutor(max_workers=2, thread_name_prefix='image-inference') as pool:
+            tasks = {pool.submit(run_yolo, image, weights, **yolo_options): 'yolo',
+                     pool.submit(run_ocr, image, **ocr_options): 'ocr'}
+            pending = set(tasks)
+            while pending:
+                done, pending = wait(pending, timeout=0.1, return_when=FIRST_COMPLETED)
+                while True:
+                    try:
+                        message = messages.get_nowait()
+                    except Empty:
+                        break
+                    if progress:
+                        progress(message)
+                for task in done:
+                    results[tasks[task]] = task.result()
+                    if progress:
+                        progress(f"{tasks[task].upper()} inference completed")
+        yolo, ocr = results['yolo'], results['ocr']
+    else:
+        yolo = run_yolo(image, weights, **yolo_options)
+        ocr = run_ocr(image, **ocr_options)
+    return yolo, ocr, dict(parallel=parallel, thread_budget=threads,
+                           yolo_threads=yolo_threads, ocr_threads=ocr_threads,
+                           rectangular_inference=rectangular,
+                           wall_seconds=round(time.perf_counter()-started,3))
 
 
 class _CaptureTextDetection:
@@ -529,15 +629,20 @@ def combine_detections(image, yolo, ocr, *, profile="block-diagram"):
             continue
         accepted.add(index)
         fitted = frame or icon
+        local_fit=ui_metadata.get(index,{}).get('local_geometry')
         frame_fields = ({"detected_rect": box, "corrected_rect": fitted, "geometry_padding": 1}
                         if fitted else {})
         elements.append(dict(
             id=len(elements) + 1, entity_type="graphic-control", geometry_kind=(
+                local_fit['geometry_kind'] if local_fit else
                 "compact-frame" if frame else "compact-icon" if icon else "yolo-region"),
             semantic_name="Graphic control candidate", observed_value="", rect=fitted or box,
             source="yolo", detection_confidence=score, confidence=score,
             confidence_kind="yolo-detection", yolo_proposal_ids=[index, *ui_report.get("merged_yolo_ids", {}).get(index, [])],
+            icon_row_evidence=ui_metadata.get(index, {}).get("icon_row"),
+            geometry_evidence=local_fit,
             pixel_evidence=evidence, ambiguity="Compact border observed; control semantics need review" if frame else
+            "Compact icon pixels fitted; control semantics need review" if icon else
             "YOLO region has no fitted component outline",
             status="observed", uia_verified=False, executable=False, suggested_actions=[], **frame_fields))
     for recovered in recovered_icons:

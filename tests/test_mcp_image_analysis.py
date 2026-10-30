@@ -163,6 +163,8 @@ def test_mcp_advertises_image_file_input():
     assert tool.inputSchema["properties"]["auto_crop"]["default"] is True
     assert tool.inputSchema["properties"]["confidence"]["default"] == 0.1
     assert tool.inputSchema["properties"]["rectangle_snap"]["default"] is True
+    assert tool.inputSchema['properties']['rectangular_inference']['default'] is False
+    assert tool.inputSchema['properties']['parallel_inference']['default'] is True
     assert visualization.STATUS_COLORS["observed"] == "#00b8d4"
 
 
@@ -220,6 +222,7 @@ def test_mcp_defaults_to_local_without_resolving_api_credentials(monkeypatch, tm
     assert options["profile"] == "ui" and options["auto_crop"] is True
     assert options["max_elements"] == 1000 and options["box_padding"] == 1
     assert options["confidence"] == 0.1 and options["rectangle_snap"] is True
+    assert not options['rectangular_inference'] and options['parallel_inference']
 
 
 def test_missing_local_dependencies_never_trigger_a_remote_fallback(monkeypatch):

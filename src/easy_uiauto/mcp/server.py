@@ -2319,6 +2319,9 @@ async def analyze_ui_image(
     auto_crop: bool = True,
     confidence: float = 0.1,
     rectangle_snap: bool = True,
+    detail_recovery: bool = True,
+    rectangular_inference: bool = False,
+    parallel_inference: bool = True,
 ) -> str:
     """Annotate a saved image with local YOLO + RapidOCR by default (recommended).
 
@@ -2354,6 +2357,13 @@ async def analyze_ui_image(
         confidence: Local YOLO threshold, default 0.1.
         rectangle_snap: Local mode fits graphic boxes to nearby closed rectangles
             using IoU >= 0.35 and at most 1.6x growth per dimension; text stays unchanged.
+        detail_recovery: Local UI mode packs populated regions of large screenshots
+            at native resolution for at most one extra YOLO pass. False skips it.
+        rectangular_inference: Experimental local UI option to remove unused square
+            padding. Input shapes can change predictions. Default False preserves
+            the original square input to prioritize annotation quality.
+        parallel_inference: Local UI mode runs YOLO and OCR concurrently within the
+            same CPU thread budget. False runs them sequentially for comparison.
     """
     async def report_progress(current: int, message: str) -> None:
         if ctx is None:
@@ -2379,6 +2389,9 @@ async def analyze_ui_image(
                 max_elements=max_elements, box_padding=1 if box_padding is None else box_padding,
                 auto_crop=auto_crop, progress=lambda _message: None,
                 confidence=confidence, rectangle_snap=rectangle_snap,
+                detail_recovery=detail_recovery,
+                rectangular_inference=rectangular_inference,
+                parallel_inference=parallel_inference,
             )
         else:
             api_url, api_key, selected_model = _vision_api_settings(model)

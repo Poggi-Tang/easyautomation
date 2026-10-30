@@ -169,6 +169,31 @@ def test_cli_defaults_and_opt_out_for_rectangle_snapping():
     assert options.no_rectangle_snap is True
 
 
+def test_cli_inference_optimization_switches():
+    defaults=image_cli.build_parser().parse_args(['in.png','out'])
+    assert not defaults.rectangular_inference and not defaults.sequential_inference
+    options=image_cli.build_parser().parse_args([
+        'in.png','out','--square-inference','--sequential-inference'])
+    assert not options.rectangular_inference and options.sequential_inference
+    assert image_cli.build_parser().parse_args([
+        'in.png','out','--rectangular-inference']).rectangular_inference
+    with pytest.raises(SystemExit):
+        image_cli.build_parser().parse_args([
+            'in.png','out','--rectangular-inference','--square-inference'])
+
+
+@pytest.mark.parametrize('profile,optimized',[('ui',True),('block-diagram',False)])
+@pytest.mark.parametrize('rectangular',[False,True])
+def test_ui_optimizations_preserve_the_diagram_execution_path(
+        local_engines,tmp_path,profile,optimized,rectangular):
+    source=tmp_path/'input.png'
+    Image.new('RGB',(240,160),'white').save(source)
+    result=image_cli.analyze_local_image(source,tmp_path/'out',profile=profile,
+        rectangular_inference=rectangular,progress=lambda _s:None)
+    assert result['inference_execution']['parallel']==optimized
+    assert result['inference_execution']['rectangular_inference']==(optimized and rectangular)
+
+
 def test_removed_circuit_profile_is_rejected_before_reading_inputs(tmp_path):
     with pytest.raises(SystemExit) as error:
         image_cli.build_parser().parse_args(['in.png','out','--profile','circuit'])

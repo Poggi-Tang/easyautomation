@@ -9,6 +9,77 @@ from __future__ import annotations
 from .ui_image_fusion import _intersection, _rect
 
 
+def compact_icon_rows(proposals, texts):
+    """Find rows of independent compact proposals, excluding ordinary words."""
+    candidates=[]
+    for index, box, _score in proposals:
+        w,h=box['width'],box['height']
+        if not (7<=min(w,h) and max(w,h)<=48 and 0.65<=w/h<=1.6):
+            continue
+        normal=False
+        for text in texts:
+            overlap=_intersection(box,text['rect'])
+            text_area=text['rect']['width']*text['rect']['height']
+            if (overlap/max(1,w*h)<0.65 and overlap/max(1,text_area)<0.8) or text['score']<0.9:
+                continue
+            literal=text['text'].strip()
+            cjk=sum('\u4e00'<=c<='\u9fff' for c in literal)
+            if cjk>=2 or (literal.isdigit()) or (len(literal)>=3 and literal.isalnum()):
+                normal=True
+        if not normal:
+            candidates.append((index,box))
+    rows=[]
+    for index,box in sorted(candidates,key=lambda p:(p[1]['top'],p[1]['left'])):
+        cy=(box['top']+box['bottom'])/2
+        row=next((r for r in rows if abs(r['cy']-cy)<=4 and abs(r['height']-box['height'])<=7),None)
+        if row is None:
+            rows.append(dict(cy=cy,height=box['height'],items=[(index,box)]))
+        else:
+            row['items'].append((index,box))
+    found=[]
+    for row in rows:
+        groups=[]
+        for item in sorted(row['items'],key=lambda p:p[1]['left']):
+            if not groups or item[1]['left']-groups[-1][-1][1]['right']>row['height']*3:
+                groups.append([item])
+            else:
+                groups[-1].append(item)
+        for group in groups:
+            centers=[]
+            for _index,box in group:
+                cx=(box['left']+box['right'])/2
+                if not centers or cx-centers[-1]>5:
+                    centers.append(cx)
+            if len(centers)<3:
+                continue
+            found.append(dict(id=len(found)+1,yolo_ids=[i for i,_b in group],
+                              distinct_controls=len(centers),method='aligned-compact-proposals'))
+    return found
+
+
+def fit_row_icon(evidence, box):
+    """Keep all pieces of a light/disabled icon, not only its darkest component."""
+    import cv2
+    import numpy as np
+
+    rgb=evidence.rgb[box['top']:box['bottom'],box['left']:box['right']].astype('int16')
+    border=np.concatenate((rgb[0],rgb[-1],rgb[:,0],rgb[:,-1]))
+    ink=(np.abs(rgb-np.median(border,axis=0)).max(2)>=8).astype('uint8')
+    ink[[0,-1],:]=0
+    ink[:,[0,-1]]=0
+    _count,_labels,stats,_centers=cv2.connectedComponentsWithStats(ink)
+    parts=[]
+    for x,y,w,h,area in stats[1:]:
+        if area<3 or (w>=box['width']*0.8 and h<=2) or (h>=box['height']*0.8 and w<=2):
+            continue
+        parts.append((int(x),int(y),int(x+w),int(y+h)))
+    if not parts:
+        return None
+    x,y=min(p[0] for p in parts),min(p[1] for p in parts)
+    right,bottom=max(p[2] for p in parts),max(p[3] for p in parts)
+    return _rect(box['left']+x,box['top']+y,right-x,bottom-y)
+
+
 def layout_lines(evidence):
     import cv2
     import numpy as np
@@ -76,8 +147,7 @@ def region_kind(box, grids, texts, icons):
 def content_only(evidence, box, texts, icons):
     """Do not emit another row box when OCR and icons explain all dark pixels."""
     patch = evidence.gray[box['top']:box['bottom'], box['left']:box['right']] < 170
-    related = [t for t in texts if _intersection(box, t['rect']) /
-               (t['rect']['width']*t['rect']['height']) >= 0.7]
+    related = [t for t in texts if _intersection(box, t['rect']) > 0]
     if not related:
         return False
     for rect in [*(t['rect'] for t in texts), *icons]:
@@ -112,14 +182,16 @@ def discover_details(evidence, proposals, texts, vertical_lines):
     count, labels, stats, _ = cv2.connectedComponentsWithStats((evidence.gray < 170).astype('uint8'))
     for component_id in range(1, count):
         x, y, w, h, _area = map(int, stats[component_id])
-        if not (10 <= w <= 28 and 10 <= h <= 28 and 0.8 <= w/h <= 1.2):
+        if not (8 <= w <= 28 and 8 <= h <= 28 and 0.8 <= w/h <= 1.2):
             continue
         box = _rect(x, y, w, h)
-        owners = [t for t in texts if t['text'].strip().endswith(('Q', 'O'))
+        owners = [t for t in texts if (t['text'].strip().endswith(('Q','O'))
+                  and abs(t['rect']['right']-box['right'])<=3 or
+                  t['text'].strip().startswith(('Q','O'))
+                  and abs(t['rect']['left']-box['left'])<=t['rect']['height']*0.5)
                   and any('\u4e00' <= c <= '\u9fff' for c in t['text'])
                   and _intersection(box, t['rect'])/(w*h) >= 0.9
-                  and abs(t['rect']['right']-box['right']) <= 3
-                  and t['rect']['width'] >= w*3]
+                  and t['rect']['width'] >= w*2]
         if not owners:
             continue
         mask = (labels[y:y+h, x:x+w] == component_id).astype('uint8') * 255
@@ -139,9 +211,16 @@ def discover_details(evidence, proposals, texts, vertical_lines):
             continue
         owner = owners[0]
         before = dict(rect=dict(owner['rect']), text=owner['text'])
-        owner['rect'] = _rect(owner['rect']['left'], owner['rect']['top'],
-                              x-owner['rect']['left']-1, owner['rect']['height'])
-        owner['text'] = owner['text'].rstrip()[:-1].rstrip()
+        prefix=(owner['text'].strip().startswith(('Q','O'))
+                and abs(owner['rect']['left']-x)<=owner['rect']['height']*0.5)
+        if prefix:
+            old=owner['rect']
+            owner['rect']=_rect(x+w+1,old['top'],old['right']-x-w-1,old['height'])
+            owner['text']=owner['text'].lstrip()[1:].lstrip()
+        else:
+            owner['rect'] = _rect(owner['rect']['left'], owner['rect']['top'],
+                                  x-owner['rect']['left']-1, owner['rect']['height'])
+            owner['text'] = owner['text'].rstrip()[:-1].rstrip()
         owner['quad'] = [[owner['rect'][a], owner['rect'][b]]
                          for a, b in (('left','top'), ('right','top'), ('right','bottom'), ('left','bottom'))]
         owner['layout_correction'] = dict(method='separate-magnifier-glyph', before=before,
@@ -149,4 +228,29 @@ def discover_details(evidence, proposals, texts, vertical_lines):
         corrections.append(dict(raw_ocr_id=owner['raw_id'], **owner['layout_correction']))
         additions.append(dict(rect=box, geometry_kind='magnifier-icon',
                               supporting_yolo_ids=support, method='separate-magnifier-glyph'))
+    markers=[]
+    for text in texts:
+        if not text['text'].lstrip().startswith(('■','☑','□')):
+            continue
+        b=text['rect']
+        frames=[f for f in evidence.frames if abs(f['left']-b['left'])<=b['height']*0.6
+                and max(f['width'],f['height'])<=b['height']*0.8
+                and _intersection(f,b)/(f['width']*f['height'])>=0.85
+                and (evidence.gray[f['top']:f['bottom'],f['left']:f['right']]<225).mean()>=0.75]
+        if frames:
+            markers.append((text,min(frames,key=lambda f:abs(f['left']-b['left']))))
+    for text,box in markers:
+        if sum(abs(other['top']-box['top'])<=4 for _t,other in markers)<3:
+            continue
+        before=dict(rect=dict(text['rect']),text=text['text'])
+        b=text['rect']
+        text['rect']=_rect(box['right']+1,b['top'],b['right']-box['right']-1,b['height'])
+        text['text']=text['text'].lstrip()[1:].lstrip()
+        text['quad']=[[text['rect'][a],text['rect'][b]] for a,b in
+                      (('left','top'),('right','top'),('right','bottom'),('left','bottom'))]
+        text['layout_correction']=dict(method='separate-repeated-marker',before=before,graphic_rect=box)
+        corrections.append(dict(raw_ocr_id=text['raw_id'],**text['layout_correction']))
+        support=[i for i,p,_score in proposals if _intersection(box,p)/(box['width']*box['height'])>=0.8]
+        additions.append(dict(rect=box,geometry_kind='compact-marker',supporting_yolo_ids=support,
+                              method='repeated-filled-prefix-markers'))
     return additions, corrections

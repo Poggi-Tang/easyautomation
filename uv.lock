@@ -508,7 +508,7 @@ nvtx = [
 
 [[package]]
 name = "easy-uiauto"
-version = "0.9.1"
+version = "0.9.10"
 source = { editable = "." }
 dependencies = [
     { name = "build" },

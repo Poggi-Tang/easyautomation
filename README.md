@@ -536,6 +536,35 @@ cd /d C:\path\to\easyautomation
 annotate-image.cmd "C:\images\input.bmp" "C:\images\results"
 ```
 
+#### IEEE9 example and actual output
+
+The repository includes [IEEE9.bmp](https://raw.githubusercontent.com/Poggi-Tang/easyautomation/v0.9.10/docs/examples/IEEE9/IEEE9.bmp)
+and its actual local YOLO + RapidOCR results. Reproduce the model-diagram run:
+
+```cmd
+annotate-image.cmd "docs\examples\IEEE9\IEEE9.bmp" "%TEMP%\easy-uiauto-ieee9" --profile block-diagram
+```
+
+This run produced **42 graphic observations and 102 text observations**, using
+confidence 0.1, square CPU inference and local geometry refinement, with zero
+vision API requests. Counts describe this sample, not an accuracy benchmark.
+
+Original image (PNG display copy of the BMP):
+
+![IEEE9 input](https://raw.githubusercontent.com/Poggi-Tang/easyautomation/v0.9.10/docs/examples/IEEE9/IEEE9.png)
+
+Combined annotation; click to inspect the full-resolution labels:
+
+![IEEE9 graphic and text annotations](https://raw.githubusercontent.com/Poggi-Tang/easyautomation/v0.9.10/docs/examples/IEEE9/results/combined.preview.png)
+
+Download the [graphic layer](https://raw.githubusercontent.com/Poggi-Tang/easyautomation/v0.9.10/docs/examples/IEEE9/results/controls.png),
+[text layer](https://raw.githubusercontent.com/Poggi-Tang/easyautomation/v0.9.10/docs/examples/IEEE9/results/text.preview.png),
+[coordinates JSON](https://github.com/Poggi-Tang/easyautomation/blob/v0.9.10/docs/examples/IEEE9/results/elements.json)
+or [all run resources](https://github.com/Poggi-Tang/easyautomation/tree/v0.9.10/docs/examples/IEEE9/results).
+After cloning/downloading, open `docs/examples/IEEE9/results/index.html` locally.
+Only this approved image example is published; private software screenshots and
+other local experiments are excluded. Exported paths are relative and portable.
+
 The arguments are the input image and output parent directory. Quote paths containing
 spaces. Each run creates an independent `<image>-<timestamp>-<id>` folder and prints
 its path. Open `index.html` there to view all three layers and resource links:
@@ -569,6 +598,11 @@ small controls and normal OCR text. It uses no reviewed annotations or reference
 coordinates. Recovered observations use `local-template-recovery` and
 `confidence_kind=template-correlation`, which is not a YOLO probability or semantic
 verification. Inspect `ui-fusion.json` for all filtering, protection and recovery evidence.
+Aligned compact toolbar/dock proposals protect icons from low-confidence OCR
+glyph conflicts, including light disabled artwork. Repeated tree prefixes and
+leading search/filled markers can be separated from a caption. Original OCR text,
+bounds and each correction remain in the report; a fitted glyph does not verify
+the control's function.
 UI layout lines separate table cells, row fragments and repeated list regions from
 their atomic text/icon observations; the original region proposals remain in the
 report. Pixel-fitted arrows and close symbols retire their duplicate OCR glyphs.
@@ -577,6 +611,31 @@ locally, with original text and bounds retained in correction evidence. Wide lig
 input borders and button borders protect those controls from text-only filtering.
 Dense small-control pages also receive a separately rendered 2x preview; coordinates
 remain relative to the analysis input and the viewer opens the readable preview.
+For UI inputs larger than 1280 pixels, the detector also packs populated pixel
+regions at native scale into at most one extra YOLO pass, reusing its loaded
+weights. Whole-image detections remain and mapped small-control additions retain
+their patch evidence. Review `detail-input.png` and `detail-recovery.json`, including
+omitted regions and rejected crop-edge predictions. This is a bounded detail pass,
+not a claim of full native-resolution coverage. Disable it with MCP/Python
+`detail_recovery=False` or CMD `--no-detail-recovery`. Smaller images and model
+diagrams retain their single whole-image pass.
+Quality comes first: preserve the original 1280x1280 square YOLO input by default.
+UI YOLO and OCR run concurrently within one `--threads` budget (default 3+1); one-thread
+runs stay sequential. Model diagrams retain square, sequential inference.
+`raw-yolo.json` records actual input shapes; `inference_execution` records the
+schedule, thread split and wall time. Concurrent `yolo_seconds` and `ocr_seconds`
+overlap and must not be added as total elapsed time. Reduced stride-aligned padding
+is experimental: explicitly opt in with `--rectangular-inference` or Python/MCP
+`rectangular_inference=True`. Detection scale stays the same, but changing input
+shape can change predictions; validate quality rather than assuming lossless
+acceleration. `--square-inference` remains a compatibility option for the default
+square input. Compare scheduling with `--sequential-inference` or
+`parallel_inference=False`. Models, thresholds and recovery passes stay the same.
+Blank proposals need foreground inside their own bounds, or a complete matched
+closed control border within their 2px context. A neighboring panel line alone
+does not qualify. Empty inputs and checkboxes keep their closed-border support.
+`pixel_evidence` records `inside_foreground_pixels`, `context_foreground_pixels`,
+`context_closed_border` and `pixel_support` for review.
 Other duplicate text proposals are removed; UI mode does not force diagram outlines
 onto arbitrary icons. Results can
 still contain missed regions, false positives and OCR errors. Diagram fitting supports

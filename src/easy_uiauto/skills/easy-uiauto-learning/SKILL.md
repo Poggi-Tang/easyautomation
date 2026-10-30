@@ -29,6 +29,24 @@ and geometry_additions for locally separated magnifiers and supported scroll thu
 their semantics remain unverified. Wide light borders protect inputs and buttons.
 Display annotated_preview_image for dense pages: its 2x drawing keeps coordinates
 relative to the original analysis input, with thin strokes and adjacent labels.
+Large UI screenshots can add one native-scale detail pass, packing populated
+regions into one 1280px canvas and reusing loaded weights. Inspect detail-input.png
+and detail-recovery.json for source/atlas mapping, omitted regions and crop-edge
+rejections; whole-image IDs remain available. Disable using detail_recovery=false
+or --no-detail-recovery. Small inputs and block diagrams keep one whole-image pass.
+Prioritize quality: the original 1280x1280 square detector input is the default.
+Reduced stride-aligned padding is experimental and needs explicit opt-in using
+--rectangular-inference or rectangular_inference=true. It can change predictions
+despite unchanged scaling; never silently enable it to meet a latency target.
+YOLO and OCR share one CPU thread budget in parallel (default 3+1); single-thread
+and model-diagram runs stay sequential. Inspect input_shapes in raw-yolo.json and
+inference_execution; parallel engine timings overlap. --square-inference retains
+the default; --sequential-inference / parallel_inference=false compare scheduling.
+Blank predictions require their own foreground or a complete matching closed
+control border within the 2px context. Neighboring lines alone cannot validate
+them. Review pixel_evidence inside/context counts and closed-border support.
+Compact icon rows protect low-confidence OCR conflicts; tree prefixes, leading
+magnifiers and filled markers retain their original caption/correction evidence.
 For standalone local YOLO + RapidOCR exports from CMD, use the checkout's
 `annotate-image.cmd "input-image" "output-parent"` or installed
 `easy_uiauto_image "input-image" "output-parent"`. This creates an independent run

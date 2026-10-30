@@ -6,6 +6,41 @@ The format is based on Keep a Changelog and is maintained automatically by Seman
 
 ## [Unreleased]
 
+## [0.9.10] - 2026-10-30
+
+### Fixed
+
+- Preserve compact toolbar and dock icons when low-confidence OCR reads their
+  artwork as letters or symbols. Merge repeated scale observations and reject
+  closed text-glyph fragments instead of promoting them to checkbox controls.
+- Separate repeated tree arrows/prefix icons, leading search magnifiers and
+  repeated filled markers from OCR captions, retaining original text and bounds.
+- Reject blank UI proposals supported only by neighboring pixels in their 2px
+  context. Preserve empty inputs/checkboxes only when their complete matched
+  closed border is visible there. Audit inside/context counts and border support.
+
+### Added
+
+- Add the IEEE9.bmp public image example, its actual local annotations and
+  portable coordinate/diagnostic resources to both READMEs. No private software
+  screenshots or other local experiment resources are included.
+- Add a bounded native-scale detail pass for large UI screenshots. Pack populated
+  regions into one extra 1280px inference with the already loaded YOLO model;
+  retain whole-image IDs, map coordinates back and audit omitted/edge regions.
+  Export detail-input.png and detail-recovery.json; expose detail_recovery=False
+  and --no-detail-recovery to opt out. Model-diagram profiles keep their pipeline.
+
+### Changed
+
+- Preserve the original square YOLO input by default to prioritize annotation
+  quality. Run UI YOLO and OCR concurrently within one CPU thread budget
+  (default 3+1); single-thread and model-diagram runs stay sequential.
+  Reduced stride-aligned padding is an experimental opt-in via
+  --rectangular-inference or rectangular_inference=True; it can change raw
+  predictions. Keep --square-inference for compatibility and use
+  --sequential-inference / parallel_inference=False for scheduling comparisons.
+  Export input shapes and inference scheduling/timing evidence.
+
 ## [0.9.9] - 2026-10-29
 
 ### Added

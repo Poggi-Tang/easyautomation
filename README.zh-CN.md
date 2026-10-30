@@ -466,6 +466,33 @@ cd /d C:\path\to\easyautomation
 annotate-image.cmd "C:\images\input.bmp" "C:\images\results"
 ```
 
+#### IEEE9 原图与实测结果
+
+仓库提供 [IEEE9.bmp](https://raw.githubusercontent.com/Poggi-Tang/easyautomation/v0.9.10/docs/examples/IEEE9/IEEE9.bmp)
+及其本地 YOLO＋RapidOCR 实测结果。可在仓库目录复现：
+
+```cmd
+annotate-image.cmd "docs\examples\IEEE9\IEEE9.bmp" "%TEMP%\easy-uiauto-ieee9" --profile block-diagram
+```
+
+本次识别得到 **42 个图形观察项、102 个文字观察项**，置信度为 0.1，使用方形 CPU 输入和本地几何修正，
+视觉 API 请求为 0。数量是该样例的实际输出，不代表准确率。
+
+原图（BMP 的 PNG 展示副本）：
+
+![IEEE9 原图](https://raw.githubusercontent.com/Poggi-Tang/easyautomation/v0.9.10/docs/examples/IEEE9/IEEE9.png)
+
+文字与图形合并标注，点击图片可查看完整分辨率编号：
+
+![IEEE9 文字与图形合并标注](https://raw.githubusercontent.com/Poggi-Tang/easyautomation/v0.9.10/docs/examples/IEEE9/results/combined.preview.png)
+
+另可查看 [图形标注](https://raw.githubusercontent.com/Poggi-Tang/easyautomation/v0.9.10/docs/examples/IEEE9/results/controls.png)、
+[文字标注](https://raw.githubusercontent.com/Poggi-Tang/easyautomation/v0.9.10/docs/examples/IEEE9/results/text.preview.png)、
+[坐标 JSON](https://github.com/Poggi-Tang/easyautomation/blob/v0.9.10/docs/examples/IEEE9/results/elements.json)
+和 [完整实测资源](https://github.com/Poggi-Tang/easyautomation/tree/v0.9.10/docs/examples/IEEE9/results)。
+克隆或下载后，可在本地打开 `docs/examples/IEEE9/results/index.html`。
+公开样例仅包含这张已授权图片，其余自研软件截图及本地测试资源不上传；导出文件使用可移植的相对路径。
+
 前两个参数分别是图片路径和输出父目录，支持中文和空格；路径请加双引号。
 每次在输出目录下建立独立的 `图片名-时间-随机编号` 子目录，避免覆盖旧结果。
 命令结束后打印该目录和 `index.html` 路径，双击 `index.html` 即可集中查看。
@@ -498,11 +525,30 @@ UI 模式还从当前图片已检测的小图标提取模板，按相关度至�
 最多使用 12 个模板，避开已有小控件和正常 OCR 文字，不读取旧标注或参考图坐标。
 补检来源为 `local-template-recovery`，`confidence_kind=template-correlation`，该分数
 不是 YOLO 置信度，也不验证控件语义。过滤、保护和补检证据均写入 `ui-fusion.json`。
+对齐排列的工具栏、停靠按钮候选会保护图标，避免被低置信度 OCR 字母或符号误删，
+并保留浅色禁用图标的全部像素部件。重复树形箭头、前缀图标、文字前的搜索放大镜和
+成组实心标记可与文字分离；原文字、原坐标和纠正过程均保留，几何拟合不验证控件功能。
 表格网格、残缺行和重复列表区域单独记录为布局证据，不再与其内部文字、图标叠画为独立图形。
 箭头和关闭符号在像素证据匹配时合并重复 OCR；有邻近区域支持的滚动条滑块，以及被中文标签
 末尾误读为 Q/O 的放大镜图形，可在本地分离，原文字和坐标保存在纠正证据中。带浅灰闭合
 边框的长输入框和按钮受保护。密集小控件页面另存 2 倍预览，重新绘制细框和相邻编号，
 HTML 查看器优先显示该预览；坐标仍相对识别输入图。
+UI 图片长边超过 1280 像素时，会从原图提取有内容的区域，按原始分辨率拼入一张局部识别图，
+复用已加载的 YOLO 权重，最多追加一轮推理。整图检测保留，小控件候选回映到原图坐标并去重。
+查看 `detail-input.png`、`detail-recovery.json` 中的区域映射、未容纳区域及裁剪边缘拒绝记录；
+该步骤有一轮预算，不保证覆盖全部原始分辨率内容。MCP/Python 的 `detail_recovery=False`
+或 CMD 的 `--no-detail-recovery` 可关闭；小图和模型图保持原来的单轮整图推理。
+质量优先：默认保留原来的 `1280×1280` 方形 YOLO 输入。UI 模式的 YOLO 与 OCR 默认并行，共用 `--threads` 的线程预算：
+默认 4 线程分配为 YOLO 3 线程、OCR 1 线程；单线程时串行运行。模型图沿用原来的方形、串行推理。
+`raw-yolo.json` 保存实际输入形状，`inference_execution` 保存调度、线程分配和推理墙钟耗时；
+并行时 `yolo_seconds` 与 `ocr_seconds` 存在重叠，不能直接相加作为总耗时。
+减少填充属于实验选项：显式传 `--rectangular-inference` 或 MCP/Python 的 `rectangular_inference=True`，
+才会按 32 像素步长减少方形填充和局部拼图末尾空白行。虽然检测缩放比例相同，模型输入形状变化仍可能改变预测框，
+需要单独检查质量，不能视为无损提速。`--square-inference` 保留兼容，表示使用默认方形输入；
+`--sequential-inference` / `parallel_inference=False` 用于串行对照。模型、阈值和补检轮次保持原配置。
+空白候选必须有框内前景，或在 2 像素上下文中找到与候选匹配的完整闭合边框；仅有相邻面板线时会拒绝。
+这样保留空输入框和复选框，同时阻止框外边线为纯白区域提供证据。`pixel_evidence` 记录
+`inside_foreground_pixels`、`context_foreground_pixels`、`context_closed_border` 和 `pixel_support`。
 其余与正常 OCR 文字重复的候选仍去重，不强制套用控制框图外框。识别结果仍可能漏检、误检或错字，
 几何纠正只支持已实现的图形结构。
 

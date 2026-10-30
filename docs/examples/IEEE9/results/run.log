@@ -1,0 +1,9 @@
+[  0.90s] [1/6] Input 2308x1173; checking local runtime
+[  4.97s] [2/6] YOLO + OCR on CPU
+[  4.97s] Inference schedule: sequential; YOLO 4 threads, OCR 4 threads
+[ 38.55s] Small-text recovery: checking 4 isolated regions inside frames
+[ 38.87s] [3/6] Saving 30 YOLO and 102 OCR regions
+[ 38.88s] [4/6] Combining graphics and 102 OCR regions
+[ 44.21s] [5/6] Rendering combined, text and control annotation images
+[ 47.80s] [6/6] Writing coordinates, report and HTML viewer
+[ 48.05s] Completed: 42 graphic + 102 text controls

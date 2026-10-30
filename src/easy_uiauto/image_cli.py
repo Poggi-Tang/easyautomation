@@ -83,7 +83,8 @@ h1,h2{{font-weight:600}}h2{{font-size:18px}}img{{display:block;width:100%;height
 def analyze_local_image(image_path, output_dir="", *, weights=None, profile="ui",
                         threads=4, confidence=image_detection.DEFAULT_CONFIDENCE, offline=False, ocr_runtime="",
                         small_text_recovery=True, progress=print, auto_crop=True,
-                        max_elements=None, box_padding=1, rectangle_snap=True):
+                        max_elements=None, box_padding=1, rectangle_snap=True, detail_recovery=True,
+                        rectangular_inference=False, parallel_inference=True):
     """Save a self-contained run folder, preserving previous runs and input pixels."""
     from .mcp import diagram_geometry, image_analysis
 
@@ -121,12 +122,21 @@ def analyze_local_image(image_path, output_dir="", *, weights=None, profile="ui"
         model = image_detection.ensure_weights(
             Path(weights) if weights else image_detection.default_weights(),
             offline=offline, progress=report)
-        report("[2/6] YOLO detection on CPU")
-        yolo = image_detection.run_yolo(image, model, threads=threads, confidence=confidence)
+        report("[2/6] YOLO + OCR on CPU")
+        yolo, ocr, execution = image_detection.run_detectors(
+            image, model, threads=threads, confidence=confidence, runtime_dir=ocr_runtime,
+            recover_details=detail_recovery and profile=='ui',
+            recover_small_text=small_text_recovery,
+            rectangular=rectangular_inference and profile=='ui',
+            parallel=parallel_inference and profile=='ui', progress=report)
         _write_json(directory / "raw-yolo.json", yolo)
-        report(f"[3/6] OCR on CPU; YOLO proposed {len(yolo['boxes'])} regions")
-        ocr = image_detection.run_ocr(image, threads=threads, runtime_dir=ocr_runtime,
-                                      recover_small_text=small_text_recovery, progress=report)
+        detail_report=yolo.get('detail_recovery',dict(enabled=False,reason='No detail pass reported'))
+        _write_json(directory / 'detail-recovery.json',detail_report)
+        if detail_report.get('enabled'):
+            from . import image_details
+
+            image_details.render_atlas(image,detail_report).save(directory/'detail-input.png')
+        report(f"[3/6] Saving {len(yolo['boxes'])} YOLO and {len(ocr['texts'])} OCR regions")
         _write_json(directory / "raw-ocr.json", ocr)
         _write_json(directory / "ocr-recovery.json", ocr.get("small_text_recovery", {
             "enabled": False, "added_count": 0}))
@@ -167,6 +177,8 @@ def analyze_local_image(image_path, output_dir="", *, weights=None, profile="ui"
         result.update(
             ok=True, engine="local", **provenance, **snap_artifacts,
             confidence_threshold=confidence, rectangle_snap=snap_report,
+            detail_recovery=detail_report,
+            inference_execution=execution,
             image_width=image.width, image_height=image.height,
             exif_orientation_applied=orientation not in (None, 1),
             output_directory=str(directory), coordinates_json=str(coordinates),
@@ -198,6 +210,8 @@ def analyze_local_image(image_path, output_dir="", *, weights=None, profile="ui"
             "detected_element_count", "truncated", "local_only", "api_requests",
             "confidence_threshold", "rectangle_snap",
             "ui_fusion", "template_recovered_graphics", "blank_rejected_graphics",
+            "detail_recovery",
+            "inference_execution",
             "yolo_supported_graphics", "geometry_recovered_graphics", "needs_review_labels",
             "color_candidate_count", "color_supported_graphics", "unmatched_yolo_graphics",
             "fusion_seconds",
@@ -235,6 +249,16 @@ def build_parser():
     parser.add_argument("--offline", action="store_true", help="Require cached models; no download")
     parser.add_argument("--no-small-text-recovery", action="store_true",
                         help="Disable automatic recovery of small text inside frames")
+    parser.add_argument('--no-detail-recovery',action='store_true',
+                        help='Disable the extra native-scale small-control pass for large UI screenshots')
+    inference_shape = parser.add_mutually_exclusive_group()
+    inference_shape.add_argument('--rectangular-inference', action='store_true',
+                                 help='Opt into experimental reduced UI padding; compare annotation quality')
+    inference_shape.add_argument('--square-inference', dest='rectangular_inference', action='store_false',
+                                 help='Use the original square YOLO input (default)')
+    parser.set_defaults(rectangular_inference=False)
+    parser.add_argument('--sequential-inference', action='store_true',
+                        help='Run YOLO and OCR sequentially instead of sharing the CPU thread budget')
     parser.add_argument("--no-auto-crop", action="store_true",
                         help="Keep the full input instead of first cropping a reliable window frame")
     parser.add_argument("--no-rectangle-snap", action="store_true",
@@ -255,6 +279,9 @@ def main(argv=None):
             ocr_runtime=args.ocr_runtime, small_text_recovery=not args.no_small_text_recovery,
             auto_crop=not args.no_auto_crop,
             rectangle_snap=not args.no_rectangle_snap,
+            detail_recovery=not args.no_detail_recovery,
+            rectangular_inference=args.rectangular_inference,
+            parallel_inference=not args.sequential_inference,
             progress=lambda s: print(s, file=sys.stderr, flush=True))
         if args.json:
             print(json.dumps(result, ensure_ascii=False, indent=2))
