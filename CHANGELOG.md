@@ -6,6 +6,22 @@ The format is based on Keep a Changelog and is maintained automatically by Seman
 
 ## [Unreleased]
 
+## [0.9.11] - 2026-10-30
+
+### Added
+
+- Add complete Windows x64 installation and offline download launchers, with a
+  dedicated Python runtime, CPU PyTorch, all dependencies, YOLO weights, portable
+  Tesseract, English/Chinese OCR data, the configuration app and bundled skills.
+- Add `easy_uiauto_setup install`, `download`, `install-offline` and `verify`.
+  Verify file hashes, install offline from a complete locked wheelhouse, and
+  check dependencies, OCR recognition and YOLO inference before completion.
+- Add a `full` Python extra covering MCP, local image annotation and vision tools.
+
+### Fixed
+
+- Simplify the IEEE9 examples and release documentation.
+
 ## [0.9.10] - 2026-10-30
 
 ### Fixed

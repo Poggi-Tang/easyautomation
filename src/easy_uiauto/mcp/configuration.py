@@ -311,6 +311,15 @@ def _replace_codex() -> str:
     return show_codex()
 
 
+def replace_codex_preserving_settings() -> str:
+    """Move the MCP entry to this Python while retaining this app's settings."""
+    for name in (KNOWLEDGE_DIR, VISION_API_URL, VISION_API_KEY, VISION_MODEL):
+        value = _existing_vision_value(name)
+        if value:
+            _write_user_environment(name, value)
+    return _replace_codex()
+
+
 def quick_setup_codex(api_url: str, model: str, version: str) -> str:
     """Configure remote vision and replace the global easy_uiauto Codex entry."""
     api_url, _api_key, model = _configure_remote_vision(api_url, model)

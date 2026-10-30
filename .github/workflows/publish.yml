@@ -68,5 +68,68 @@ jobs:
           python -m build
           python scripts/verify_config_bundle.py
           python -m twine check dist/*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-distributions
+          path: dist/*
+          if-no-files-found: error
       - name: Publish
         uses: pypa/gh-action-pypi-publish@release/v1
+
+  offline-bundle:
+    needs: publish
+    runs-on: windows-latest
+    timeout-minutes: 60
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-distributions
+          path: dist
+      - name: Download complete offline resources
+        shell: pwsh
+        run: |
+          $version = $env:GITHUB_REF_NAME.Substring(1)
+          $wheel = (Get-ChildItem dist -Filter *.whl).FullName
+          python src/easy_uiauto/deployment.py download offline --version $version --wheel $wheel
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Verify offline installation and inference
+        shell: pwsh
+        run: |
+          $bundle = (Get-ChildItem offline -Directory).FullName
+          python src/easy_uiauto/deployment.py install-offline $bundle --target "$env:RUNNER_TEMP/easy-uiauto-full" --no-integrate
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Build standalone installation launchers
+        run: python scripts/build_deployment_bootstrap.py --output-dir deployment
+      - name: Prepare offline download asset
+        shell: pwsh
+        run: |
+          $archive = (Get-ChildItem offline -Filter *.zip).FullName
+          $destination = Join-Path (Resolve-Path offline) "easy-uiauto-offline-win-x64.zip"
+          Move-Item -LiteralPath $archive -Destination $destination
+          Move-Item -LiteralPath "$archive.sha256" -Destination "$destination.sha256"
+          $digest = (Get-FileHash -LiteralPath $destination -Algorithm SHA256).Hash.ToLowerInvariant()
+          Set-Content -LiteralPath "$destination.sha256" -Value "$digest  easy-uiauto-offline-win-x64.zip" -Encoding ASCII
+      - uses: actions/download-artifact@v4
+        with:
+          name: configuration-exe
+          path: deployment
+      - name: Publish GitHub release assets
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view $env:GITHUB_REF_NAME
+          if ($LASTEXITCODE -ne 0) {
+            python -c "import pathlib, os; text=pathlib.Path('CHANGELOG.md').read_text(encoding='utf-8'); section=text.split('## ['+os.environ['GITHUB_REF_NAME'][1:]+']',1)[1]; pathlib.Path('release-notes.md').write_text(section.split('\n',1)[1].split('\n## [',1)[0].strip()+'\n',encoding='utf-8')"
+            gh release create $env:GITHUB_REF_NAME --title $env:GITHUB_REF_NAME --notes-file release-notes.md
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          $assets = @((Get-ChildItem dist -File).FullName) + @((Get-ChildItem deployment -File).FullName) + @((Get-ChildItem offline -File).FullName)
+          gh release upload $env:GITHUB_REF_NAME @assets --clobber
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

@@ -1,4 +1,6 @@
 include annotate-image.cmd
+include install-full.cmd
+include download-offline.cmd
 include README.zh-CN.md
 include CHANGELOG.md
 include demo/mcp_import.py
@@ -6,5 +8,6 @@ include src/easy_uiauto/highlight.py
 include src/easy_uiauto/_highlight_worker.py
 include src/easy_uiauto/bin/easy-uiauto-config.exe
 recursive-include scripts *.py
+recursive-include scripts *.ps1
 recursive-include docs *.md
 recursive-include docs/examples/IEEE9 *.bmp *.png *.json *.csv *.html *.log

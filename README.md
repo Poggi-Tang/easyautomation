@@ -81,6 +81,47 @@ and direct MCP calls.
 
 ## Installation
 
+### Complete installation and offline deployment
+
+On Windows x64, download and double-click [install-full.cmd](https://github.com/Poggi-Tang/easyautomation/releases/latest/download/install-full.cmd).
+It installs a dedicated Python runtime, all Python dependencies, CPU PyTorch,
+YOLO weights, RapidOCR, portable Tesseract with English/Chinese language data,
+the configuration app and skills, then registers available MCP clients.
+No existing Python installation is required. The installer verifies dependencies,
+OCR recognition and YOLO inference before reporting success.
+
+For offline deployment, [download the complete ZIP](https://github.com/Poggi-Tang/easyautomation/releases/latest/download/easy-uiauto-offline-win-x64.zip),
+copy it to the offline PC, extract it, and double-click `install-offline.cmd`.
+
+To prepare the ZIP yourself on a connected Windows PC, download and run
+[download-offline.cmd](https://github.com/Poggi-Tang/easyautomation/releases/latest/download/download-offline.cmd).
+The ZIP and SHA256 file are saved to `%USERPROFILE%\Downloads\easy-uiauto-offline`.
+
+From a repository checkout, you can specify directories:
+
+```cmd
+install-full.cmd -Target "D:\easy-uiauto"
+download-offline.cmd -Output "D:\offline-packages"
+```
+
+The default installation is `%LOCALAPPDATA%\easy-uiauto\full`. Run
+`easy_uiauto_config.cmd` there to configure the knowledge directory and remote API,
+or `easy_uiauto_image.cmd` to annotate images. `activate.cmd` activates the environment
+in an existing CMD window. `-Client none` skips MCP registration; `-NoIntegrate`
+also skips user PATH and skill installation. Microsoft Visual C++ Runtime is
+included and installed when missing; Windows may request administrator approval.
+
+For an existing Python environment, install all Python dependencies with the
+`full` extra, then use the setup command to prepare the complete runtime:
+
+```cmd
+python -m pip install -U "easy-uiauto[full]"
+easy_uiauto_setup install
+easy_uiauto_setup download "D:\offline-packages"
+```
+
+### Basic Python package
+
 Requirements: Windows and Python 3.11 or newer.
 
 Install from PyPI:
@@ -194,7 +235,7 @@ easy_uiauto
 The setup commands register, inspect, or remove the MCP entry through the
 client's own CLI. Existing entries are not overwritten by the basic installer.
 
-For a complete Codex installation:
+To configure remote vision and check client connectivity:
 
 ```bash
 pip install --upgrade "easy-uiauto[mcp,vision]"

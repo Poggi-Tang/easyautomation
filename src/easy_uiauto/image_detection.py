@@ -33,6 +33,9 @@ def file_sha256(path):
 
 
 def default_weights() -> Path:
+    configured = os.environ.get("EASY_UIAUTO_MODEL_DIR")
+    if configured:
+        return Path(configured).expanduser() / "omniparser" / "icon_detect_v3" / "model.pt"
     cache = Path(os.environ.get("LOCALAPPDATA", Path.home() / ".cache")) / "easy-uiauto"
     preferred = cache / "models" / "omniparser" / "icon_detect_v3" / "model.pt"
     # Reuse the model already downloaded by the local experiment.

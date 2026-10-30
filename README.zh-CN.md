@@ -70,6 +70,42 @@
 
 ## 安装
 
+### 一键完整安装与离线部署
+
+Windows x64 用户下载并双击 [install-full.cmd](https://github.com/Poggi-Tang/easyautomation/releases/latest/download/install-full.cmd)，
+即可自动安装独立 Python 环境、全部 Python 依赖、CPU 版 PyTorch、YOLO 权重、RapidOCR、
+便携版 Tesseract 及中英文语言包、配置窗口和配套 Skill，并自动接入已安装的 MCP 客户端。
+无需预装 Python。安装完成前会检查依赖、执行 OCR 识别和 YOLO 推理。
+
+离线部署可[直接下载完整 ZIP](https://github.com/Poggi-Tang/easyautomation/releases/latest/download/easy-uiauto-offline-win-x64.zip)，
+复制到离线电脑，完整解压后双击 `install-offline.cmd`，无需联网或预装 Python。
+
+也可以在联网 Windows 电脑上下载并运行 [download-offline.cmd](https://github.com/Poggi-Tang/easyautomation/releases/latest/download/download-offline.cmd)，
+即可生成完整离线部署 ZIP 和 SHA256 校验文件，默认保存到 `%USERPROFILE%\Downloads\easy-uiauto-offline`。
+
+在仓库目录中，也可以指定安装位置和离线包输出位置：
+
+```cmd
+install-full.cmd -Target "D:\easy-uiauto"
+download-offline.cmd -Output "D:\offline-packages"
+```
+
+默认安装位置为 `%LOCALAPPDATA%\easy-uiauto\full`。安装后运行目录中的
+`easy_uiauto_config.cmd` 配置知识库路径和远程 API，运行 `easy_uiauto_image.cmd` 标注图片；
+在已有 CMD 窗口中执行 `activate.cmd` 可激活该环境。
+`-Client none` 跳过 MCP 注册，`-NoIntegrate` 同时跳过用户 PATH 和 Skill 安装。
+包内包含 Microsoft Visual C++ 运行库，缺失时自动安装；Windows 可能要求管理员授权。
+
+已有 Python 环境时，可安装 `full` 扩展来装齐 Python 依赖，再通过安装入口准备完整运行环境：
+
+```cmd
+python -m pip install -U "easy-uiauto[full]"
+easy_uiauto_setup install
+easy_uiauto_setup download "D:\offline-packages"
+```
+
+### 基础 Python 包
+
 运行环境：Windows，Python 3.11 或更高版本。
 
 从 PyPI 安装：
@@ -228,7 +264,7 @@ easy_uiauto
 配置命令通过客户端自身的 CLI 安装、查看或卸载 MCP 条目。基础安装命令遇到同名配置
 时不会覆盖。
 
-完整部署 Codex：
+配置远程视觉 API 并检查客户端接入：
 
 ```bash
 pip install --upgrade "easy-uiauto[mcp,vision]"
@@ -237,7 +273,7 @@ easy_uiauto --full-setup-codex \
   --vision-model your-vision-model
 ```
 
-完整配置会通过隐藏输入询问缺失的 API Key，补齐 Python 视觉依赖和 Tesseract，
+此配置会通过隐藏输入询问缺失的 API Key，补齐 Python 视觉依赖和 Tesseract，
 仅替换 `easy_uiauto` Codex 条目，安装两个配套 Skill，然后检查 UIA、本地 OCR 和
 远程视觉接口。验收使用程序生成的图片，不会上传当前桌面。
 当前版本的 MCP 会在每次调用时读取最新视觉配置。安装或更新 Python 包、MCP 条目、

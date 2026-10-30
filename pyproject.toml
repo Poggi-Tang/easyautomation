@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "easy-uiauto"
-version = "0.9.10"
+version = "0.9.11"
 description = "UI automation toolkit based on pyautogui and uiautomation"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -53,6 +53,16 @@ image = [
     "numpy>=1.26",
     "opencv-python>=4.8",
 ]
+full = [
+    "mcp[cli]>=1.0.0,<2.0.0",
+    "opencv-python>=4.8",
+    "pytesseract>=0.3.10",
+    "torch>=2.0",
+    "rapidocr==3.10.0",
+    "onnxruntime>=1.20",
+    "Pillow>=10.0",
+    "numpy>=1.26",
+]
 
 [project.urls]
 Homepage = "https://github.com/Poggi-Tang/easyautomation"
@@ -66,6 +76,7 @@ easy_uiauto = "easy_uiauto.mcp.server:main"
 easy_uiauto_service = "easy_uiauto.mcp.service:main"
 easy_uiauto_ui = "easy_uiauto.mcp.ui_cli_command:main"
 easy_uiauto_image = "easy_uiauto.image_cli:main"
+easy_uiauto_setup = "easy_uiauto.deployment:main"
 
 [project.gui-scripts]
 easy_uiauto_config = "easy_uiauto.mcp.config_launcher:main"

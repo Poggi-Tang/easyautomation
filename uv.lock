@@ -508,7 +508,7 @@ nvtx = [
 
 [[package]]
 name = "easy-uiauto"
-version = "0.9.10"
+version = "0.9.11"
 source = { editable = "." }
 dependencies = [
     { name = "build" },
@@ -521,6 +521,17 @@ dependencies = [
 [package.optional-dependencies]
 dev = [
     { name = "pytest" },
+]
+full = [
+    { name = "mcp", extra = ["cli"] },
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "numpy", version = "2.5.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "onnxruntime" },
+    { name = "opencv-python" },
+    { name = "pillow" },
+    { name = "pytesseract" },
+    { name = "rapidocr" },
+    { name = "torch" },
 ]
 image = [
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
@@ -543,21 +554,29 @@ vision = [
 requires-dist = [
     { name = "build", specifier = ">=1.4.0" },
     { name = "mcp", extras = ["cli"], marker = "extra == 'mcp'", specifier = ">=1.0.0,<2.0.0" },
+    { name = "mcp", extras = ["cli"], marker = "extra == 'full'", specifier = ">=1.0.0,<2.0.0" },
+    { name = "numpy", marker = "extra == 'full'", specifier = ">=1.26" },
     { name = "numpy", marker = "extra == 'image'", specifier = ">=1.26" },
     { name = "onnxruntime", marker = "extra == 'image'", specifier = ">=1.20" },
+    { name = "onnxruntime", marker = "extra == 'full'", specifier = ">=1.20" },
     { name = "opencv-python", marker = "extra == 'image'", specifier = ">=4.8" },
     { name = "opencv-python", marker = "extra == 'vision'", specifier = ">=4.8" },
+    { name = "opencv-python", marker = "extra == 'full'", specifier = ">=4.8" },
     { name = "pillow", marker = "extra == 'image'", specifier = ">=10.0" },
+    { name = "pillow", marker = "extra == 'full'", specifier = ">=10.0" },
     { name = "pyautogui", specifier = ">=0.9.54" },
     { name = "pynput", specifier = ">=1.8.1" },
     { name = "pyperclip", specifier = ">=1.8.0" },
     { name = "pytesseract", marker = "extra == 'vision'", specifier = ">=0.3.10" },
+    { name = "pytesseract", marker = "extra == 'full'", specifier = ">=0.3.10" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
     { name = "rapidocr", marker = "extra == 'image'", specifier = "==3.10.0" },
+    { name = "rapidocr", marker = "extra == 'full'", specifier = "==3.10.0" },
     { name = "torch", marker = "extra == 'image'", specifier = ">=2.0" },
+    { name = "torch", marker = "extra == 'full'", specifier = ">=2.0" },
     { name = "uiautomation", specifier = ">=2.0.29" },
 ]
-provides-extras = ["dev", "mcp", "vision", "image"]
+provides-extras = ["dev", "mcp", "vision", "image", "full"]
 
 [[package]]
 name = "evdev"

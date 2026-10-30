@@ -56,6 +56,21 @@ def test_install_codex_uses_current_python(monkeypatch) -> None:
     ]
 
 
+def test_runtime_replacement_preserves_only_application_settings(monkeypatch) -> None:
+    values = {
+        configuration.KNOWLEDGE_DIR: "D:/knowledge",
+        configuration.VISION_API_URL: "https://vision.example/v1",
+        configuration.VISION_API_KEY: "test-secret",
+        configuration.VISION_MODEL: "test-model",
+    }
+    saved = {}
+    monkeypatch.setattr(configuration, "_existing_vision_value", values.__getitem__)
+    monkeypatch.setattr(configuration, "_write_user_environment", saved.__setitem__)
+    monkeypatch.setattr(configuration, "_replace_codex", lambda: "replaced")
+    assert configuration.replace_codex_preserving_settings() == "replaced"
+    assert saved == values
+
+
 def test_install_claude_code_uses_user_scope(monkeypatch) -> None:
     calls: list[tuple[str, list[str]]] = []
 
