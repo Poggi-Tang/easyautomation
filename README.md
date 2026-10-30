@@ -536,34 +536,30 @@ cd /d C:\path\to\easyautomation
 annotate-image.cmd "C:\images\input.bmp" "C:\images\results"
 ```
 
-#### IEEE9 example and actual output
+#### IEEE9 annotation example
 
-The repository includes [IEEE9.bmp](https://raw.githubusercontent.com/Poggi-Tang/easyautomation/v0.9.10/docs/examples/IEEE9/IEEE9.bmp)
-and its actual local YOLO + RapidOCR results. Reproduce the model-diagram run:
+Annotate [IEEE9.bmp](https://raw.githubusercontent.com/Poggi-Tang/easyautomation/v0.9.10/docs/examples/IEEE9/IEEE9.bmp)
+with local YOLO + RapidOCR:
 
 ```cmd
 annotate-image.cmd "docs\examples\IEEE9\IEEE9.bmp" "%TEMP%\easy-uiauto-ieee9" --profile block-diagram
 ```
 
-This run produced **42 graphic observations and 102 text observations**, using
-confidence 0.1, square CPU inference and local geometry refinement, with zero
-vision API requests. Counts describe this sample, not an accuracy benchmark.
+The example detects **42 graphics and 102 text regions**.
 
-Original image (PNG display copy of the BMP):
+Original image:
 
 ![IEEE9 input](https://raw.githubusercontent.com/Poggi-Tang/easyautomation/v0.9.10/docs/examples/IEEE9/IEEE9.png)
 
-Combined annotation; click to inspect the full-resolution labels:
+Combined annotation:
 
 ![IEEE9 graphic and text annotations](https://raw.githubusercontent.com/Poggi-Tang/easyautomation/v0.9.10/docs/examples/IEEE9/results/combined.preview.png)
 
-Download the [graphic layer](https://raw.githubusercontent.com/Poggi-Tang/easyautomation/v0.9.10/docs/examples/IEEE9/results/controls.png),
-[text layer](https://raw.githubusercontent.com/Poggi-Tang/easyautomation/v0.9.10/docs/examples/IEEE9/results/text.preview.png),
-[coordinates JSON](https://github.com/Poggi-Tang/easyautomation/blob/v0.9.10/docs/examples/IEEE9/results/elements.json)
-or [all run resources](https://github.com/Poggi-Tang/easyautomation/tree/v0.9.10/docs/examples/IEEE9/results).
-After cloning/downloading, open `docs/examples/IEEE9/results/index.html` locally.
-Only this approved image example is published; private software screenshots and
-other local experiments are excluded. Exported paths are relative and portable.
+Results: [graphics](https://raw.githubusercontent.com/Poggi-Tang/easyautomation/v0.9.10/docs/examples/IEEE9/results/controls.png),
+[text](https://raw.githubusercontent.com/Poggi-Tang/easyautomation/v0.9.10/docs/examples/IEEE9/results/text.preview.png),
+[coordinates JSON](https://github.com/Poggi-Tang/easyautomation/blob/v0.9.10/docs/examples/IEEE9/results/elements.json).
+For the interactive viewer, download the [example](docs/examples/IEEE9) and open
+`docs/examples/IEEE9/results/index.html`.
 
 The arguments are the input image and output parent directory. Quote paths containing
 spaces. Each run creates an independent `<image>-<timestamp>-<id>` folder and prints

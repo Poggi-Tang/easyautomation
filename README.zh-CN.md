@@ -466,32 +466,28 @@ cd /d C:\path\to\easyautomation
 annotate-image.cmd "C:\images\input.bmp" "C:\images\results"
 ```
 
-#### IEEE9 原图与实测结果
+#### IEEE9 标注示例
 
-仓库提供 [IEEE9.bmp](https://raw.githubusercontent.com/Poggi-Tang/easyautomation/v0.9.10/docs/examples/IEEE9/IEEE9.bmp)
-及其本地 YOLO＋RapidOCR 实测结果。可在仓库目录复现：
+使用本地 YOLO＋RapidOCR 标注 [IEEE9.bmp](https://raw.githubusercontent.com/Poggi-Tang/easyautomation/v0.9.10/docs/examples/IEEE9/IEEE9.bmp)：
 
 ```cmd
 annotate-image.cmd "docs\examples\IEEE9\IEEE9.bmp" "%TEMP%\easy-uiauto-ieee9" --profile block-diagram
 ```
 
-本次识别得到 **42 个图形观察项、102 个文字观察项**，置信度为 0.1，使用方形 CPU 输入和本地几何修正，
-视觉 API 请求为 0。数量是该样例的实际输出，不代表准确率。
+该示例识别出 **42 个图形、102 个文字区域**。
 
-原图（BMP 的 PNG 展示副本）：
+原图：
 
 ![IEEE9 原图](https://raw.githubusercontent.com/Poggi-Tang/easyautomation/v0.9.10/docs/examples/IEEE9/IEEE9.png)
 
-文字与图形合并标注，点击图片可查看完整分辨率编号：
+文字与图形合并标注：
 
 ![IEEE9 文字与图形合并标注](https://raw.githubusercontent.com/Poggi-Tang/easyautomation/v0.9.10/docs/examples/IEEE9/results/combined.preview.png)
 
-另可查看 [图形标注](https://raw.githubusercontent.com/Poggi-Tang/easyautomation/v0.9.10/docs/examples/IEEE9/results/controls.png)、
-[文字标注](https://raw.githubusercontent.com/Poggi-Tang/easyautomation/v0.9.10/docs/examples/IEEE9/results/text.preview.png)、
-[坐标 JSON](https://github.com/Poggi-Tang/easyautomation/blob/v0.9.10/docs/examples/IEEE9/results/elements.json)
-和 [完整实测资源](https://github.com/Poggi-Tang/easyautomation/tree/v0.9.10/docs/examples/IEEE9/results)。
-克隆或下载后，可在本地打开 `docs/examples/IEEE9/results/index.html`。
-公开样例仅包含这张已授权图片，其余自研软件截图及本地测试资源不上传；导出文件使用可移植的相对路径。
+标注结果：[图形](https://raw.githubusercontent.com/Poggi-Tang/easyautomation/v0.9.10/docs/examples/IEEE9/results/controls.png)、
+[文字](https://raw.githubusercontent.com/Poggi-Tang/easyautomation/v0.9.10/docs/examples/IEEE9/results/text.preview.png)、
+[坐标 JSON](https://github.com/Poggi-Tang/easyautomation/blob/v0.9.10/docs/examples/IEEE9/results/elements.json)。
+下载[完整示例](docs/examples/IEEE9)后，打开 `docs/examples/IEEE9/results/index.html` 即可交互查看结果。
 
 前两个参数分别是图片路径和输出父目录，支持中文和空格；路径请加双引号。
 每次在输出目录下建立独立的 `图片名-时间-随机编号` 子目录，避免覆盖旧结果。

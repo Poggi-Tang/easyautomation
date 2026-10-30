@@ -21,9 +21,8 @@ The format is based on Keep a Changelog and is maintained automatically by Seman
 
 ### Added
 
-- Add the IEEE9.bmp public image example, its actual local annotations and
-  portable coordinate/diagnostic resources to both READMEs. No private software
-  screenshots or other local experiment resources are included.
+- Add an IEEE9 image annotation example with the input image, annotated results
+  and coordinate exports to the English and Chinese READMEs.
 - Add a bounded native-scale detail pass for large UI screenshots. Pack populated
   regions into one extra 1280px inference with the already loaded YOLO model;
   retain whole-image IDs, map coordinates back and audit omitted/edge regions.
