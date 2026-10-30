@@ -102,7 +102,7 @@ jobs:
         shell: pwsh
         run: |
           $bundle = (Get-ChildItem offline -Directory).FullName
-          python src/easy_uiauto/deployment.py install-offline $bundle --target "$env:RUNNER_TEMP/easy-uiauto-full" --no-integrate
+          python src/easy_uiauto/deployment.py install-offline $bundle --target "$env:RUNNER_TEMP/完整安装 smoke" --no-integrate
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Build standalone installation launchers
         run: python scripts/build_deployment_bootstrap.py --output-dir deployment

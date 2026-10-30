@@ -414,24 +414,30 @@ tkinter.Tcl().eval("info patchlevel")
 import easy_uiauto, pytesseract
 from easy_uiauto import _highlight_worker
 from easy_uiauto import image_detection
+from easy_uiauto.mcp.diagnostics import _ocr_languages
 image_detection.check_runtime()
 weights = image_detection.ensure_weights(image_detection.default_weights(), offline=True)
 with tempfile.TemporaryDirectory() as scratch:
-    image = Image.new("RGB", (480, 140), "white")
+    image = Image.new("RGB", (1440, 900), "white")
     draw = ImageDraw.Draw(image)
-    draw.rectangle((5, 5, 475, 135), outline="black", width=2)
-    draw.text((25, 35), "Easy 123", fill="black", font=ImageFont.truetype("arial.ttf", 48))
-    languages = pytesseract.get_languages(config="")
+    draw.rectangle((20, 25, 200, 95), outline="black", width=1)
+    draw.text((40, 45), "Easy 123", fill="black", font=ImageFont.truetype("arial.ttf", 20))
+    languages, language_error = _ocr_languages(20)
+    assert language_error is None, language_error
     assert {"eng", "chi_sim"}.issubset(languages), languages
     text = pytesseract.image_to_string(image, lang="eng+chi_sim", config="--psm 6")
     assert "123" in text, text
-    ocr = image_detection.run_ocr(image, threads=1, recover_small_text=False)
-    assert "123" in str(ocr["texts"]), ocr["texts"]
-    detection = image_detection.run_yolo(image, weights, threads=2)
+    sample = pathlib.Path(easy_uiauto.__file__).parent / "resources/IEEE9.png"
+    with Image.open(sample) as source:
+        example = source.convert("RGB")
+    ocr = image_detection.run_ocr(example, threads=1, recover_small_text=False)
+    assert "BUS_2" in ocr["texts"], ocr["texts"]
+    detection = image_detection.run_yolo(example, weights, threads=2)
+    assert detection["boxes"], "YOLO returned no graphics for the installation example"
 gui = pathlib.Path(easy_uiauto.__file__).parent / "bin/easy-uiauto-config.exe"
 assert gui.is_file() and gui.read_bytes()[:2] == b"MZ", "Configuration EXE missing"
 print(json.dumps(dict(ok=True, version=easy_uiauto.__version__, python=__import__("sys").version.split()[0],
-    tesseract_languages=languages, rapidocr=True, yolo=True, configuration_exe=True)))
+    tesseract_languages=sorted(languages), rapidocr=True, yolo=True, configuration_exe=True)))
 '''
     output = run([python, "-I", "-c", probe], log=log, timeout=300)
     result = json.loads(output.strip().splitlines()[-1])

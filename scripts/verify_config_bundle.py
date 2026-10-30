@@ -34,6 +34,8 @@ def main():
         entries = archive.read(f"easy_uiauto-{version}.dist-info/entry_points.txt").decode("utf-8")
         if "easy_uiauto_config = easy_uiauto.mcp.config_launcher:main" not in entries:
             raise RuntimeError("Wheel is missing its configuration launcher")
+        if archive.read("easy_uiauto/resources/IEEE9.png") != (root / "docs/examples/IEEE9/IEEE9.png").read_bytes():
+            raise RuntimeError("Wheel is missing the IEEE9 installation self-check image")
     with tarfile.open(sdist) as archive:
         member = archive.extractfile(f"easy_uiauto-{version}/src/{relative}")
         if member is None or member.read() != executable:

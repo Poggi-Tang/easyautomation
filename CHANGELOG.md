@@ -20,6 +20,8 @@ The format is based on Keep a Changelog and is maintained automatically by Seman
 
 ### Fixed
 
+- Support non-ASCII Windows installation paths when loading YOLO weights and
+  checking installed Tesseract languages.
 - Simplify the IEEE9 examples and release documentation.
 
 ## [0.9.10] - 2026-10-30

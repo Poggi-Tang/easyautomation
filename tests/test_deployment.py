@@ -51,6 +51,12 @@ def test_full_extra_covers_all_functional_extras():
     assert data["project"]["scripts"]["easy_uiauto_setup"] == "easy_uiauto.deployment:main"
 
 
+def test_installation_fixture_matches_the_public_example():
+    source = ROOT / "docs/examples/IEEE9/IEEE9.png"
+    fixture = ROOT / "src/easy_uiauto/resources/IEEE9.png"
+    assert fixture.read_bytes() == source.read_bytes()
+
+
 @pytest.mark.parametrize("name", ["../escape", "/absolute", "C:/absolute", "nested/../../escape", "nested\\escape", "."])
 def test_manifest_paths_cannot_escape(tmp_path, name):
     with pytest.raises(ValueError):
@@ -203,3 +209,26 @@ def test_model_directory_can_be_configured(monkeypatch, tmp_path):
 
     monkeypatch.setenv("EASY_UIAUTO_MODEL_DIR", str(tmp_path))
     assert default_weights() == tmp_path / "omniparser/icon_detect_v3/model.pt"
+
+
+def test_detector_can_load_non_ascii_windows_paths(monkeypatch, tmp_path):
+    from easy_uiauto import image_detection
+    import sys
+
+    weights = tmp_path / "模型目录" / "model.pt"
+    weights.parent.mkdir()
+    weights.write_bytes(b"serialized model")
+    loaded = []
+    model = SimpleNamespace(eval=lambda: "ready")
+
+    def load(stream, **kwargs):
+        assert not isinstance(stream, str), "Native fopen must not receive a non-ASCII path"
+        loaded.append(stream.read())
+        return model
+
+    monkeypatch.setitem(sys.modules, "torch", SimpleNamespace(
+        set_num_threads=lambda _threads: None, jit=SimpleNamespace(load=load)))
+    monkeypatch.setattr(image_detection, "_predict_yolo", lambda *_args, **_kwargs: dict(
+        boxes=[[1, 2, 20, 30]], scores=[0.9], forward_seconds=0.01, tensor_shape=[1, 3, 1280, 1280]))
+    assert image_detection.run_yolo(None, weights)["boxes"] == [[1, 2, 20, 30]]
+    assert loaded == [b"serialized model"]

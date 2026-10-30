@@ -86,7 +86,7 @@ package-dir = {"" = "src"}
 include-package-data = true
 
 [tool.setuptools.package-data]
-easy_uiauto = ["py.typed", "skills/*/SKILL.md", "skills/*/agents/openai.yaml", "bin/*.exe"]
+easy_uiauto = ["py.typed", "skills/*/SKILL.md", "skills/*/agents/openai.yaml", "bin/*.exe", "resources/*.png"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

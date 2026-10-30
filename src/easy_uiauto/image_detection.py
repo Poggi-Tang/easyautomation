@@ -196,7 +196,13 @@ def run_yolo(image, weights, *, threads=4, confidence=DEFAULT_CONFIDENCE,
 
     torch.set_num_threads(threads)
     started=time.perf_counter()
-    model=torch.jit.load(str(weights),map_location='cpu').eval()
+    weight_path = Path(weights)
+    if os.name == "nt" and not str(weight_path).isascii():
+        # Native fopen in PyTorch can misinterpret non-ASCII Windows paths.
+        with weight_path.open("rb") as stream:
+            model = torch.jit.load(stream, map_location="cpu").eval()
+    else:
+        model = torch.jit.load(str(weight_path), map_location="cpu").eval()
     loaded=time.perf_counter()
     whole=_predict_yolo(image,model,confidence,rectangular=rectangular)
     boxes,scores=whole['boxes'],whole['scores']
