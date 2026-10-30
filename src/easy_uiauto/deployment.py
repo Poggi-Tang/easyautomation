@@ -21,6 +21,7 @@ import time
 import urllib.request
 import uuid
 import zipfile
+import xml.etree.ElementTree as ET
 from email.parser import BytesParser
 from pathlib import Path, PurePosixPath
 
@@ -124,6 +125,96 @@ def extract_zip(archive: Path, destination: Path) -> None:
             if (item.external_attr >> 16) & 0o170000 == 0o120000:
                 raise ValueError("ZIP symbolic links are not supported")
         source.extractall(destination)
+
+
+def utf8_manifest(original: bytes) -> bytes:
+    """Preserve the native manifest and enable Windows' per-process UTF-8 ACP."""
+    asm1, asm3 = "urn:schemas-microsoft-com:asm.v1", "urn:schemas-microsoft-com:asm.v3"
+    settings_ns = "http://schemas.microsoft.com/SMI/2019/WindowsSettings"
+    ET.register_namespace("", asm1)
+    ET.register_namespace("asmv3", asm3)
+    ET.register_namespace("ws2019", settings_ns)
+    if original:
+        root = ET.fromstring(original.rstrip(b"\0"))
+    else:
+        root = ET.Element(f"{{{asm1}}}assembly", manifestVersion="1.0")
+        ET.SubElement(root, f"{{{asm1}}}assemblyIdentity", type="win32",
+                      name="easy_uiauto.portable.Tesseract", version="1.0.0.0")
+    application = root.find(f"{{{asm3}}}application")
+    if application is None:
+        application = root.find(f"{{{asm1}}}application")
+    if application is None:
+        application = ET.SubElement(root, f"{{{asm3}}}application")
+    namespace = application.tag.split("}", 1)[0] + "}"
+    settings = application.find(namespace + "windowsSettings")
+    if settings is None:
+        settings = ET.SubElement(application, namespace + "windowsSettings")
+    codepage = settings.find(f"{{{settings_ns}}}activeCodePage")
+    if codepage is None:
+        codepage = ET.SubElement(settings, f"{{{settings_ns}}}activeCodePage")
+    codepage.text = "UTF-8"
+    return ET.tostring(root, encoding="utf-8", xml_declaration=True)
+
+
+def enable_native_utf8(executable: Path) -> None:
+    """Update only the portable CLI's manifest, using the Windows resource API.
+
+    https://learn.microsoft.com/windows/apps/design/globalizing/use-utf8-code-page
+    """
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    pointer, integer = ctypes.c_void_p, ctypes.c_uint32
+    callback_type = ctypes.WINFUNCTYPE(ctypes.c_int, pointer, pointer, pointer,
+                                      ctypes.c_ushort, ctypes.c_ssize_t)
+    signatures = {
+        "LoadLibraryExW": (pointer, [ctypes.c_wchar_p, pointer, integer]),
+        "FreeLibrary": (ctypes.c_int, [pointer]),
+        "FindResourceW": (pointer, [pointer, pointer, pointer]),
+        "SizeofResource": (integer, [pointer, pointer]),
+        "LoadResource": (pointer, [pointer, pointer]),
+        "LockResource": (pointer, [pointer]),
+        "EnumResourceLanguagesW": (ctypes.c_int, [pointer, pointer, pointer, callback_type, ctypes.c_ssize_t]),
+        "BeginUpdateResourceW": (pointer, [ctypes.c_wchar_p, ctypes.c_int]),
+        "UpdateResourceW": (ctypes.c_int, [pointer, pointer, pointer, ctypes.c_ushort, pointer, integer]),
+        "EndUpdateResourceW": (ctypes.c_int, [pointer, ctypes.c_int]),
+    }
+    for name, (result, arguments) in signatures.items():
+        function = getattr(kernel, name)
+        function.restype, function.argtypes = result, arguments
+    library = kernel.LoadLibraryExW(str(executable), None, 0x2 | 0x20)
+    if not library:
+        raise ctypes.WinError(ctypes.get_last_error())
+    original, languages = b"", []
+    try:
+        resource = kernel.FindResourceW(library, pointer(1), pointer(24))
+        if resource:
+            size = kernel.SizeofResource(library, resource)
+            data = kernel.LockResource(kernel.LoadResource(library, resource))
+            if not data:
+                raise ctypes.WinError(ctypes.get_last_error())
+            original = ctypes.string_at(data, size)
+            @callback_type
+            def remember_language(_module, _type, _name, language, _parameter):
+                languages.append(language)
+                return 1
+            if not kernel.EnumResourceLanguagesW(library, pointer(24), pointer(1), remember_language, 0):
+                raise ctypes.WinError(ctypes.get_last_error())
+    finally:
+        kernel.FreeLibrary(library)
+    content = utf8_manifest(original)
+    buffer = ctypes.create_string_buffer(content)
+    update = kernel.BeginUpdateResourceW(str(executable), False)
+    if not update:
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        for language in set(languages or [0]):
+            if not kernel.UpdateResourceW(update, pointer(24), pointer(1), language,
+                                           ctypes.cast(buffer, pointer), len(content)):
+                raise ctypes.WinError(ctypes.get_last_error())
+    except BaseException:
+        kernel.EndUpdateResourceW(update, True)
+        raise
+    if not kernel.EndUpdateResourceW(update, False):
+        raise ctypes.WinError(ctypes.get_last_error())
 
 
 def run(command: list[str], *, log: Path, env=None, timeout=1800, accepted=(0,)) -> str:
@@ -296,6 +387,8 @@ def download_bundle(output: Path, version: str, *, wheel: Path | None = None,
         shutil.copytree(extracted, tesseract, ignore=shutil.ignore_patterns("$*", "uninstall*", "*-uninstall.exe"))
         if not (tesseract / "tesseract.exe").is_file():
             raise RuntimeError("Could not extract the Tesseract runtime")
+        enable_native_utf8(tesseract / "tesseract.exe")
+        sources["tesseract-installer.exe"]["portable_manifest"] = "activeCodePage=UTF-8"
     for language in ("eng", "chi_sim"):
         (tesseract / "tessdata").mkdir(exist_ok=True)
         shutil.copy2(cache / f"{language}.traineddata", tesseract / "tessdata" / f"{language}.traineddata")

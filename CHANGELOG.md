@@ -6,6 +6,13 @@ The format is based on Keep a Changelog and is maintained automatically by Seman
 
 ## [Unreleased]
 
+## [0.9.13] - 2026-10-30
+
+### Fixed
+
+- Enable the UTF-8 process code page in portable Tesseract while preserving its
+  original application manifest, so Chinese model paths work on English Windows.
+
 ## [0.9.12] - 2026-10-30
 
 ### Fixed

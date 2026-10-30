@@ -215,6 +215,20 @@ def test_python_children_force_utf8_even_in_isolated_mode(monkeypatch, tmp_path)
     assert result == "中文"
 
 
+def test_native_manifest_preserves_identity_and_requests_utf8():
+    import xml.etree.ElementTree as ET
+    original = b'''<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+      <assemblyIdentity name="Tesseract" version="5.4.0.0" type="win32"/>
+      <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3"><security/></trustInfo>
+    </assembly>'''
+    root = ET.fromstring(deployment.utf8_manifest(original))
+    assert root.find("{urn:schemas-microsoft-com:asm.v1}assemblyIdentity").get("name") == "Tesseract"
+    assert root.find("{urn:schemas-microsoft-com:asm.v3}trustInfo") is not None
+    setting = root.find(".//{http://schemas.microsoft.com/SMI/2019/WindowsSettings}activeCodePage")
+    assert setting.text == "UTF-8"
+    assert deployment.utf8_manifest(deployment.utf8_manifest(original)) == deployment.utf8_manifest(original)
+
+
 def test_model_directory_can_be_configured(monkeypatch, tmp_path):
     from easy_uiauto.image_detection import default_weights
 
