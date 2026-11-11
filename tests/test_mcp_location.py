@@ -6,6 +6,8 @@ import json
 from types import SimpleNamespace
 from unittest.mock import Mock
 
+import pytest
+
 from easy_uiauto import utils
 from easy_uiauto.mcp import native_windows, server
 from easy_uiauto.mcp.protocol import (
@@ -47,6 +49,29 @@ def test_set_top_window_restores_and_activates_native_handle(monkeypatch) -> Non
     assert utils.set_top_window("微信") is True
     assert state["restored"] == [(42, 9)]
     assert utils.set_top_window("不存在") is False
+
+
+@pytest.mark.parametrize("mode", ["delayed", "already-foreground", "denied"])
+def test_set_top_window_waits_for_foreground_update_before_verifying(monkeypatch, mode):
+    state = {"foreground": 42 if mode == "already-foreground" else 7}
+    messages = []
+    def sleep(seconds):
+        assert seconds == 0.005
+        if mode == "delayed": state["foreground"] = 42
+    wait = Mock(side_effect=sleep)
+    user32 = SimpleNamespace(GetForegroundWindow=lambda: state["foreground"],
+        IsIconic=lambda _hwnd: False, SetForegroundWindow=Mock(), ShowWindow=Mock())
+    monkeypatch.setattr(utils, "_get_user32", lambda: user32)
+    monkeypatch.setattr(utils, "_find_visible_window_handle", lambda _title: 42)
+    monkeypatch.setattr(utils, "push_message", messages.append)
+    monkeypatch.setattr(utils.time, "sleep", wait)
+    assert utils.set_top_window("Example") is (mode != "denied")
+    if mode == "already-foreground":
+        user32.SetForegroundWindow.assert_not_called(); wait.assert_not_called()
+    else:
+        user32.SetForegroundWindow.assert_called_once_with(42); wait.assert_called_once_with(0.005)
+    activation_errors = [m for m in messages if not m.startswith("[计时]")]
+    assert activation_errors == (["窗口激活失败：Example"] if mode == "denied" else [])
 
 
 def test_find_visible_window_handle_uses_exact_visible_title(monkeypatch) -> None:
@@ -96,7 +121,7 @@ def test_find_window_scope_without_name_uses_desktop_root(monkeypatch) -> None:
 
 
 def test_find_window_scope_prefers_class_and_name(monkeypatch) -> None:
-    window = SimpleNamespace(ClassName="WindowClass")
+    window = SimpleNamespace(Name="Example", ClassName="WindowClass", ControlTypeName="WindowControl")
     enumerate_windows = Mock(return_value=[dict(title="Example", handle=42, class_name="NativeClass")])
     bind = Mock(return_value=window)
     forbidden = Mock(side_effect=AssertionError("Desktop UIA lookup is forbidden"))
@@ -118,7 +143,7 @@ def test_find_window_scope_missing_window_does_not_query_uia(monkeypatch) -> Non
     bind.assert_not_called()
 
 
-def test_native_scope_rejects_duplicate_windows_before_binding_and_respects_index(monkeypatch):
+def test_native_scope_rejects_duplicate_uia_windows_and_respects_index(monkeypatch):
     import pytest
 
     from easy_uiauto.mcp.results import ActionError
@@ -126,13 +151,15 @@ def test_native_scope_rejects_duplicate_windows_before_binding_and_respects_inde
     monkeypatch.setattr(native_windows, "enumerate_windows", lambda **_kw: [
         dict(title="Example", handle=1), dict(title="Example", handle=2),
     ])
-    bind = Mock(return_value=object())
+    controls = {handle: SimpleNamespace(Name="Example") for handle in (1, 2)}
+    bind = Mock(side_effect=controls.get)
     monkeypatch.setattr(utils.uiautomation, "ControlFromHandle", bind)
     with pytest.raises(ActionError, match="ambiguous_match"):
         utils._native_window_scope("Example", {})
-    bind.assert_not_called()
-    assert utils._native_window_scope("Example", {"foundIndex": 2}) is bind.return_value
-    bind.assert_called_once_with(2)
+    assert [c.args[0] for c in bind.call_args_list] == [1, 2]
+    bind.reset_mock()
+    assert utils._native_window_scope("Example", {"foundIndex": 2}) is controls[2]
+    assert [c.args[0] for c in bind.call_args_list] == [1, 2]
 
 
 def test_location_from_xpath_matches_recorded_location_shape() -> None:
@@ -158,11 +185,11 @@ def test_normalize_location_accepts_recorded_action_wrapper() -> None:
     assert normalize_location(action) == location
 
 
-def test_stable_location_uses_automation_id_instead_of_dynamic_name() -> None:
+def test_stored_location_preserves_name_for_default_identity_mode() -> None:
     location = stable_location(location_from_xpath(XPATH))
 
-    assert location["Name"] == ""
-    assert "Name" not in location["Xpath"][-1]
+    assert location["Name"] == "Save"
+    assert location["Xpath"][-1]["Name"] == "Save"
     assert location["AutomationId"] == "saveButton"
     assert location["Xpath"][-1]["AutomationId"] == "saveButton"
     assert location["Xpath"][0]["Name"] == "Example"
@@ -229,102 +256,41 @@ def test_capture_record_contains_canonical_location(monkeypatch) -> None:
     assert record["xpath"][-1]["search_depth"] == 3
 
 
-def test_core_find_control_keeps_legacy_empty_xpath_fallback(monkeypatch) -> None:
-    control = _fake_control()
-    window = SimpleNamespace()
+def test_core_find_control_keeps_legacy_empty_xpath_fallback(monkeypatch):
+    control, window = _strict_tree(monkeypatch)
+    assert utils.find_control(build_location(window_name="Example", name="Save", automation_id="stale-id")) is control
 
-    def fake_strategy_dictionary(selector, parent=None):
-        if selector["ControlType"] == "WindowControl":
-            return window
-        assert parent is window
-        return control
 
-    monkeypatch.setattr(utils, "CURRENT_APP_NAME", "Example")
-    monkeypatch.setattr(utils, "_find_window_scope", lambda *_args: window)
-    monkeypatch.setattr(utils, "_has_second_match", lambda *_args: False)
-    monkeypatch.setattr(utils, "strategy_xpath", lambda *_args, **_kwargs: False)
-    monkeypatch.setattr(utils, "strategy_dictionary", fake_strategy_dictionary)
-    location = build_location(
-        window_name="Example",
-        name="Save",
-        class_name="ButtonClass",
-        control_type="ButtonControl",
-        automation_id="saveButton",
-    )
-
+def test_core_find_control_supports_id_only_location(monkeypatch):
+    control, window = _strict_tree(monkeypatch)
+    location = build_location(window_name="Example", automation_id="saveButton")
+    location["Xpath"] = [{"ControlType": "WindowControl", "Name": "Example"},
+                         {"ControlType": "GroupControl", "Name": "Missing hierarchy"}]
     assert utils.find_control(location) is control
 
 
-def test_core_find_control_prefers_automation_id_before_xpath(monkeypatch) -> None:
-    control = _fake_control()
-    window = SimpleNamespace()
-    selectors = []
-
-    def fake_strategy_dictionary(selector, parent=None):
-        selectors.append(selector)
-        if selector.get("ControlType") == "WindowControl":
-            return window
-        assert parent is window
-        if selector.get("AutomationId") == "saveButton":
-            return control
-        return False
-
-    monkeypatch.setattr(utils, "CURRENT_APP_NAME", "Example")
-    monkeypatch.setattr(utils, "_find_window_scope", lambda *_args: window)
-    monkeypatch.setattr(utils, "_has_second_match", lambda *_args: False)
-    monkeypatch.setattr(utils, "strategy_dictionary", fake_strategy_dictionary)
-    monkeypatch.setattr(
-        utils,
-        "strategy_xpath",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(
-            AssertionError("XPath must not run after an AutomationId match")
-        ),
-    )
-
-    assert utils.find_control(location_from_xpath(XPATH)) is control
-    assert selectors[0] == {
-        "ControlType": "ButtonControl",
-        "ClassName": "ButtonClass",
-        "AutomationId": "saveButton",
-    }
+def test_core_find_control_uses_xpath_when_automation_id_is_duplicated(monkeypatch):
+    from test_mcp_scanner import FakeControl
+    first = FakeControl("Save", "ButtonControl", (1, 1, 10, 10), automation_id="save")
+    second = FakeControl("Save", "ButtonControl", (20, 1, 30, 10), automation_id="save")
+    left = FakeControl("Left", "GroupControl", (0, 0, 50, 50), [first])
+    right = FakeControl("Right", "GroupControl", (50, 0, 100, 50), [second])
+    window = FakeControl("Example", "WindowControl", (0, 0, 100, 100), [left, right])
+    monkeypatch.setattr(utils, "_native_window_scope", lambda *_args: window)
+    location = location_from_xpath([
+        {"ControlType": "WindowControl", "Name": "Example"},
+        {"ControlType": "GroupControl", "Name": "Right"},
+        {"ControlType": "ButtonControl", "AutomationId": "save"}])
+    assert utils.find_control(location) is second
 
 
-def test_core_find_control_uses_xpath_when_automation_id_is_duplicated(monkeypatch) -> None:
-    wrong = object()
-    correct = object()
-    window = SimpleNamespace()
-    selectors = []
-
-    def fake_strategy_dictionary(selector, parent=None):
-        selectors.append(selector)
-        return wrong if selector.get("AutomationId") == "saveButton" else False
-
-    monkeypatch.setattr(utils, "CURRENT_APP_NAME", "Example")
-    monkeypatch.setattr(utils, "_find_window_scope", lambda *_args: window)
-    monkeypatch.setattr(utils, "_has_second_match", lambda *_args: True)
-    monkeypatch.setattr(utils, "strategy_dictionary", fake_strategy_dictionary)
-    monkeypatch.setattr(utils, "strategy_xpath", lambda *_args, **_kwargs: correct)
-
-    assert utils.find_control(location_from_xpath(XPATH)) is correct
-    assert len(selectors) == 1
-
-
-def test_core_find_control_rejects_ambiguous_fallback(monkeypatch) -> None:
-    window = SimpleNamespace()
-    selectors = []
-
-    def fake_strategy_dictionary(selector, parent=None):
-        selectors.append(selector)
-        return object()
-
-    monkeypatch.setattr(utils, "CURRENT_APP_NAME", "Example")
-    monkeypatch.setattr(utils, "_find_window_scope", lambda *_args: window)
-    monkeypatch.setattr(utils, "_has_second_match", lambda *_args: True)
-    monkeypatch.setattr(utils, "strategy_dictionary", fake_strategy_dictionary)
-    monkeypatch.setattr(utils, "strategy_xpath", lambda *_args, **_kwargs: False)
-
-    assert utils.find_control(location_from_xpath(XPATH)) is False
-    assert len(selectors) == 2  # ID match and final property combination only.
+def test_core_find_control_returns_first_identity_match(monkeypatch):
+    from test_mcp_scanner import FakeControl
+    from easy_uiauto.mcp.results import ActionError
+    import pytest
+    first, window = _strict_tree(monkeypatch)
+    window._children.append(FakeControl("Save", "ButtonControl", (20, 1, 30, 10)))
+    assert utils.find_control(build_location(window_name="Example", name="Save"), strict=False) is first
 
 
 def test_has_second_match_uses_second_matching_control(monkeypatch) -> None:
@@ -345,56 +311,29 @@ def test_has_second_match_uses_second_matching_control(monkeypatch) -> None:
     }]
 
 
-def test_core_find_control_does_not_call_xpath_when_path_is_empty(monkeypatch) -> None:
-    control = _fake_control()
-    window = SimpleNamespace()
-
-    def fake_strategy_dictionary(selector, parent=None):
-        if selector.get("ControlType") == "WindowControl":
-            return window
-        if selector.get("AutomationId"):
-            return False
-        return control
-
-    monkeypatch.setattr(utils, "CURRENT_APP_NAME", "Example")
-    monkeypatch.setattr(utils, "_find_window_scope", lambda *_args: window)
-    monkeypatch.setattr(utils, "strategy_dictionary", fake_strategy_dictionary)
-    monkeypatch.setattr(
-        utils,
-        "strategy_xpath",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(
-            AssertionError("empty XPath must never be resolved")
-        ),
-    )
-    location = build_location(
-        window_name="Example",
-        name="Save",
-        class_name="ButtonClass",
-        control_type="ButtonControl",
-        automation_id="stale-id",
-    )
-
-    assert utils.find_control(location) is control
+def test_core_find_control_does_not_call_xpath_when_path_is_empty(monkeypatch):
+    control, window = _strict_tree(monkeypatch)
+    assert utils.find_control({"WindowName": "Example", "Name": "Save", "Xpath": []}) is control
 
 
-def test_core_find_control_uses_xpath_before_property_combination(monkeypatch) -> None:
-    control = _fake_control()
-    window = SimpleNamespace()
-    combination_used = False
+def test_core_find_control_uses_xpath_before_property_combination(monkeypatch):
+    from test_mcp_scanner import FakeControl
+    first, window = _strict_tree(monkeypatch)
+    second = FakeControl("Save", "ButtonControl", (20, 1, 30, 10))
+    second.AutomationId = ""
+    group = FakeControl("Target group", "GroupControl", (0, 0, 60, 60), [second])
+    window._children.append(group)
+    location = location_from_xpath([
+        {"ControlType": "WindowControl", "Name": "Example"},
+        {"ControlType": "GroupControl", "Name": "Target group"},
+        {"ControlType": "ButtonControl", "Name": "Save"}])
+    assert utils.find_control(location) is second
 
-    def fake_strategy_dictionary(selector, parent=None):
-        nonlocal combination_used
-        if selector.get("ControlType") == "WindowControl":
-            return window
-        if selector.get("AutomationId"):
-            return False
-        combination_used = True
-        return control
 
-    monkeypatch.setattr(utils, "CURRENT_APP_NAME", "Example")
-    monkeypatch.setattr(utils, "_find_window_scope", lambda *_args: window)
-    monkeypatch.setattr(utils, "strategy_dictionary", fake_strategy_dictionary)
-    monkeypatch.setattr(utils, "strategy_xpath", lambda *_args, **_kwargs: control)
-
-    assert utils.find_control(location_from_xpath(XPATH)) is control
-    assert combination_used is False
+def _strict_tree(monkeypatch):
+    from test_mcp_scanner import FakeControl
+    control = FakeControl("Save", "ButtonControl", (1, 1, 10, 10), automation_id="saveButton")
+    window = FakeControl("Example", "WindowControl", (0, 0, 100, 100), [control])
+    monkeypatch.setattr(utils, "_native_window_scope", lambda *_args: window)
+    monkeypatch.setattr(utils, "set_top_window", lambda *_args: (_ for _ in ()).throw(AssertionError("Read must not activate")))
+    return control, window

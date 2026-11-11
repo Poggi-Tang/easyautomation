@@ -1,0 +1,476 @@
+<!doctype html>
+<html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>easy-uiauto · SVG 图标预览</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#f4f7fb;color:#0f172a;font:14px/1.6 "Microsoft YaHei UI",system-ui,sans-serif}
+main{max-width:1350px;margin:auto;padding:40px 28px}h1{font-size:30px;letter-spacing:-.5px;margin:0 0 8px}.intro{margin:0 0 24px;color:#475569}
+.toolbar{position:sticky;top:0;z-index:1;background:#f4f7fb;display:flex;flex-wrap:wrap;align-items:center;gap:12px;padding:16px 0;border-bottom:1px solid #e2e8f0}
+input[type=search],select,button{font:inherit;border:1px solid #cbd5e1;border-radius:6px;background:white;color:#334155;padding:6px 10px}
+input[type=search]{min-width:200px}label{display:flex;gap:8px;align-items:center}button{cursor:pointer}button:hover{background:#eff6ff;border-color:#2563eb}
+:focus-visible{outline:2px solid #2563eb;outline-offset:3px}.counter{margin-left:auto;color:#64748b}.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:14px;margin-top:20px}
+.card{border:1px solid #e2e8f0;border-radius:10px;background:white;padding:16px;min-width:0}.card[hidden]{display:none}.stage{height:85px;display:flex;align-items:center;justify-content:center;background:#f8fafc;border-radius:6px;margin-bottom:14px}
+.stage svg{width:var(--size,32px);height:var(--size,32px);flex:none;color:var(--accent)}.label{font-weight:600}.identifier{color:#64748b;font-size:12px;margin:2px 0 12px}
+.meta{display:flex;justify-content:space-between;align-items:center;gap:6px;font-size:11px;color:#64748b}.download{font-size:12px;padding:3px 6px}
+body[data-mode=disabled] .stage svg{color:#9ca3af}body[data-mode=selected] .stage{background:#1e293b}body[data-mode=selected] .stage svg{color:white}
+.swatches{display:flex;flex-wrap:wrap;gap:16px;margin-top:18px;color:#475569;font-size:12px}.swatch{display:inline-flex;align-items:center;gap:6px}.dot{width:10px;height:10px;border-radius:3px;background:var(--color)}
+.note{color:#64748b;font-size:12px;margin-top:24px}.empty{padding:30px;text-align:center;color:#64748b}
+@media(max-width:600px){main{padding:24px 16px}h1{font-size:24px}.counter{margin-left:0}.grid{grid-template-columns:repeat(2,minmax(0,1fr))}.card{padding:12px}.meta{flex-wrap:wrap}}
+</style><main><h1>easy-uiauto · SVG 图标</h1>
+<p class="intro">49 类语义，50 个矢量文件。统一 24 × 24 网格、1.75 线宽与圆角端点，透明背景。</p>
+<div class="swatches"><span class="swatch"><span class="dot" style="--color:#2563EB"></span>功能蓝 #2563EB</span><span class="swatch"><span class="dot" style="--color:#475569"></span>中性灰 #475569</span><span class="swatch"><span class="dot" style="--color:#7C3AED"></span>智能紫 #7C3AED</span><span class="swatch"><span class="dot" style="--color:#15803D"></span>成功绿 #15803D</span><span class="swatch"><span class="dot" style="--color:#B45309"></span>提醒橙 #B45309</span><span class="swatch"><span class="dot" style="--color:#DC2626"></span>危险红 #DC2626</span></div>
+<div class="toolbar"><input id="search" type="search" aria-label="搜索图标" placeholder="搜索中文名称 / 英文名">
+<label>分类<select id="group"><option value="all">全部</option><option value="navigation">导航与内容</option><option value="common">通用操作</option><option value="learning">学习与流程</option><option value="status">状态提示</option></select></label>
+<label>尺寸<select id="size"><option>16</option><option>18</option><option>20</option><option>24</option><option selected>32</option><option>48</option></select>px</label>
+<label>外观<select id="mode"><option value="normal">原色</option><option value="disabled">禁用灰</option><option value="selected">选中白</option></select></label>
+<span class="counter" id="counter" aria-live="polite">50 / 50</span></div>
+<div class="grid"><article class="card" data-group="navigation" data-search="知识库 library" style="--accent:#2563EB">
+<div class="stage"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" color="#2563EB" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="知识库">
+  <title>知识库</title>
+  <rect x="4" y="6" width="4" height="12" rx=".8"/>
+  <rect x="10" y="3.5" width="4" height="14.5" rx=".8"/>
+  <rect x="16" y="7.5" width="4" height="10.5" rx=".8"/>
+  <path d="M3 21h18"/>
+</svg>
+</div><div class="label">知识库</div>
+<div class="identifier">library</div><div class="meta"><span>#2563EB</span>
+<button type="button" class="download" data-id="library">下载 SVG</button></div></article>
+<article class="card" data-group="navigation" data-search="软件窗口 window" style="--accent:#2563EB">
+<div class="stage"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" color="#2563EB" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="软件窗口">
+  <title>软件窗口</title>
+  <rect x="3" y="4.5" width="18" height="15" rx="2"/>
+  <path d="M3 8.5h18M7 13h5"/>
+</svg>
+</div><div class="label">软件窗口</div>
+<div class="identifier">window</div><div class="meta"><span>#2563EB</span>
+<button type="button" class="download" data-id="window">下载 SVG</button></div></article>
+<article class="card" data-group="navigation" data-search="使用知识 book-open" style="--accent:#2563EB">
+<div class="stage"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" color="#2563EB" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="使用知识">
+  <title>使用知识</title>
+  <path d="M12 6.5C9 4.8 6 4.4 3 5v14c3-.6 6-.2 9 1.5 3-1.7 6-2.1 9-1.5V5c-3-.6-6-.2-9 1.5ZM12 6.5v14M6.5 9.5l2.5.5M15 10l2.5-.5"/>
+</svg>
+</div><div class="label">使用知识</div>
+<div class="identifier">book-open</div><div class="meta"><span>#2563EB</span>
+<button type="button" class="download" data-id="book-open">下载 SVG</button></div></article>
+<article class="card" data-group="navigation" data-search="文档资料 documents" style="--accent:#475569">
+<div class="stage"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" color="#475569" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="文档资料">
+  <title>文档资料</title>
+  <path d="M5 17H4a1 1 0 0 1-1-1V5a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2"/>
+  <rect x="8" y="7" width="12" height="14" rx="2"/>
+  <path d="M11.5 12h5M11.5 16h4"/>
+</svg>
+</div><div class="label">文档资料</div>
+<div class="identifier">documents</div><div class="meta"><span>#475569</span>
+<button type="button" class="download" data-id="documents">下载 SVG</button></div></article>
+<article class="card" data-group="navigation" data-search="控件库 controls" style="--accent:#2563EB">
+<div class="stage"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" color="#2563EB" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="控件库">
+  <title>控件库</title>
+  <rect x="3.5" y="3.5" width="6.5" height="6.5" rx="1.5"/>
+  <rect x="14" y="3.5" width="6.5" height="6.5" rx="1.5"/>
+  <rect x="3.5" y="14" width="6.5" height="6.5" rx="1.5"/>
+  <rect x="14" y="14" width="6.5" height="6.5" rx="1.5"/>
+</svg>
+</div><div class="label">控件库</div>
+<div class="identifier">controls</div><div class="meta"><span>#2563EB</span>
+<button type="button" class="download" data-id="controls">下载 SVG</button></div></article>
+<article class="card" data-group="navigation" data-search="单个控件 control" style="--accent:#2563EB">
+<div class="stage"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" color="#2563EB" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="单个控件">
+  <title>单个控件</title>
+  <path d="M10 15H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v5M7 8.5h5"/>
+  <path d="m13 11.5 8 4.7-4.4 1-1.5 3.8Z"/>
+</svg>
+</div><div class="label">单个控件</div>
+<div class="identifier">control</div><div class="meta"><span>#2563EB</span>
+<button type="button" class="download" data-id="control">下载 SVG</button></div></article>
+<article class="card" data-group="navigation" data-search="区域 region" style="--accent:#2563EB">
+<div class="stage"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" color="#2563EB" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="区域">
+  <title>区域</title>
+  <path d="M3 8V4a1 1 0 0 1 1-1h4M16 3h4a1 1 0 0 1 1 1v4M21 16v4a1 1 0 0 1-1 1h-4M8 21H4a1 1 0 0 1-1-1v-4"/>
+  <rect x="7.5" y="7.5" width="9" height="9" rx="1.25"/>
+</svg>
+</div><div class="label">区域</div>
+<div class="identifier">region</div><div class="meta"><span>#2563EB</span>
+<button type="button" class="download" data-id="region">下载 SVG</button></div></article>
+<article class="card" data-group="navigation" data-search="区域状态 layers" style="--accent:#2563EB">
+<div class="stage"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" color="#2563EB" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="区域状态">
+  <title>区域状态</title>
+  <path d="M4 16a1 1 0 0 1-1-1V5a2 2 0 0 1 2-2h10a1 1 0 0 1 1 1"/>
+  <rect x="7" y="7" width="14" height="14" rx="2"/>
+  <path d="M7 11h6V7"/>
+</svg>
+</div><div class="label">区域状态</div>
+<div class="identifier">layers</div><div class="meta"><span>#2563EB</span>
+<button type="button" class="download" data-id="layers">下载 SVG</button></div></article>
+<article class="card" data-group="navigation" data-search="组合动作 workflow" style="--accent:#2563EB">
+<div class="stage"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" color="#2563EB" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="组合动作">
+  <title>组合动作</title>
+  <rect x="3" y="3" width="6" height="5" rx="1.25"/>
+  <rect x="15" y="9" width="6" height="5" rx="1.25"/>
+  <rect x="3" y="16" width="6" height="5" rx="1.25"/>
+  <path d="M9 5.5h2a1.5 1.5 0 0 1 1.5 1.5v3a1.5 1.5 0 0 0 1.5 1.5h1M18 14v3a1.5 1.5 0 0 1-1.5 1.5H9m2-2-2 2 2 2"/>
+</svg>
+</div><div class="label">组合动作</div>
+<div class="identifier">workflow</div><div class="meta"><span>#2563EB</span>
+<button type="button" class="download" data-id="workflow">下载 SVG</button></div></article>
+<article class="card" data-group="common" data-search="打开文件夹 folder-open" style="--accent:#2563EB">
+<div class="stage"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" color="#2563EB" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="打开文件夹">
+  <title>打开文件夹</title>
+  <path d="M3 18V6a2 2 0 0 1 2-2h4l2.5 3H18a2 2 0 0 1 2 2M3 18l2.6-6.7A2 2 0 0 1 7.5 10H21l-3 8a2 2 0 0 1-1.9 1.3H4.3A1.3 1.3 0 0 1 3 18Z"/>
+</svg>
+</div><div class="label">打开文件夹</div>
+<div class="identifier">folder-open</div><div class="meta"><span>#2563EB</span>
+<button type="button" class="download" data-id="folder-open">下载 SVG</button></div></article>
+<article class="card" data-group="common" data-search="搜索 search" style="--accent:#475569">
+<div class="stage"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" color="#475569" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="搜索">
+  <title>搜索</title>
+  <circle cx="10.5" cy="10.5" r="6.5"/>
+  <path d="m15.2 15.2 5.3 5.3"/>
+</svg>
+</div><div class="label">搜索</div>
+<div class="identifier">search</div><div class="meta"><span>#475569</span>
+<button type="button" class="download" data-id="search">下载 SVG</button></div></article>
+<article class="card" data-group="common" data-search="设置 settings" style="--accent:#475569">
+<div class="stage"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" color="#475569" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="设置">
+  <title>设置</title>
+  <path d="m10 3-.5 2.5-2 1.2-2.4-.8-2 3.4 1.9 1.7v2l-1.9 1.7 2 3.4 2.4-.8 2 1.2.5 2.5h4l.5-2.5 2-1.2 2.4.8 2-3.4L19 13v-2l1.9-1.7-2-3.4-2.4.8-2-1.2L14 3Z"/>
+  <circle cx="12" cy="12" r="3"/>
+</svg>
+</div><div class="label">设置</div>
+<div class="identifier">settings</div><div class="meta"><span>#475569</span>
+<button type="button" class="download" data-id="settings">下载 SVG</button></div></article>
+<article class="card" data-group="common" data-search="标注模型 model-chip" style="--accent:#7C3AED">
+<div class="stage"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" color="#7C3AED" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="标注模型">
+  <title>标注模型</title>
+  <rect x="6" y="6" width="12" height="12" rx="2"/>
+  <path d="M9 3v3M15 3v3M9 18v3M15 18v3M3 9h3M3 15h3M18 9h3M18 15h3"/>
+  <g fill="currentColor" stroke="none"><circle cx="10" cy="10" r="1"/><circle cx="14" cy="10" r="1"/><circle cx="10" cy="14" r="1"/><circle cx="14" cy="14" r="1"/></g>
+</svg>
+</div><div class="label">标注模型</div>
+<div class="identifier">model-chip</div><div class="meta"><span>#7C3AED</span>
+<button type="button" class="download" data-id="model-chip">下载 SVG</button></div></article>
+<article class="card" data-group="common" data-search="新增 add" style="--accent:#2563EB">
+<div class="stage"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" color="#2563EB" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="新增">
+  <title>新增</title>
+  <path d="M12 5v14M5 12h14"/>
+</svg>
+</div><div class="label">新增</div>
+<div class="identifier">add</div><div class="meta"><span>#2563EB</span>
+<button type="button" class="download" data-id="add">下载 SVG</button></div></article>
+<article class="card" data-group="common" data-search="保存 save" style="--accent:#2563EB">
+<div class="stage"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" color="#2563EB" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="保存">
+  <title>保存</title>
+  <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h12l4 4v12a2 2 0 0 1-2 2ZM7 3v5h9V3M7 21v-7h10v7"/>
+</svg>
+</div><div class="label">保存</div>
+<div class="identifier">save</div><div class="meta"><span>#2563EB</span>
+<button type="button" class="download" data-id="save">下载 SVG</button></div></article>
+<article class="card" data-group="common" data-search="编辑 edit" style="--accent:#475569">
+<div class="stage"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" color="#475569" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="编辑">
+  <title>编辑</title>
+  <path d="m4 15 11-11a2.1 2.1 0 0 1 3 0l2 2a2.1 2.1 0 0 1 0 3L9 20l-6 1ZM13 6l5 5M4 15l5 5"/>
+</svg>
+</div><div class="label">编辑</div>
+<div class="identifier">edit</div><div class="meta"><span>#475569</span>
+<button type="button" class="download" data-id="edit">下载 SVG</button></div></article>
+<article class="card" data-group="common" data-search="刷新 refresh" style="--accent:#2563EB">
+<div class="stage"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" color="#2563EB" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="刷新">
+  <title>刷新</title>
+  <path d="M20 8c-1.4-3.1-4.3-5-7.6-5C9.5 3 6.8 4.3 5 6.5M20 3.5V8h-4.5M4 16c1.4 3.1 4.3 5 7.6 5 2.9 0 5.6-1.3 7.4-3.5M4 20.5V16h4.5"/>
+</svg>
+</div><div class="label">刷新</div>
+<div class="identifier">refresh</div><div class="meta"><span>#2563EB</span>
+<button type="button" class="download" data-id="refresh">下载 SVG</button></div></article>
+<article class="card" data-group="common" data-search="下载 download" style="--accent:#2563EB">
+<div class="stage"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" color="#2563EB" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="下载">
+  <title>下载</title>
+  <path d="M12 3v11m-4-4 4 4 4-4M3.5 15v4a2 2 0 0 0 2 2h13a2 2 0 0 0 2-2v-4"/>
+</svg>
+</div><div class="label">下载</div>
+<div class="identifier">download</div><div class="meta"><span>#2563EB</span>
+<button type="button" class="download" data-id="download">下载 SVG</button></div></article>
+<article class="card" data-group="common" data-search="导入 import" style="--accent:#2563EB">
+<div class="stage"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" color="#2563EB" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="导入">
+  <title>导入</title>
+  <path d="M8 7V5a2 2 0 0 1 2-2h6l5 5v11a2 2 0 0 1-2 2h-9a2 2 0 0 1-2-2v-2M16 3v5h5M3 12h11m-3-3 3 3-3 3"/>
+</svg>
+</div><div class="label">导入</div>
+<div class="identifier">import</div><div class="meta"><span>#2563EB</span>
+<button type="button" class="download" data-id="import">下载 SVG</button></div></article>
+<article class="card" data-group="common" data-search="导出 export" style="--accent:#2563EB">
+<div class="stage"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" color="#2563EB" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="导出">
+  <title>导出</title>
+  <path d="M8 7V5a2 2 0 0 1 2-2h6l5 5v11a2 2 0 0 1-2 2h-9a2 2 0 0 1-2-2v-2M16 3v5h5M14 12H3m3-3-3 3 3 3"/>
+</svg>
+</div><div class="label">导出</div>
+<div class="identifier">export</div><div class="meta"><span>#2563EB</span>
+<button type="button" class="download" data-id="export">下载 SVG</button></div></article>
+<article class="card" data-group="common" data-search="删除 trash" style="--accent:#DC2626">
+<div class="stage"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" color="#DC2626" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="删除">
+  <title>删除</title>
+  <path d="M3.5 6h17M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2M5 6l1 13a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2l1-13M10 10v7M14 10v7"/>
+</svg>
+</div><div class="label">删除</div>
+<div class="identifier">trash</div><div class="meta"><span>#DC2626</span>
+<button type="button" class="download" data-id="trash">下载 SVG</button></div></article>
+<article class="card" data-group="common" data-search="移除 minus" style="--accent:#475569">
+<div class="stage"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" color="#475569" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="移除">
+  <title>移除</title>
+  <path d="M5 12h14"/>
+</svg>
+</div><div class="label">移除</div>
+<div class="identifier">minus</div><div class="meta"><span>#475569</span>
+<button type="button" class="download" data-id="minus">下载 SVG</button></div></article>
+<article class="card" data-group="common" data-search="运行 play" style="--accent:#15803D">
+<div class="stage"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" color="#15803D" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="运行">
+  <title>运行</title>
+  <path d="M7 4.7a1.2 1.2 0 0 1 1.8-1L20 10.9a1.25 1.25 0 0 1 0 2.2L8.8 20.3a1.2 1.2 0 0 1-1.8-1Z" fill="currentColor" stroke="none"/>
+</svg>
+</div><div class="label">运行</div>
+<div class="identifier">play</div><div class="meta"><span>#15803D</span>
+<button type="button" class="download" data-id="play">下载 SVG</button></div></article>
+<article class="card" data-group="common" data-search="停止 stop" style="--accent:#DC2626">
+<div class="stage"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" color="#DC2626" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="停止">
+  <title>停止</title>
+  <rect x="5.5" y="5.5" width="13" height="13" rx="2" fill="currentColor" stroke="none"/>
+</svg>
+</div><div class="label">停止</div>
+<div class="identifier">stop</div><div class="meta"><span>#DC2626</span>
+<button type="button" class="download" data-id="stop">下载 SVG</button></div></article>
+<article class="card" data-group="common" data-search="更多 more" style="--accent:#475569">
+<div class="stage"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" color="#475569" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="更多">
+  <title>更多</title>
+  <g fill="currentColor" stroke="none"><circle cx="5" cy="12" r="1.75"/><circle cx="12" cy="12" r="1.75"/><circle cx="19" cy="12" r="1.75"/></g>
+</svg>
+</div><div class="label">更多</div>
+<div class="identifier">more</div><div class="meta"><span>#475569</span>
+<button type="button" class="download" data-id="more">下载 SVG</button></div></article>
+<article class="card" data-group="common" data-search="属性与参数 sliders" style="--accent:#475569">
+<div class="stage"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" color="#475569" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="属性与参数">
+  <title>属性与参数</title>
+  <path d="M3 5h3M10 5h11M3 12h11M18 12h3M3 19h5M12 19h9"/>
+  <circle cx="8" cy="5" r="2"/><circle cx="16" cy="12" r="2"/><circle cx="10" cy="19" r="2"/>
+</svg>
+</div><div class="label">属性与参数</div>
+<div class="identifier">sliders</div><div class="meta"><span>#475569</span>
+<button type="button" class="download" data-id="sliders">下载 SVG</button></div></article>
+<article class="card" data-group="common" data-search="返回 back" style="--accent:#475569">
+<div class="stage"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" color="#475569" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="返回">
+  <title>返回</title>
+  <path d="M20 12H4m6-6-6 6 6 6"/>
+</svg>
+</div><div class="label">返回</div>
+<div class="identifier">back</div><div class="meta"><span>#475569</span>
+<button type="button" class="download" data-id="back">下载 SVG</button></div></article>
+<article class="card" data-group="common" data-search="关闭 / 取消 close" style="--accent:#475569">
+<div class="stage"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" color="#475569" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="关闭 / 取消">
+  <title>关闭 / 取消</title>
+  <path d="m6 6 12 12M18 6 6 18"/>
+</svg>
+</div><div class="label">关闭 / 取消</div>
+<div class="identifier">close</div><div class="meta"><span>#475569</span>
+<button type="button" class="download" data-id="close">下载 SVG</button></div></article>
+<article class="card" data-group="common" data-search="上移 arrow-up" style="--accent:#475569">
+<div class="stage"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" color="#475569" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="上移">
+  <title>上移</title>
+  <path d="M12 20V4M6 10l6-6 6 6"/>
+</svg>
+</div><div class="label">上移</div>
+<div class="identifier">arrow-up</div><div class="meta"><span>#475569</span>
+<button type="button" class="download" data-id="arrow-up">下载 SVG</button></div></article>
+<article class="card" data-group="common" data-search="下移 arrow-down" style="--accent:#475569">
+<div class="stage"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" color="#475569" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="下移">
+  <title>下移</title>
+  <path d="M12 4v16m-6-6 6 6 6-6"/>
+</svg>
+</div><div class="label">下移</div>
+<div class="identifier">arrow-down</div><div class="meta"><span>#475569</span>
+<button type="button" class="download" data-id="arrow-down">下载 SVG</button></div></article>
+<article class="card" data-group="common" data-search="复制 copy" style="--accent:#475569">
+<div class="stage"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" color="#475569" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="复制">
+  <title>复制</title>
+  <path d="M5 16H4a1 1 0 0 1-1-1V5a2 2 0 0 1 2-2h10a1 1 0 0 1 1 1v1"/>
+  <rect x="8" y="8" width="13" height="13" rx="2"/>
+</svg>
+</div><div class="label">复制</div>
+<div class="identifier">copy</div><div class="meta"><span>#475569</span>
+<button type="button" class="download" data-id="copy">下载 SVG</button></div></article>
+<article class="card" data-group="common" data-search="启用参考 toggle-on" style="--accent:#2563EB">
+<div class="stage"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" color="#2563EB" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="启用参考">
+  <title>启用参考</title>
+  <rect x="3" y="6" width="18" height="12" rx="6"/>
+  <circle cx="15" cy="12" r="3" fill="currentColor" stroke="none"/>
+</svg>
+</div><div class="label">启用参考</div>
+<div class="identifier">toggle-on</div><div class="meta"><span>#2563EB</span>
+<button type="button" class="download" data-id="toggle-on">下载 SVG</button></div></article>
+<article class="card" data-group="common" data-search="停用参考 toggle-off" style="--accent:#475569">
+<div class="stage"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" color="#475569" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="停用参考">
+  <title>停用参考</title>
+  <rect x="3" y="6" width="18" height="12" rx="6"/>
+  <circle cx="9" cy="12" r="3" fill="currentColor" stroke="none"/>
+</svg>
+</div><div class="label">停用参考</div>
+<div class="identifier">toggle-off</div><div class="meta"><span>#475569</span>
+<button type="button" class="download" data-id="toggle-off">下载 SVG</button></div></article>
+<article class="card" data-group="learning" data-search="截图 capture" style="--accent:#2563EB">
+<div class="stage"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" color="#2563EB" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="截图">
+  <title>截图</title>
+  <path d="M5 7h3l1.5-3h5L16 7h3a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2Z"/>
+  <circle cx="12" cy="13.5" r="3.5"/>
+</svg>
+</div><div class="label">截图</div>
+<div class="identifier">capture</div><div class="meta"><span>#2563EB</span>
+<button type="button" class="download" data-id="capture">下载 SVG</button></div></article>
+<article class="card" data-group="learning" data-search="学习区域 scan" style="--accent:#7C3AED">
+<div class="stage"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" color="#7C3AED" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="学习区域">
+  <title>学习区域</title>
+  <path d="M3 8V4a1 1 0 0 1 1-1h4M16 3h4a1 1 0 0 1 1 1v4M21 16v4a1 1 0 0 1-1 1h-4M8 21H4a1 1 0 0 1-1-1v-4M8 10h8M8 14h5"/>
+</svg>
+</div><div class="label">学习区域</div>
+<div class="identifier">scan</div><div class="meta"><span>#7C3AED</span>
+<button type="button" class="download" data-id="scan">下载 SVG</button></div></article>
+<article class="card" data-group="learning" data-search="拾取目标 target" style="--accent:#2563EB">
+<div class="stage"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" color="#2563EB" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="拾取目标">
+  <title>拾取目标</title>
+  <circle cx="12" cy="12" r="6.5"/>
+  <path d="M12 3v4M12 17v4M3 12h4M17 12h4"/>
+  <circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none"/>
+</svg>
+</div><div class="label">拾取目标</div>
+<div class="identifier">target</div><div class="meta"><span>#2563EB</span>
+<button type="button" class="download" data-id="target">下载 SVG</button></div></article>
+<article class="card" data-group="learning" data-search="验证定位 target-check" style="--accent:#2563EB">
+<div class="stage"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" color="#2563EB" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="验证定位">
+  <title>验证定位</title>
+  <path d="M10.5 17a6.5 6.5 0 1 1 6.5-6.5M10.5 3v3.5M3 10.5h3.5M10.5 14.5V18M14.5 10.5H18m-5 8 2.5 2.5 5.5-6"/>
+</svg>
+</div><div class="label">验证定位</div>
+<div class="identifier">target-check</div><div class="meta"><span>#2563EB</span>
+<button type="button" class="download" data-id="target-check">下载 SVG</button></div></article>
+<article class="card" data-group="learning" data-search="细分区域 split" style="--accent:#2563EB">
+<div class="stage"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" color="#2563EB" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="细分区域">
+  <title>细分区域</title>
+  <rect x="3" y="3.5" width="18" height="17" rx="2"/>
+  <path d="M11 3.5v17M11 12h10"/>
+</svg>
+</div><div class="label">细分区域</div>
+<div class="identifier">split</div><div class="meta"><span>#2563EB</span>
+<button type="button" class="download" data-id="split">下载 SVG</button></div></article>
+<article class="card" data-group="learning" data-search="学习展开内容 expand" style="--accent:#2563EB">
+<div class="stage"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" color="#2563EB" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="学习展开内容">
+  <title>学习展开内容</title>
+  <rect x="3" y="4" width="10" height="5" rx="1.5"/>
+  <path d="M8 9v3.5a2 2 0 0 0 2 2h3m-2-2 2 2-2 2"/>
+  <rect x="13" y="10" width="8" height="11" rx="1.5"/>
+  <path d="M16.5 14h1.5M16.5 17h1.5"/>
+</svg>
+</div><div class="label">学习展开内容</div>
+<div class="identifier">expand</div><div class="meta"><span>#2563EB</span>
+<button type="button" class="download" data-id="expand">下载 SVG</button></div></article>
+<article class="card" data-group="learning" data-search="插入前置步骤 route" style="--accent:#2563EB">
+<div class="stage"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" color="#2563EB" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="插入前置步骤">
+  <title>插入前置步骤</title>
+  <circle cx="5" cy="5" r="2"/><circle cx="5" cy="13" r="2"/>
+  <path d="M5 7v4M7 13h4a2 2 0 0 1 2 2v2a2 2 0 0 0 2 2h3m-2-2 2 2-2 2M21 15v6"/>
+</svg>
+</div><div class="label">插入前置步骤</div>
+<div class="identifier">route</div><div class="meta"><span>#2563EB</span>
+<button type="button" class="download" data-id="route">下载 SVG</button></div></article>
+<article class="card" data-group="learning" data-search="录制 record" style="--accent:#DC2626">
+<div class="stage"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" color="#DC2626" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="录制">
+  <title>录制</title>
+  <circle cx="12" cy="12" r="8.5"/>
+  <circle cx="12" cy="12" r="4.5" fill="currentColor" stroke="none"/>
+</svg>
+</div><div class="label">录制</div>
+<div class="identifier">record</div><div class="meta"><span>#DC2626</span>
+<button type="button" class="download" data-id="record">下载 SVG</button></div></article>
+<article class="card" data-group="learning" data-search="预期检查 check-list" style="--accent:#2563EB">
+<div class="stage"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" color="#2563EB" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="预期检查">
+  <title>预期检查</title>
+  <path d="m3.5 7 2 2 4-4M13 7h7.5m-17 10 2 2 4-4M13 17h7.5"/>
+</svg>
+</div><div class="label">预期检查</div>
+<div class="identifier">check-list</div><div class="meta"><span>#2563EB</span>
+<button type="button" class="download" data-id="check-list">下载 SVG</button></div></article>
+<article class="card" data-group="learning" data-search="运行结果 results" style="--accent:#2563EB">
+<div class="stage"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" color="#2563EB" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="运行结果">
+  <title>运行结果</title>
+  <path d="M8 5H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/>
+  <rect x="8" y="3" width="8" height="4" rx="1"/>
+  <path d="M8 11h8M8 14.5h8M8 18h5"/>
+</svg>
+</div><div class="label">运行结果</div>
+<div class="identifier">results</div><div class="meta"><span>#2563EB</span>
+<button type="button" class="download" data-id="results">下载 SVG</button></div></article>
+<article class="card" data-group="learning" data-search="网页 globe" style="--accent:#2563EB">
+<div class="stage"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" color="#2563EB" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="网页">
+  <title>网页</title>
+  <circle cx="12" cy="12" r="9"/>
+  <ellipse cx="12" cy="12" rx="4" ry="9"/>
+  <path d="M3 12h18"/>
+</svg>
+</div><div class="label">网页</div>
+<div class="identifier">globe</div><div class="meta"><span>#2563EB</span>
+<button type="button" class="download" data-id="globe">下载 SVG</button></div></article>
+<article class="card" data-group="status" data-search="成功 status-success" style="--accent:#15803D">
+<div class="stage"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" color="#15803D" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="成功">
+  <title>成功</title>
+  <circle cx="12" cy="12" r="9"/>
+  <path d="m7.5 12 3 3 6-6"/>
+</svg>
+</div><div class="label">成功</div>
+<div class="identifier">status-success</div><div class="meta"><span>#15803D</span>
+<button type="button" class="download" data-id="status-success">下载 SVG</button></div></article>
+<article class="card" data-group="status" data-search="提醒 status-warning" style="--accent:#B45309">
+<div class="stage"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" color="#B45309" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="提醒">
+  <title>提醒</title>
+  <path d="M10.5 4.2a1.75 1.75 0 0 1 3 0l7.2 13.3a1.75 1.75 0 0 1-1.5 2.6H4.8a1.75 1.75 0 0 1-1.5-2.6ZM12 9v4"/>
+  <circle cx="12" cy="16.5" r="1" fill="currentColor" stroke="none"/>
+</svg>
+</div><div class="label">提醒</div>
+<div class="identifier">status-warning</div><div class="meta"><span>#B45309</span>
+<button type="button" class="download" data-id="status-warning">下载 SVG</button></div></article>
+<article class="card" data-group="status" data-search="失败 status-error" style="--accent:#DC2626">
+<div class="stage"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" color="#DC2626" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="失败">
+  <title>失败</title>
+  <circle cx="12" cy="12" r="9"/>
+  <path d="m8.5 8.5 7 7m0-7-7 7"/>
+</svg>
+</div><div class="label">失败</div>
+<div class="identifier">status-error</div><div class="meta"><span>#DC2626</span>
+<button type="button" class="download" data-id="status-error">下载 SVG</button></div></article>
+<article class="card" data-group="status" data-search="待验证 status-pending" style="--accent:#475569">
+<div class="stage"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" color="#475569" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="待验证">
+  <title>待验证</title>
+  <circle cx="12" cy="12" r="9"/>
+  <path d="M8 12h8"/>
+</svg>
+</div><div class="label">待验证</div>
+<div class="identifier">status-pending</div><div class="meta"><span>#475569</span>
+<button type="button" class="download" data-id="status-pending">下载 SVG</button></div></article>
+<article class="card" data-group="status" data-search="处理中 status-busy" style="--accent:#2563EB">
+<div class="stage"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" color="#2563EB" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="处理中">
+  <title>处理中</title>
+  <path d="M21 12a9 9 0 1 1-9-9"/>
+</svg>
+</div><div class="label">处理中</div>
+<div class="identifier">status-busy</div><div class="meta"><span>#2563EB</span>
+<button type="button" class="download" data-id="status-busy">下载 SVG</button></div></article>
+<article class="card" data-group="status" data-search="已隔离 status-blocked" style="--accent:#B45309">
+<div class="stage"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" color="#B45309" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="已隔离">
+  <title>已隔离</title>
+  <circle cx="12" cy="12" r="9"/>
+  <path d="m5.65 18.35 12.7-12.7"/>
+</svg>
+</div><div class="label">已隔离</div>
+<div class="identifier">status-blocked</div><div class="meta"><span>#B45309</span>
+<button type="button" class="download" data-id="status-blocked">下载 SVG</button></div></article></div><p class="empty" id="empty" hidden>没有匹配的图标。</p>
+<p class="note">下载 SVG 保留设计原色。外观切换仅用于预览；“处理中”在本页为静态形状，接入 GUI 时可旋转。</p></main>
+<script>
+const cards=[...document.querySelectorAll('.card')], search=document.getElementById('search'), group=document.getElementById('group');
+function filter(){let count=0;const query=search.value.trim().toLowerCase();for(const card of cards){card.hidden=!(card.dataset.search.toLowerCase().includes(query)&&(group.value==='all'||card.dataset.group===group.value));if(!card.hidden)count++}document.getElementById('counter').textContent=`${count} / ${cards.length}`;document.getElementById('empty').hidden=count!==0}
+search.addEventListener('input',filter);group.addEventListener('change',filter);
+document.getElementById('size').addEventListener('change',event=>document.documentElement.style.setProperty('--size',event.target.value+'px'));
+document.getElementById('mode').addEventListener('change',event=>document.body.dataset.mode=event.target.value);
+document.querySelectorAll('.download').forEach(button=>button.addEventListener('click',()=>{const svg=button.closest('.card').querySelector('svg').cloneNode(true);const data=new XMLSerializer().serializeToString(svg);const url=URL.createObjectURL(new Blob([data],{type:'image/svg+xml;charset=utf-8'}));const link=document.createElement('a');link.href=url;link.download=button.dataset.id+'.svg';document.body.appendChild(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),1000)}));
+</script></html>

@@ -47,7 +47,7 @@ def test_full_extra_covers_all_functional_extras():
 
     data = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     extras = data["project"]["optional-dependencies"]
-    assert set(extras["full"]) == set(extras["mcp"] + extras["image"] + extras["vision"])
+    assert set(extras["full"]) == set(extras["mcp"] + extras["image"] + extras["vision"] + extras["gui"])
     assert data["project"]["scripts"]["easy_uiauto_setup"] == "easy_uiauto.deployment:main"
 
 

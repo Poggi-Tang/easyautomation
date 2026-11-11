@@ -348,6 +348,7 @@ def set_top_window(window_title):
         if user32.IsIconic(hwnd):
             user32.ShowWindow(hwnd, 9)  # SW_RESTORE
         user32.SetForegroundWindow(hwnd)
+        time.sleep(0.005)
         activated = user32.GetForegroundWindow() == hwnd
         if not activated:
             push_message(f"窗口激活失败：{window_title}")
@@ -357,7 +358,7 @@ def set_top_window(window_title):
         return False
 
 
-def get_control_info(x, y):
+def get_control_info(x, y, *, match_mode="identity", raise_errors=False):
     """
     获取坐标点控件Xpath、控件
     :param x: 横坐标
@@ -380,14 +381,16 @@ def get_control_info(x, y):
                 child = child.GetNextSiblingControl()
             else:
                 break
-        xpath = get_control_xpath(control, x, y)
-        CoUninitialize()
+        xpath = get_control_xpath(control, x, y, match_mode=match_mode)
         return xpath, control
 
     except Exception as e:
+        if raise_errors:
+            raise
         push_message(f"获取控件信息异常: {e}")
-        CoUninitialize()
         return [], None
+    finally:
+        CoUninitialize()
 
 
 def auto_scroll(pixels, duration=0, direction='down'):
@@ -630,118 +633,12 @@ def _brothers(ctrl):
             return  ctrl
 
 # @timeit
-def find_control_by_xpath(xpath,debug=False):
-    """通过控件的Xpath路径获取控件"""
-    key_with, key_without = generate_cache_keys(xpath)
-    try:
-        # current_ctrl = CONTROL_CACHE.get(key1,CONTROL_CACHE.get(key2,None))
-        current_ctrl = CONTROL_CACHE.get(key_with, None)
-        if current_ctrl:
-            # 快速检测
-            isExists = current_ctrl.ControlType
-            # 计算控件可见区域
-            rect = get_check_point_by_control(current_ctrl)
-            if rect.check_pos != (0, 0):
-                # 检测成功
-                if debug:
-                    push_message("使用缓存", current_ctrl)
-                return current_ctrl
-        raise Exception("使用缓存失败，重新建立缓存")
-    except Exception as e:
-        # push_message(e)
-        try:
-            current_ctrl = uiautomation.GetRootControl()
-            last_ctrl = current_ctrl
-            # 创建xpath的副本，避免修改原始数据
-            xpath_copy = [item.copy() for item in xpath]
-            for i, item in enumerate(xpath_copy):
-                item_name = item.get('Name', '')
-                item_class = item.get('ClassName', '')
-                item_type = item.get('ControlType', '')
-                if i != len(xpath_copy) - 1 and item_type in {"CustomControl", "GroupControl"} or item_class in {'#32769'}:
-                    continue
-                if "Area" in item_name or "Area" in item_class or "Splitter" in item_name or "Splitter" in item_class:
-                    continue
-                item_foundIndex = item.get('foundIndex', -1)
-                if item_foundIndex in [0, 1]:
-                    del xpath_copy[i]['foundIndex']
-                item_automation = item.get('AutomationId', -1)
-                if item_automation == '':
-                    del xpath_copy[i]['AutomationId']
-                # ===============节点类型直接匹配===============
-                if item_type in ITEM_TYPE_NAMES or item_foundIndex not in [-1, 0, 1]:
-                    # brothers = current_ctrl.GetChildren()
-                    brothers = _brothers(current_ctrl)
-                    found_index = 1
-                    matched = {}
-                    for brother in brothers:
-                        if brother.ControlTypeName == item['ControlType']:
-                            if brother.Name == item.get('Name', '') and \
-                                    brother.ClassName == item.get('ClassName', '') \
-                                    and brother.AutomationId == item.get('AutomationId', ''):
-                                matched[found_index] = brother
-                            found_index += 1
-                    matched_keys = list(matched.keys())
-                    matched_keys_count = len(matched_keys)
-                    if matched_keys_count == 1:
-                        current_ctrl = matched[matched_keys[0]]
-                        CONTROL_CACHE[key_with] = current_ctrl
-                        CONTROL_CACHE[key_without] = current_ctrl
-                        if debug:
-                            push_message(f'第【{i}】层{current_ctrl}')
-                        return current_ctrl
-                    elif matched_keys_count > 1:
-                        index = item.get('foundIndex', 0)
-                        if index <= 1:
-                            current_ctrl = matched[matched_keys[0]]
-                        elif index in matched_keys:
-                            current_ctrl = matched[index]
-                        else:
-                            current_ctrl = matched[matched_keys[-1]]
-                        if current_ctrl is None:
-                            # 均未找到匹配的index就返回第一个
-                            current_ctrl = matched[matched_keys[0]]
-                        CONTROL_CACHE[key_with] = current_ctrl
-                        CONTROL_CACHE[key_without] = current_ctrl
-                        if debug:
-                            push_message('添加缓存2', current_ctrl)
-                        current_ctrl = CONTROL_CACHE.get(key_with, CONTROL_CACHE.get(key_without, None))
-                        if debug:
-                            push_message("重新使用缓存", current_ctrl)
-                            push_message(f'第【{i}】层{current_ctrl}')
-                        return current_ctrl
-                    else:
-                        if debug:
-                            push_message(f'定位失败，使用上一级控件\n    {last_ctrl}\n')
-                        return last_ctrl
-                # ===============匹配程序（root、Win32/Qt）===============
-                abs_model = True  # qt
-                TopLeve = last_ctrl.GetTopLevelControl()
-                if TopLeve:
-                    if TopLeve.FrameworkId == 'Win32':
-                        abs_model = False
-                else:  # root
-                    abs_model = False
-
-                if abs_model:
-                    xpath_copy[i]['ControlType'] = CONTROL_TYPE_IDS[xpath_copy[i]['ControlType']]
-                    current_ctrl = current_ctrl.Control(**xpath_copy[i])
-                else:
-                    xpath_copy[i]['ControlType'] = CONTROL_TYPE_IDS[xpath_copy[i]['ControlType']]
-                    if 'foundIndex' in xpath_copy[i]:
-                        del xpath_copy[i]['foundIndex']
-                    current_ctrl = current_ctrl.Control(**xpath_copy[i])
-                if debug:
-                    push_message(f'第【{i}】层{current_ctrl}')
-                last_ctrl = current_ctrl
-            CONTROL_CACHE[key_with] = current_ctrl
-            CONTROL_CACHE[key_without] = current_ctrl
-            return current_ctrl
-        except Exception as e:
-            push_message(e)
+def find_control_by_xpath(xpath, debug=False, *, match_mode=None):
+    """Resolve XPath; an explicit mode overrides the recorded per-step modes."""
+    return find_control({"Xpath": xpath}, debug=debug, match_mode=match_mode)
 
 
-def get_control_xpath(control, x=None, y=None):
+def get_control_xpath(control, x=None, y=None, *, match_mode="identity"):
     """
     获取控件Xpath
     :param x:横坐标
@@ -750,69 +647,50 @@ def get_control_xpath(control, x=None, y=None):
     :return: Xpath
     """
 
-    xpath = []
-    over_tag = False
-    search_depth = 0
-    search_depth_list = []
-    # desktop = True
+    from .mcp.protocol import normalize_match_mode
 
+    mode = normalize_match_mode(match_mode)
+    lineage = []
     while control:
-        foundIndex = 0
-        search_depth += 1
-        if control.ControlTypeName not in {'DesktopControl'} and \
-                control.ClassName not in {'QWidget',
-                                          'GroupControl',
-                                          'CustomControl',
-                                          'WindowControl', '#32769'}:
-            if control.ControlTypeName in ITEM_TYPE_NAMES:
-                for child in control.GetParentControl().GetChildren():
-                    if child.ControlType == control.ControlType:
-                        foundIndex += 1
-                    if child.Name == control.Name:
-                        if x and y:
-                            boundingRect = child.BoundingRectangle
-                            if boundingRect.left <= x <= boundingRect.right and boundingRect.top <= y <= boundingRect.bottom:
-                                control = child
-                                break
-                        else:
-                            control = child
-            current_control_info = {
-                "ControlType": control.ControlTypeName,
-            }
-
-            if control.Name:
-                current_control_info['Name'] = control.Name
-            if control.ClassName:
-                current_control_info['ClassName'] = control.ClassName
-            if control.AutomationId:
-                current_control_info['AutomationId'] = control.AutomationId
-            if foundIndex != 0:
-                current_control_info['foundIndex'] = foundIndex
-            # else:
-            #     current_control_info['foundIndex'] = 1
-
-            xpath.append(current_control_info)
-            search_depth_list.append(search_depth)
-
-        control = control.GetParentControl()
-        if over_tag:
+        if control.ControlTypeName == 'DesktopControl' or control.ClassName == '#32769':
             break
         parent = control.GetParentControl()
-        if control and parent:
-            if control.ControlTypeName == 'WindowControl' and \
-                    parent.ControlTypeName not in [
-                'TableControl', 'ListControl', 'TreeControl', 'TabControl', 'WindowControl', 'GroupControl', 'CustomControl']:
-                # print(control.GetParentControl())
-                over_tag = True
-        else:
-            over_tag = True
+        lineage.append((control, parent))
+        if control.ControlTypeName == 'WindowControl' and (
+                parent is None or parent.ControlTypeName not in {
+                    'TableControl', 'ListControl', 'TreeControl', 'TabControl',
+                    'WindowControl', 'GroupControl', 'CustomControl'}):
+            break
+        control = parent
 
-    # if xpath and xpath[0].get('ClassName', '') == '#32769' and desktop:
-    #     xpath = xpath[1:]
-    xpath = xpath[::-1]
-    for index in range(len(xpath)):
-        xpath[index]['searchDepth'] = search_depth_list[index]
-
+    xpath = []
+    for depth, (node, parent) in enumerate(reversed(lineage), 1):
+        step = {"ControlType": node.ControlTypeName, "searchDepth": depth,
+                "match_mode": mode}
+        for key in ("Name", "ClassName", "AutomationId"):
+            value = getattr(node, key, "")
+            if value:
+                step[key] = value
+        # Retain real ancestors so a type ordinal is always relative to its parent.
+        # Name equality cannot establish which same-named sibling was recorded.
+        if depth > 1 and parent is not None:
+            ordinal = 0
+            for sibling in parent.GetChildren():
+                if sibling.ControlType != node.ControlType:
+                    continue
+                ordinal += 1
+                same = sibling is node
+                if not same:
+                    try:
+                        same = uiautomation.ControlsAreSame(sibling, node)
+                    except (AttributeError, TypeError):
+                        same = False
+                if same:
+                    step["foundIndex"] = ordinal
+                    break
+            else:
+                raise ValueError("Recorded control is no longer a child of its parent")
+        xpath.append(step)
     return xpath
 
 
@@ -916,39 +794,71 @@ def _find_window_scope(window_name, xpath=None):
         raise
 
 
-def _native_window_scope(window_name, first_step):
-    """Bind a unique visible native window without querying unrelated UIA providers."""
+def _selector_index(value):
+    """Validate a recorded ordinal once, consistently for windows and controls."""
+    from .mcp.results import ActionError
+
+    try:
+        if isinstance(value, bool) or (value not in (None, "") and not isinstance(value, (str, int))):
+            raise ValueError
+        index = int(value) if value not in (None, "") else 0
+        if index < 0:
+            raise ValueError
+        return index
+    except (TypeError, ValueError) as error:
+        raise ActionError("invalid_argument", "foundIndex must be zero or a positive 1-based integer") from error
+
+
+def _native_window_scope(window_name, first_step, *, native_title=False):
+    """Enumerate HWNDs natively, then match the recorded UIA window identity.
+
+    Native titles/classes only narrow the initial candidates. A provider's Name
+    need not equal GetWindowTextW. Explicit title activation uses native_title.
+    """
     from .mcp import native_windows
     from .mcp.results import ActionError
 
     try:
+        index = _selector_index(first_step.get("foundIndex"))
         windows = native_windows.enumerate_windows(visible_only=True)
-        candidates = [window for window in windows
-                      if not window_name or window["title"] == window_name]
-        raw_index = first_step.get("foundIndex")
-        try:
-            index = int(raw_index) if raw_index not in (None, "") else 0
-        except (TypeError, ValueError) as error:
-            raise ActionError("invalid_argument", "foundIndex must be an integer") from error
-        if index < 0:
-            raise ActionError("invalid_argument", "foundIndex must not be negative")
-        expected_id = first_step.get("AutomationId")
-        expected_class = first_step.get("ClassName")
         bound = {}
-        if expected_id or expected_class:
-            filtered = []
-            for window in candidates:
-                control = uiautomation.ControlFromHandle(window["handle"])
-                if control is None:
-                    raise RuntimeError("Could not bind UIA to the selected window")
-                if ((not expected_id or control.AutomationId == expected_id)
-                        and (not expected_class or control.ClassName == expected_class)):
-                    filtered.append(window)
-                    bound[window["handle"]] = control
-            candidates = filtered
+        if native_title:
+            candidates = [w for w in windows if w["title"] == window_name]
+        else:
+            expected = {key: first_step[key] for key in ("Name", "ClassName", "AutomationId")
+                        if first_step.get(key)}
+            if window_name and not expected.get("Name"): expected["Name"] = window_name
+            expected_type = first_step.get("ControlType")
+            expected_class = expected.get("ClassName")
+            titles = {n for n in (window_name, expected.get("Name")) if n}
+            preferred = [w for w in windows if w["title"] in titles
+                         or expected_class and w.get("class_name") == expected_class]
+
+            def match(entries):
+                matches = []
+                for entry in entries:
+                    control = uiautomation.ControlFromHandle(entry["handle"])
+                    if control is None:
+                        raise RuntimeError("Could not bind UIA to a candidate window")
+                    if (all(getattr(control, key) == value for key, value in expected.items())
+                            and (not expected_type or control.ControlTypeName == expected_type)):
+                        matches.append(entry)
+                        bound[entry["handle"]] = control
+                return matches
+
+            candidates = match(preferred or windows)
+            if not candidates and preferred:
+                tried = {w["handle"] for w in preferred}
+                candidates = match([w for w in windows if w["handle"] not in tried])
         if not candidates or index > len(candidates):
+            identity_mismatch = (not native_title and not candidates and window_name
+                                 and any(w["title"] == window_name for w in windows))
             raise ActionError(
-                "window_invalid", "Window not found or no longer visible", retryable=True,
+                "window_invalid",
+                "Native title matches but the recorded UIA window identity does not match" if identity_mismatch
+                else "Window not found or no longer visible",
+                retryable=not bool(index) and not bool(identity_mismatch),
+                reason="index_out_of_range" if index else "window_identity_mismatch" if identity_mismatch else "",
             )
         if not index and len(candidates) != 1:
             raise ActionError("ambiguous_match", "Multiple visible windows match the location")
@@ -1000,14 +910,21 @@ def strict_control_resolution(*, activate=False):
 
 
 def _observe_match(parent, selector, *, search_depth=0xFFFFFFFF, absent_code="control_not_found"):
-    """Resolve one selector without UIA's implicit polling or first-match fallback."""
+    """Apply one explicit selection rule without mixing identity and type ordinals."""
     from .mcp.results import ActionError
+    from .mcp.protocol import normalize_match_mode
 
-    conditions = {
-        key: selector[key]
-        for key in ("Name", "ClassName", "AutomationId")
-        if selector.get(key) not in (None, "")
-    }
+    mode = normalize_match_mode(selector.get("match_mode", "identity"))
+    index = _selector_index(selector.get("foundIndex"))
+    if mode == "position":
+        if not selector.get("ControlType") or not index:
+            raise ActionError("invalid_argument", "Position mode requires ControlType and a positive foundIndex")
+        conditions = {}
+        search_depth = 1
+    else:
+        keys = ("Name", "ClassName") if selector.get("Name") else ("AutomationId", "ClassName")
+        conditions = {key: selector[key] for key in keys if selector.get(key) not in (None, "")}
+        index = 1
     control_type = selector.get("ControlType")
     if control_type:
         if control_type not in CONTROL_TYPE_IDS:
@@ -1015,116 +932,139 @@ def _observe_match(parent, selector, *, search_depth=0xFFFFFFFF, absent_code="co
         conditions["ControlType"] = CONTROL_TYPE_IDS[control_type]
     if not conditions:
         raise ActionError("invalid_argument", "A control selector must include a name, class, type, or AutomationId")
-    raw_index = selector.get("foundIndex")
-    try:
-        index = int(raw_index) if raw_index not in (None, "") else 0
-    except (TypeError, ValueError) as error:
-        raise ActionError("invalid_argument", "foundIndex must be an integer") from error
-    if index < 0:
-        raise ActionError("invalid_argument", "foundIndex must be zero or a positive 1-based index")
     conditions["searchDepth"] = search_depth
 
     def lookup(found_index):
         try:
             candidate = parent.Control(foundIndex=found_index, **conditions)
-            if candidate.Refind(maxSearchSeconds=0, raiseException=False):
-                return candidate
-            return None
+            return candidate if candidate.Refind(maxSearchSeconds=0, raiseException=False) else None
         except ActionError:
             raise
         except Exception as error:
-            # A COM/backend failure cannot establish that a control disappeared.
             raise ActionError("action_failed", f"UIA lookup failed: {error}") from error
 
-    control = lookup(index or 1)
+    control = lookup(index)
     if control is None:
         message = "Window not found or no longer available" if absent_code == "window_invalid" else "Control not found"
-        raise ActionError(absent_code, message, retryable=True)
-    if not index and lookup(2) is not None:
-        raise ActionError(
-            "ambiguous_match",
-            "Multiple controls match; add a unique selector, XPath, or explicit foundIndex",
-        )
+        raise ActionError(absent_code, message, retryable=mode == "identity",
+                          reason="index_out_of_range" if mode == "position" else "")
     return control
 
 
-def observe_control(location):
-    """Read one current control without activating windows, scrolling, or caching.
+def observe_control(location, *, window=None, prefix_cache=None, search_depth=0xFFFFFFFF, match_mode=None):
+    """Read a LOCATION without activation, scrolling, or persistent caches.
 
-    A zero/omitted foundIndex requires uniqueness. Positive indices are explicit
-    1-based choices. Only confirmed absence raises control_not_found; backend
-    errors remain action_failed so disappearance waits cannot report false success.
+    A supplied window and prefix cache belong to one non-mutating inspection only.
+    Identity defaults to the first matching name; position uses a 1-based type ordinal.
     """
-    from .mcp.protocol import normalize_location
+    import json
+    from .mcp.protocol import normalize_location, normalize_match_mode, with_match_mode
     from .mcp.results import ActionError
 
+    if isinstance(search_depth, bool) or not isinstance(search_depth, int) or search_depth < 1:
+        raise ActionError("invalid_argument", "search_depth must be a positive integer")
     try:
-        normalized = normalize_location(location)
+        normalized = (with_match_mode(location, match_mode) if match_mode is not None
+                      else normalize_location(location))
     except (TypeError, ValueError, AttributeError) as error:
         raise ActionError("invalid_argument", str(error)) from error
-    xpath = normalized.get("Xpath", [])
+    xpath = normalized["Xpath"]
+    default_mode = normalized["PARAMETERS"].get("match_mode", "identity")
+    leaf_mode = xpath[-1].get("match_mode", default_mode) if xpath else default_mode
+    if leaf_mode == "position" and xpath and normalized.get("foundIndex") not in (None, "", 0, "0"):
+        leaf_index = xpath[-1].get("foundIndex")
+        if leaf_index not in (None, "", 0, "0") and str(leaf_index) != str(normalized["foundIndex"]):
+            raise ActionError("invalid_argument", "LOCATION and XPath specify different leaf indices")
+        xpath[-1] = {**xpath[-1], "foundIndex": normalized["foundIndex"]}
     first_step = xpath[0] if xpath else {}
-    window_name = normalized.get("WindowName", "")
-    window_step = first_step.get("ControlType") == "WindowControl"
-    if window_name or window_step:
-        window = _native_window_scope(window_name, first_step if window_step else {})
-    else:
+    window_name = normalized["WindowName"]
+    window_step = first_step.get("ControlType") in {"WindowControl", "DesktopControl"}
+    # Validate all selectors before any backend call or shortcut can bypass them.
+    for selector in [normalized, *xpath]:
+        _selector_index(selector.get("foundIndex"))
+        normalize_match_mode(selector.get("match_mode", default_mode))
         try:
-            window = uiautomation.GetRootControl()
-            if window is None:
-                raise RuntimeError("UIA returned no desktop root")
-        except Exception as error:
-            raise ActionError("action_failed", f"UIA desktop lookup failed: {error}") from error
+            raw_depth = selector.get("searchDepth")
+            if raw_depth is not None and (isinstance(raw_depth, bool) or not isinstance(raw_depth, (str, int)) or int(raw_depth) < 0):
+                raise ValueError
+        except (TypeError, ValueError) as error:
+            raise ActionError("invalid_argument", "foundIndex and searchDepth must be nonnegative integers") from error
+        desktop_root = (selector.get("ControlType") == "DesktopControl"
+                        and (selector is first_step or len(xpath) == 1))
+        if selector.get("ControlType") and selector["ControlType"] not in CONTROL_TYPE_IDS and not desktop_root:
+            raise ActionError("invalid_argument", f"Unknown ControlType: {selector['ControlType']}")
+    if window is None:
+        if first_step.get("ClassName") in {"Progman", "WorkerW", "Shell_TrayWnd", "Shell_SecondaryTrayWnd"}:
+            window = _native_window_scope("", first_step)
+        elif first_step.get("ControlType") != "DesktopControl" and (window_name or window_step):
+            window = _native_window_scope(window_name, first_step if window_step else {})
+        else:
+            try:
+                window = uiautomation.GetRootControl()
+                if window is None:
+                    raise RuntimeError("UIA returned no desktop root")
+            except Exception as error:
+                raise ActionError("action_failed", f"UIA desktop lookup failed: {error}") from error
 
     failures = []
+    cache = prefix_cache if prefix_cache is not None else {}
 
-    def attempt(parent, selector, search_depth=0xFFFFFFFF):
+    def attempt(parent, selector, search_depth=search_depth):
         try:
             return _observe_match(parent, selector, search_depth=search_depth)
         except ActionError as error:
-            if error.code not in ("control_not_found", "ambiguous_match"):
+            if error.reason == "index_out_of_range" or error.code not in {"control_not_found", "ambiguous_match"}:
                 raise
             failures.append(error)
             return None
 
-    if normalized.get("AutomationId"):
-        stable_selector = {
-            key: normalized.get(key)
-            for key in ("AutomationId", "ControlType", "ClassName")
-        }
-        control = attempt(window, stable_selector)
-        if control is not None:
-            return control
-
     if xpath:
-        steps = xpath[1:] if window_step or first_step.get("ControlType") == "DesktopControl" else xpath
+        # A bound shell root can itself be a PaneControl rather than WindowControl.
+        root_matches = all(not first_step.get(key) or first_step[key] == getattr(window, attr, None)
+                           for key, attr in (("Name", "Name"), ("ClassName", "ClassName"),
+                                             ("AutomationId", "AutomationId")))
+        type_name = getattr(window, "ControlTypeName", None)
+        if type_name is not None:
+            root_matches = root_matches and first_step.get("ControlType") in (None, "", type_name)
+        else:
+            root_matches = root_matches and CONTROL_TYPE_IDS.get(first_step.get("ControlType")) == getattr(window, "ControlType", None)
+        skip_root = window_step or root_matches
+        steps = xpath[1:] if skip_root else xpath
         current = window
-        try:
-            previous_depth = int(first_step.get("searchDepth", 1) or 1) if window_step else 0
-        except (TypeError, ValueError) as error:
-            raise ActionError("invalid_argument", "searchDepth must be an integer") from error
+        previous_depth = int(first_step.get("searchDepth", 1) or 1) if skip_root else 0
+        prefix = []
         for step in steps:
-            try:
-                depth = int(step.get("searchDepth", previous_depth + 1) or 1)
-            except (TypeError, ValueError) as error:
-                raise ActionError("invalid_argument", "searchDepth must be an integer") from error
-            # Recorded searchDepth is absolute; UIA searches relative to parent.
-            relative_depth = max(1, depth - previous_depth)
+            depth = int(step.get("searchDepth", previous_depth + 1) or 1)
             selector = dict(step)
-            if selector.get("AutomationId"):
-                selector.pop("Name", None)
-            current = attempt(current, selector, relative_depth)
+            selector["match_mode"] = step.get("match_mode", default_mode)
+            prefix.append(json.dumps(selector, sort_keys=True, ensure_ascii=False))
+            cache_key = (id(window), *prefix)
+            cached = cache.get(cache_key) if step is not steps[-1] else None
+            if cached is not None:
+                try:
+                    if not cached.Refind(maxSearchSeconds=0, raiseException=False):
+                        cached = None
+                except Exception as error:
+                    raise ActionError("action_failed", f"Cached UIA lookup failed: {error}") from error
+            current = cached if cached is not None else attempt(current, selector, max(1, depth - previous_depth))
             if current is None:
                 break
+            if step is not steps[-1]:
+                cache[cache_key] = current
             previous_depth = depth
         if current is not None:
             return current
-
-    target_selector = {
-        key: normalized.get(key)
-        for key in ("Name", "ClassName", "ControlType", "foundIndex")
-    }
-    if any(target_selector.get(key) for key in ("Name", "ClassName", "ControlType")):
+        # A positional path is parent-relative; a global leaf search could change it.
+        if any(step.get("match_mode", default_mode) == "position" for step in steps):
+            raise ActionError("control_not_found", "Positional XPath parent was not found",
+                              reason="position_context_missing")
+    # A failed ambiguous hierarchy cannot be bypassed by a leaf-only fallback.
+    ambiguous = next((error for error in failures if error.code == "ambiguous_match"), None)
+    if ambiguous:
+        raise ambiguous
+    target_selector = {key: normalized.get(key) for key in ("Name", "AutomationId", "ClassName", "ControlType", "foundIndex")}
+    target_selector["match_mode"] = default_mode
+    if any(target_selector.get(key) for key in ("Name", "AutomationId", "ClassName", "ControlType")):
         control = attempt(window, target_selector)
         if control is not None:
             return control
@@ -1132,7 +1072,6 @@ def observe_control(location):
         if window_name:
             return window
         raise ActionError("invalid_argument", "A location must identify a window or a control")
-
     ambiguous = next((error for error in failures if error.code == "ambiguous_match"), None)
     if ambiguous:
         raise ambiguous
@@ -1140,129 +1079,21 @@ def observe_control(location):
 
 
 @timeit
-def find_control(LOCATION, debug=False, strict=False):
-    """
-    根据配置列表获取控件
-    此版本支持Name、ClassName、Type、Xpath、foundIndex、AutomationId
-    :param
-         debug: 是否打印调试日志
-         LOCATION: 定位器字典，包含：
-            - WindowName: 父窗口名称
-            - Name: 控件名称
-            - ClassName: 控件类名
-            - Type: 控件类型
-            - Xpath: 层级路径
-            - foundIndex: 索引位置
-    :return: 控件对象或None
-    """
-    if strict or _STRICT_CONTROL_RESOLUTION.get():
-        control = observe_control(LOCATION)
-        if _ACTIVATE_RESOLVED_WINDOW.get():
-            from .mcp.protocol import normalize_location
-            from .mcp.results import ActionError
+def find_control(LOCATION, debug=False, strict=True, *, match_mode=None):
+    """Use the shared mode rules; strict remains a compatibility-only flag."""
+    control = (observe_control(LOCATION, match_mode=match_mode) if match_mode is not None
+               else observe_control(LOCATION))
+    if _ACTIVATE_RESOLVED_WINDOW.get():
+        from .ctrl import Controller
+        from .mcp.results import ActionError
 
-            window_name = normalize_location(LOCATION).get("WindowName", "")
-            if window_name and not set_top_window(window_name):
-                raise ActionError("window_invalid", "Resolved window could not be activated")
-        return control
-
-    global CURRENT_APP_NAME
-
-    WindowName, Name, ClassName, ControlTypeName, AutomationId, searchDepth, foundIndex = \
-        '', '', '', '', '', 0xFFFFFFFF, 0
-    # 参数提取与初始化
-    WindowName = LOCATION.get('WindowName', '')
-    if LOCATION.get('Name'): Name = LOCATION['Name']
-    if LOCATION.get('ClassName'): ClassName = LOCATION['ClassName']
-    if LOCATION.get('ControlType'): ControlTypeName = LOCATION['ControlType']
-    if LOCATION.get('Xpath'): xpath = LOCATION['Xpath']
-    if LOCATION.get('AutomationId'): AutomationId = LOCATION['AutomationId']
-    searchDepth = LOCATION.get('searchDepth', 0xFFFFFFFF)
-    foundIndex = LOCATION.get('foundIndex', 0)
-    push_message(f"\033[1;32m{'-' * 20}开始进行控件定位{'-' * 20}\033[0m")
-    push_message(f"\033[1;32m控件名称：{Name}\033[0m")
-    push_message(f"\033[1;32m控件类名：{ClassName}\033[0m")
-    push_message(f"\033[1;32m控件类型：{ControlTypeName}\033[0m")
-    push_message(f"\033[1;32m控件所在窗口：{WindowName}\033[0m")
-
-    # 处理Xpath格式（字符串转列表）
-    if isinstance(LOCATION.get('Xpath'), str):
-        xpath = eval(LOCATION['Xpath'])
-    else:
-        xpath = LOCATION.get('Xpath', [])
-    if xpath and 'WorkerW' == xpath[0].get('ClassName'):
-        uiautomation.SendKeys('{Win}d', 0, 0)
-        push_message("桌面已激活")
-    if WindowName and WindowName != CURRENT_APP_NAME:
-        # 激活窗口
-        if WindowName == '任务栏' or (xpath and (
-                xpath[0].get('Name') == '任务栏' or xpath[0].get('ClassName') == 'Shell_TrayWnd')):
-            push_message(f"Windos任务栏无需激活")
-            return True
-        if set_top_window(window_title=WindowName):
-            CURRENT_APP_NAME = WindowName
-
-    start_time = int(datetime.now().timestamp() * 1000)
-    window = _find_window_scope(WindowName, xpath)
-
-    # 1. AutomationId is normally the most stable and cheapest selector. Dynamic
-    # Name and foundIndex values must not prevent an otherwise exact ID match.
-    duplicate_automation_id = False
-    if AutomationId and window:
-        automation_selector = {
-            'ControlType': ControlTypeName,
-            'ClassName': ClassName,
-            'AutomationId': AutomationId,
-        }
-        control = strategy_dictionary(automation_selector, window)
-        if control:
-            duplicate_automation_id = _has_second_match(window, automation_selector)
-            if not duplicate_automation_id:
-                current_time_ms = int(datetime.now().timestamp() * 1000)
-                push_message(
-                    f"[计时] AutomationId 定位耗时: {current_time_ms - start_time}ms"
-                )
-                return control
-            push_message("AutomationId 在当前窗口内不唯一，改用 XPath 定位")
-
-    # 2. Preserve the recorded hierarchy when AutomationId is absent, duplicated,
-    # or stale. Never call the XPath strategy with an empty path: historically that
-    # returned the desktop root and produced a false successful match.
-    if xpath:
-        control = strategy_xpath(Name, ClassName, ControlTypeName, xpath, debug)
-        if control:
-            current_time_ms = int(datetime.now().timestamp() * 1000)
-            push_message(f"[计时] XPath 定位耗时: {current_time_ms - start_time}ms")
-            return control
-        xpath_window = strategy_dictionary(xpath[0]) if not duplicate_automation_id else False
-        if xpath_window:
-            control = strategy_dictionary(xpath[-1], xpath_window)
-            if control:
-                current_time_ms = int(datetime.now().timestamp() * 1000)
-                push_message(
-                    f"[计时] XPath 末级定位耗时: {current_time_ms - start_time}ms"
-                )
-                return control
-
-    # 3. Fall back to the legacy property combination. Check uniqueness when
-    # the AutomationId matched multiple controls so this fallback stays safe.
-    if window:
-        combination_selector = {
-            'ControlType': ControlTypeName,
-            'Name': Name,
-            'ClassName': ClassName,
-        }
-        control = strategy_dictionary(combination_selector, window)
-        if control and (not duplicate_automation_id or
-                        not _has_second_match(window, combination_selector)):
-            current_time_ms = int(datetime.now().timestamp() * 1000)
-            push_message(
-                f"[计时] 组合属性定位耗时: {current_time_ms - start_time}ms"
-            )
-            return control
-
-    push_message(f"\n所有定位策略均失败，未找到控件")
-    return False
+        try:
+            Controller._activate_target(control)
+        except ActionError:
+            raise
+        except Exception as error:
+            raise ActionError("window_invalid", f"Resolved window could not be activated: {error}") from error
+    return control
 
 
 def strategy_dictionary(dictionary, Prant=uiautomation.GetRootControl(), timeout=10):

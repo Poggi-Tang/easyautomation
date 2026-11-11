@@ -55,6 +55,24 @@ def test_activation_denied_is_reported_even_if_focus_call_does_not_raise(monkeyp
     focus.assert_called_once_with()
 
 
+def test_handle_activation_waits_for_update_before_attempting_focus(monkeypatch):
+    from easy_uiauto.ctrl import Controller
+
+    api = _activation_api(monkeypatch, grant_foreground=False)
+    foreground = [7]
+    monkeypatch.setattr(scanner.uiautomation, "GetForegroundWindow", lambda: foreground[0])
+    def update_foreground(seconds):
+        assert seconds == 0.005
+        foreground[0] = 42
+    wait = Mock(side_effect=update_foreground)
+    monkeypatch.setattr(scanner.time, "sleep", wait)
+    focus = Mock()
+    Controller.activate_window_handle(42, control=SimpleNamespace(SetFocus=focus))
+    api.SetForegroundWindow.assert_called_once_with(42)
+    wait.assert_called_once_with(0.005)
+    focus.assert_not_called()
+
+
 def _entry(handle, title="Editor", class_name="EditorClass", visible=True):
     return dict(handle=handle, title=title, class_name=class_name, visible=visible,
                 enabled=True, process_id=8, owner_handle=0, z_order=0, foreground=False,

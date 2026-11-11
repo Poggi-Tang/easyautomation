@@ -110,20 +110,27 @@ def _resolve_verified_control_in_context(
 ):
     """Resolve through LOCATION, templates, OCR, then optional remote vision."""
     from PIL import Image
+    from .protocol import normalize_location
 
     semantic_identity.assert_consistent(record)
-    image_names = list(record.get("image_variants", []))
-    if record.get("image"):
-        image_names.append(record["image"])
-    expected_images = [directory / value for value in dict.fromkeys(image_names)]
-    expected_images = [path for path in expected_images if path.is_file()]
+    location = normalize_location(record["location"])
+    positional = (location["PARAMETERS"].get("match_mode") == "position"
+                  or any(step.get("match_mode") == "position" for step in location["Xpath"]))
+    from ..locator_images import reference_images
+    expected_images = reference_images(directory, record)
     if not expected_images:
         raise RuntimeError("control reference image is missing")
     try:
         control = resolve_location(record["location"], window=window)
-    except Exception as error:
+    except ActionError as error:
+        if (error.code != "control_not_found"
+                or error.reason in {"index_out_of_range", "position_context_missing"}
+                or positional):
+            raise
         control = None
         location_error = str(error)
+    except Exception as error:
+        raise ActionError("action_failed", f"LOCATION lookup failed: {error}") from error
     else:
         location_error = "LOCATION did not resolve"
     if control and control is not False:
@@ -140,9 +147,19 @@ def _resolve_verified_control_in_context(
                 best_similarity = max(best_similarity, similarity)
                 if similarity >= 0.72:
                     return control, similarity, current_rect, "location"
+            # A resolved first identity match (or positional target) must not be
+            # replaced with another control merely because its picture differs.
+            if positional or control:
+                continue
             template = locate_template(reference, current_screen, window_rect)
         if best_template is None or template["score"] > best_template["score"]:
             best_template = template
+    if positional:
+        raise ActionError("control_not_found", "Positional control failed reference-image verification",
+                          reason="position_verification_failed")
+    if control:
+        raise ActionError("control_not_found", "First identity match failed reference-image verification",
+                          reason="identity_verification_failed")
     if best_template and best_template["found"]:
         return None, best_template["score"], best_template["rect"], "image"
     ocr = _locate_record_text(record, current_screen, window_rect)

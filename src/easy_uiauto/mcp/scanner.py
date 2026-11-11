@@ -31,7 +31,7 @@ from . import (
     semantic_identity,
     visualization,
 )
-from .protocol import location_from_xpath, normalize_location, stable_location
+from .protocol import location_from_xpath, normalize_location, stable_location, with_match_mode
 
 ACTIONABLE_TYPES = {
     "ButtonControl": ["click", "hover"],
@@ -49,7 +49,15 @@ ACTIONABLE_TYPES = {
 SEMANTIC_CONFIDENCE_THRESHOLD = 0.72
 SEMANTIC_BATCH_SIZE = 60
 SEMANTIC_RISKS = {"safe", "state-changing", "external", "destructive", "unknown"}
-SCAN_STRATEGIES = {"visual-first", "full-uia"}
+SCAN_STRATEGIES = {"visual-first", "local-visual", "full-uia"}
+VISUAL_RESOLUTION_ERRORS = {
+    "no_uia_candidate": "UIA point lookup returned no candidate controls",
+    "uia_lookup_failed": "UIA lookup failed before a readable candidate was collected",
+    "geometry_rejected": "UIA candidates were found but rejected by geometry filters",
+    "semantic_rejected": "Geometrically matching UIA candidates were rejected by semantic checks",
+    "score_rejected": "UIA candidates passed geometry and semantics but scored below the minimum",
+    "resolution_failed": "UIA target resolution failed without diagnostic details",
+}
 GENERIC_CONTAINER_TYPES = {
     "CustomControl",
     "GroupControl",
@@ -76,8 +84,21 @@ def _rect(control) -> dict:
 
 def _window_rect(window, bounds: dict | None = None) -> dict:
     """Use the same visible frame for capture, normalized hints and coordinate mapping."""
+    handle = int(getattr(window, "NativeWindowHandle", 0) or 0)
+    if bounds is None and handle:
+        # Some Qt providers omit a frame pixel from UIA BoundingRectangle.
+        # Capture and GUI picking must both use the current physical HWND frame.
+        try:
+            user, _callback = native_windows._api()
+            rectangle = wintypes.RECT()
+            if user.IsWindow(handle) and user.GetWindowRect(handle, ctypes.byref(rectangle)):
+                bounds = dict(left=rectangle.left, top=rectangle.top, right=rectangle.right,
+                              bottom=rectangle.bottom, width=rectangle.right-rectangle.left,
+                              height=rectangle.bottom-rectangle.top)
+        except (OSError, AttributeError, TypeError):
+            pass
     return native_windows.visible_window_bounds(
-        int(getattr(window, "NativeWindowHandle", 0) or 0),
+        handle,
         _rect(window) if bounds is None else bounds,
         class_name=str(getattr(window, "ClassName", "") or ""),
     )
@@ -126,16 +147,21 @@ def _clip_rect(rectangle: dict, window_rect: dict) -> dict:
 
 
 def _find_window(title: str):
+    from .results import ActionError
+
     title = title.strip()
     if not title:
         raise ValueError("Window title must not be empty")
     candidates = native_windows.matching_windows(title, partial=True)
+    candidates = [entry for entry in candidates if entry["visible"]]
     if not candidates:
-        raise RuntimeError(f"Window not found: {title}")
-    target = next((entry for entry in candidates if entry["visible"]), candidates[0])
+        raise ActionError("window_invalid", f"Window not found: {title}", retryable=True)
+    if len(candidates) != 1:
+        raise ActionError("ambiguous_match", f"Multiple visible windows match: {title}")
+    target = candidates[0]
     control = uiautomation.ControlFromHandle(target["handle"])
     if control is None:
-        raise RuntimeError(f"Could not bind UI Automation to window: {title}")
+        raise ActionError("action_failed", f"Could not bind UI Automation to window: {title}")
     return control
 
 
@@ -210,166 +236,62 @@ def _matches_step(control, step: dict) -> bool:
     return all(not step.get(key) or step[key] == value for key, value in expected.items())
 
 
-def _descendant_matches(parent, step: dict, max_depth: int) -> list:
-    matches = []
-    queue = [(parent, 0)]
-    while queue:
-        current, depth = queue.pop(0)
-        if depth >= max_depth:
-            continue
-        try:
-            children = current.GetChildren()
-        except Exception:
-            children = []
-        for child in children:
-            if _matches_step(child, step):
-                matches.append(child)
-            queue.append((child, depth + 1))
-    return matches
 
 
-def _automation_id_step(location: dict) -> dict | None:
-    xpath = location.get("Xpath", [])
-    # An ancestor's ID identifies a container, not the requested leaf control.
-    if xpath and xpath[-1].get("AutomationId"):
-        return xpath[-1]
-    if location.get("AutomationId"):
-        return {
-            "AutomationId": location["AutomationId"],
-            "ControlType": location.get("ControlType", ""),
-            "ClassName": location.get("ClassName", ""),
-            "foundIndex": location.get("foundIndex", ""),
-        }
-    return None
 
 
-def _resolve_unique_automation_id(window, location: dict):
-    """Use UIA's native property search when an AutomationId is unique in the window."""
-    step = _automation_id_step(location)
-    if not step:
-        return None
-    control_type = getattr(uiautomation.ControlType, step.get("ControlType", ""), None)
-    query = {
-        "AutomationId": step["AutomationId"],
-        # Stored XPath depth is only an observation and may change when an app
-        # rebuilds its UI tree. Search the complete target window for a unique ID.
-        "searchDepth": 30,
-        "searchInterval": 0.05,
-    }
-    if control_type is not None:
-        query["ControlType"] = control_type
-    if step.get("ClassName"):
-        query["ClassName"] = step["ClassName"]
-    try:
-        first = uiautomation.Control(searchFromControl=window, foundIndex=1, **query)
-        if not first.Exists(0.25, 0.05):
-            return None
-        second = uiautomation.Control(searchFromControl=window, foundIndex=2, **query)
-        if second.Exists(0.15, 0.05):
-            return None
-        return first
-    except Exception:
-        return None
 
 
-def _resolve_property_combination(window, location: dict):
-    """Resolve the final Name/Class/ControlType fallback without AutomationId."""
-    step = {
-        key: location.get(key, "")
-        for key in ("ControlType", "Name", "ClassName")
-        if location.get(key)
-    }
-    if not step:
-        return None
-    candidates = _descendant_matches(window, step, 30)
-    if not candidates:
-        return None
-    if len(candidates) == 1:
-        return candidates[0]
-    found_index = location.get("foundIndex")
-    if found_index not in (None, ""):
-        try:
-            index = int(found_index) - 1
-        except (TypeError, ValueError):
-            return None
-        if 0 <= index < len(candidates):
-            return candidates[index]
-        return None
-    return candidates[0] if len(candidates) == 1 else None
 
 
 def resolve_location(location: dict, window=None, prefix_cache: dict | None = None):
-    """Resolve a canonical LOCATION through UIA without logging or window side effects."""
-    normalized = normalize_location(location)
-    xpath = normalized.get("Xpath", [])
-    window_name = normalized.get("WindowName", "")
-    if not window_name and xpath:
-        window_name = xpath[0].get("Name", "")
+    """Adapt shell contexts to the shared strict, side-effect-free resolver."""
+    from easy_uiauto.utils import observe_control
+    from .results import ActionError
+
+    try:
+        normalized = normalize_location(location)
+    except (TypeError, ValueError, AttributeError) as error:
+        raise ActionError("invalid_argument", str(error)) from error
+    xpath = normalized["Xpath"]
     if window is None:
-        window = _find_window(window_name)
+        window_name = normalized.get("WindowName") or (xpath[0].get("Name", "") if xpath else "")
+        if not window_name:
+            return observe_control(normalized, prefix_cache=prefix_cache)
+        try:
+            # Bind through the shared root selector, including class/ID/index.
+            # Keep the title-only adapter for partial-title scanning and shell discovery.
+            from easy_uiauto.utils import _native_window_scope
+            first = xpath[0] if xpath and xpath[0].get("ControlType") == "WindowControl" else {}
+            try:
+                window = _native_window_scope(window_name, first)
+            except ActionError as error:
+                if (error.code != "window_invalid" or error.reason
+                        or any(first.get(key) for key in ("Name", "ClassName", "AutomationId", "foundIndex"))):
+                    raise
+                window = _find_window(window_name)
+        except ActionError:
+            raise
+        except Exception as error:
+            raise ActionError("action_failed", f"UIA window lookup failed: {error}") from error
     if xpath and _is_desktop_window(window) and not _matches_step(window, xpath[0]):
         matches = {}
         for shell in _desktop_shell_roots(window):
             if not _matches_step(shell, xpath[0]):
                 continue
-            candidate = resolve_location(normalized, window=shell)
-            if candidate is not None and candidate is not False:
-                matches[_control_key(candidate)] = candidate
-        return next(iter(matches.values())) if len(matches) == 1 else None
-    current = window
-    prefix_cache = prefix_cache if prefix_cache is not None else {}
-    automation_key = (
-        "automation-id",
-        normalized.get("AutomationId", ""),
-        normalized.get("ControlType", ""),
-        normalized.get("ClassName", ""),
-    )
-    if automation_key in prefix_cache:
-        return prefix_cache[automation_key]
-    fast_control = _resolve_unique_automation_id(window, normalized)
-    if fast_control is not None:
-        prefix_cache[automation_key] = fast_control
-        return fast_control
-    if not xpath:
-        return _resolve_property_combination(window, normalized)
-    previous_search_depth = 1
-    steps = xpath[1:] if xpath and _matches_step(window, xpath[0]) else xpath
-    prefix = []
-    for step in steps:
-        prefix.append(json.dumps(step, ensure_ascii=False, sort_keys=True))
-        cache_key = tuple(prefix)
-        cached = prefix_cache.get(cache_key)
-        if cached is not None:
-            current = cached
-            previous_search_depth = int(step.get("searchDepth", previous_search_depth + 1) or 1)
-            continue
-        search_depth = int(step.get("searchDepth", previous_search_depth + 1) or 1)
-        relative_depth = max(1, min(12, search_depth - previous_search_depth))
-        candidates = _descendant_matches(current, step, relative_depth)
-        if not candidates and step.get("AutomationId") and step.get("Name"):
-            relaxed_step = {key: value for key, value in step.items() if key != "Name"}
-            candidates = _descendant_matches(current, relaxed_step, relative_depth)
-        if not candidates and relative_depth < 4:
-            candidates = _descendant_matches(current, step, 4)
-        if (
-            not candidates
-            and relative_depth < 4
-            and step.get("AutomationId")
-            and step.get("Name")
-        ):
-            relaxed_step = {key: value for key, value in step.items() if key != "Name"}
-            candidates = _descendant_matches(current, relaxed_step, 4)
-        if not candidates:
-            return _resolve_property_combination(window, normalized)
-        found_index = step.get("foundIndex")
-        try:
-            candidate_index = max(0, int(found_index) - 1) if found_index not in (None, "") else 0
-        except (TypeError, ValueError):
-            candidate_index = 0
-        current = candidates[min(candidate_index, len(candidates) - 1)]
-        prefix_cache[cache_key] = current
-        previous_search_depth = search_depth
-    return current
+            try:
+                candidate = observe_control(normalized, window=shell)
+            except ActionError as error:
+                if error.code != "control_not_found" or error.reason == "index_out_of_range":
+                    raise
+                continue
+            matches[_control_key(candidate)] = candidate
+        if len(matches) > 1:
+            raise ActionError("ambiguous_match", "Multiple shell controls match the location")
+        if not matches:
+            raise ActionError("control_not_found", "Shell control not found", retryable=True)
+        return next(iter(matches.values()))
+    return observe_control(normalized, window=window, prefix_cache=prefix_cache)
 
 
 def _screenshot_window(window_rect: dict):
@@ -1036,6 +958,8 @@ def _visual_component(target: dict, window_rect: dict) -> dict:
         "role": target.get("role", "control"),
         **_semantic_context(target),
     }
+    if target.get("native_evidence"):
+        component["native_evidence"] = True
     if isinstance(rectangle, dict):
         component["normalized_rect"] = knowledge.normalized_rect(
             rectangle, window_rect, relative=True
@@ -1663,20 +1587,34 @@ def _segment_desktop(screenshot, window, window_rect: dict, api_url: str, api_ke
     return segmentation
 
 
-def _candidate_fits_target(control, absolute_target: dict, window) -> bool:
+def _candidate_fits_target(
+    control, absolute_target: dict, window, diagnostics: dict | None = None,
+) -> bool:
     rectangle = _rect(control)
-    if _control_key(control) == _control_key(window):
-        return False
     target_area = max(1, absolute_target["width"] * absolute_target["height"])
     area_ratio = rectangle["width"] * rectangle["height"] / target_area
     generic = getattr(control, "ControlTypeName", "") in GENERIC_CONTAINER_TYPES
-    if area_ratio > (4 if generic else 16) or area_ratio < 0.1:
-        return False
+    max_area_ratio = 4 if generic else 16
     intersection = (max(0, min(rectangle["right"], absolute_target["right"])
                         - max(rectangle["left"], absolute_target["left"]))
                     * max(0, min(rectangle["bottom"], absolute_target["bottom"])
                           - max(rectangle["top"], absolute_target["top"])))
-    return intersection / target_area >= 0.5
+    overlap_ratio = intersection / target_area
+    reason = ""
+    if _control_key(control) == _control_key(window):
+        reason = "window_itself"
+    elif area_ratio > max_area_ratio:
+        reason = "area_too_large"
+    elif area_ratio < 0.1:
+        reason = "area_too_small"
+    elif overlap_ratio < 0.5:
+        reason = "insufficient_overlap"
+    if diagnostics is not None:
+        diagnostics.update(
+            rect=rectangle, reason=reason, area_ratio=round(area_ratio, 4),
+            max_area_ratio=max_area_ratio, overlap_ratio=round(overlap_ratio, 4),
+        )
+    return not reason
 
 
 def _candidate_score(control, target: dict, absolute_target: dict, window) -> tuple:
@@ -1722,8 +1660,14 @@ def control_from_visual_target(
     window_rect: dict,
     target: dict,
     point_lookup: Callable[[int, int], object] | None = None,
+    *,
+    diagnostics: dict | None = None,
 ):
-    """Choose the smallest stable UIA control represented by a visual target."""
+    """Choose a stable UIA target, optionally explaining lookup/filter failures.
+
+    The return value remains a control or None. Diagnostics describe this target's
+    point samples and candidates, never the target application's full UIA tree.
+    """
     point_lookup = point_lookup or uiautomation.ControlFromPoint
     relative = target["relative_rect"]
     absolute_target = {
@@ -1734,17 +1678,65 @@ def control_from_visual_target(
         "width": relative["width"],
         "height": relative["height"],
     }
-    direct = target.get("_uia_control")
-    if (direct is not None and _candidate_fits_target(direct, absolute_target, window)
-            and semantic_identity.check(target, semantic_identity.native_metadata(direct))[
-                "status"] not in {"conflict", "unresolved"}):
-        return direct
+    details = diagnostics if diagnostics is not None else {}
+    details.clear()
+    details.update(
+        reason="", target_rect=absolute_target, sample_points=[], candidate_count=0,
+        geometry_matched=0, semantics_matched=0, rejected_candidates=[],
+        rejection_count=0, lookup_errors=[], lookup_error_count=0,
+    )
+    assessments = {}
+
+    def qualifies(key, control):
+        if key in assessments:
+            return assessments[key]
+        geometry = {}
+        fits = _candidate_fits_target(control, absolute_target, window, geometry)
+        rejection = {"name": key[3], "control_type": key[1], "automation_id": key[2],
+                     **geometry}
+        if fits:
+            details["geometry_matched"] += 1
+            binding = semantic_identity.check(target, semantic_identity.native_metadata(control))
+            fits = binding["status"] not in {"conflict", "unresolved"}
+            if fits:
+                details["semantics_matched"] += 1
+            else:
+                rejection.update(reason="semantic_" + binding["status"], semantic_binding=binding)
+        assessments[key] = fits
+        if not fits:
+            details["rejection_count"] += 1
+            if len(details["rejected_candidates"]) < 8:
+                details["rejected_candidates"].append(rejection)
+        return fits
+
+    def lookup_error(stage, x, y, error):
+        details["lookup_error_count"] += 1
+        if len(details["lookup_errors"]) < 8:
+            details["lookup_errors"].append(
+                {"stage": stage, "x": x, "y": y,
+                 "error": f"{type(error).__name__}: {error}"}
+            )
+
     candidates = {}
+    direct = target.get("_uia_control")
+    if direct is not None:
+        key = _control_key(direct)
+        candidates[key] = direct
+        details["candidate_count"] = 1
+        if qualifies(key, direct):
+            details["reason"] = "resolved"
+            return direct
     for x, y in _visual_sample_points(target, window_rect):
+        sample = {"x": x, "y": y, "status": "empty"}
+        details["sample_points"].append(sample)
         try:
             current = point_lookup(x, y)
-        except Exception:
+        except Exception as error:
+            sample["status"] = "error"
+            lookup_error("point_lookup", x, y, error)
             continue
+        if current:
+            sample["status"] = "hit"
         for _depth in range(16):
             if not current:
                 break
@@ -1753,23 +1745,32 @@ def control_from_visual_target(
                 if current is window or getattr(current, "ControlTypeName", "") == "DesktopControl":
                     break
                 current = current.GetParentControl()
-            except Exception:
+            except Exception as error:
+                lookup_error("candidate_read", x, y, error)
                 break
+    details["candidate_count"] = len(candidates)
     if not candidates:
+        details["reason"] = (
+            "uia_lookup_failed" if details["lookup_error_count"] else "no_uia_candidate"
+        )
         return None
     ranked = sorted(
-        (control for control in candidates.values()
-         if _candidate_fits_target(control, absolute_target, window)
-         and semantic_identity.check(target, semantic_identity.native_metadata(control))[
-             "status"] not in {"conflict", "unresolved"}),
-        key=lambda control: _candidate_score(control, target, absolute_target, window),
+        ((_candidate_score(control, target, absolute_target, window), control)
+         for key, control in candidates.items() if qualifies(key, control)),
+        key=lambda item: item[0],
         reverse=True,
     )
     if not ranked:
+        details["reason"] = (
+            "semantic_rejected" if details["geometry_matched"] else "geometry_rejected"
+        )
         return None
-    selected = ranked[0]
-    if _candidate_score(selected, target, absolute_target, window)[0] < 0:
+    score, selected = ranked[0]
+    details["best_score"] = score[0]
+    if score[0] < 0:
+        details["reason"] = "score_rejected"
         return None
+    details["reason"] = "resolved"
     return selected
 
 
@@ -1806,12 +1807,16 @@ def controls_from_visual_targets(
     failures = []
     seen: dict[tuple, int] = {}
     for target in targets[: max(1, max_controls)]:
-        control = control_from_visual_target(window, window_rect, target)
+        diagnostics = {}
+        control = control_from_visual_target(window, window_rect, target, diagnostics=diagnostics)
         if control is None:
+            reason = diagnostics.get("reason", "resolution_failed")
             failures.append(
                 {
                     "visual_target": target.get("semantic_name") or target.get("id"),
-                    "error": "no UIA control at visual target",
+                    "error": VISUAL_RESOLUTION_ERRORS[reason],
+                    "reason": reason,
+                    "diagnostics": diagnostics,
                     "observation": target,
                 }
             )
@@ -1888,6 +1893,9 @@ def scan_window(
     progress: Callable[[str], None] | None = None,
     show_overlay: bool = False,
     overlay_duration_ms: int = 3000,
+    manual_layout: dict | None = None,
+    semantic_mode: str = "api",
+    navigation_context: dict | None = None,
 ) -> dict:
     """Scan one visible application window and persist its UI command knowledge."""
     started = time.perf_counter()
@@ -1905,34 +1913,77 @@ def scan_window(
     strategy = strategy.strip().lower()
     if strategy not in SCAN_STRATEGIES:
         raise ValueError(f"strategy must be one of: {', '.join(sorted(SCAN_STRATEGIES))}")
+    if semantic_mode not in {"api", "native"}:
+        raise ValueError("semantic_mode must be api or native")
+    if navigation_context is not None and manual_layout is None:
+        raise ValueError("展开控件学习必须绑定人工布局的所选窗口")
+    if manual_layout is not None:
+        from . import manual_layout as layout_rules
+
+        layout_rules.validate_regions(manual_layout.get("regions", []))
+        if strategy == "visual-first":
+            strategy = "local-visual"
+    elif strategy == "local-visual":
+        raise ValueError("local-visual requires defined regions and a bound window")
     progress("Finding target window through Win32")
-    window = _find_window(window_name)
+    if manual_layout is not None:
+        candidates = native_windows.matching_windows(
+            window_name, handle=int(manual_layout.get("window_handle", 0)))
+        candidates = [item for item in candidates if item["visible"]]
+        if len(candidates) != 1:
+            raise ValueError("所选软件窗口已关闭或不可见，请重新选择软件")
+        selected = candidates[0]
+        if ((manual_layout.get("window_class") and selected["class_name"] != manual_layout["window_class"])
+                or (manual_layout.get("window_process_id") and selected["process_id"] != manual_layout["window_process_id"])):
+            raise ValueError("所选窗口已经失效，请重新选择软件")
+        window = uiautomation.ControlFromHandle(selected["handle"])
+        if window is None:
+            raise ValueError("无法读取所选软件的 UI Automation 窗口")
+    else:
+        window = _find_window(window_name)
     progress("Reading target window through UI Automation")
     actual_name = (getattr(window, "Name", "") or window_name).strip()
-    _activate_window(window)
+    if navigation_context and strategy == "local-visual":
+        from .control_observation import _check_foreground
+        _check_foreground(window)
+    else:
+        _activate_window(window)
     window_rect = _window_rect(window)
     if window_rect["width"] <= 1 or window_rect["height"] <= 1:
         raise RuntimeError(f"Window has no visible bounds: {actual_name}")
+    manual_segmentation = (layout_rules.segmentation(manual_layout, window_rect)
+                           if manual_layout is not None else None)
 
     process_id = int(getattr(window, "ProcessId", 0) or 0)
     process_name = _process_name(process_id)
-    app_id = knowledge.slugify(process_name or actual_name, "application")
+    app_id = knowledge.slugify(
+        (manual_layout or {}).get("app_id") or process_name or actual_name, "application")
     try:
         user32, _callback = native_windows._api()
         owned_window = bool(user32.GetWindow(
             int(getattr(window, "NativeWindowHandle", 0) or 0), 4))
     except Exception:
         owned_window = False
-    directory = knowledge.initialize_app(app_id, actual_name, root, preserve_name=owned_window)
+    directory = knowledge.initialize_app(
+        app_id, actual_name, root, preserve_name=owned_window or manual_layout is not None)
     knowledge.load_index(directory)
     progress("Capturing window screenshot")
     screenshot = _screenshot_window(window_rect)
     capture_bounds = dict(window_rect)
-    screenshot, window_rect = _trim_window_capture(screenshot, window_rect, window)
+    if manual_layout is None:
+        screenshot, window_rect = _trim_window_capture(screenshot, window_rect, window)
     page_image = directory / "images" / "pages" / "latest.png"
-    screenshot.save(page_image)
+    local_reports, local_paths, local_frames = [], {}, []
+    if manual_layout is not None:
+        progress("Using human-defined regions")
+        segmentation = manual_segmentation
+        if strategy == "local-visual":
+            from . import local_learning
 
-    if strategy == "visual-first" and _is_desktop_window(window):
+            segmentation["controls"], local_reports = local_learning.detect(
+                screenshot, window_rect, segmentation, directory, progress,
+                expanded=bool(navigation_context))
+    elif strategy == "visual-first" and _is_desktop_window(window):
         progress("Resolving native desktop items")
         segmentation = _segment_desktop(
             screenshot, window, window_rect, api_url, api_key, model, version,
@@ -1941,18 +1992,21 @@ def scan_window(
     else:
         progress("Segmenting interface with remote AI")
         segmentation = segment_interface(screenshot, api_url, api_key, model, version, progress)
-    _activate_window(window)
+    if strategy == "local-visual":
+        from .control_observation import _check_foreground
+        _check_foreground(window)
+    else:
+        _activate_window(window)
     refreshed_rect = _window_rect(window)
     if refreshed_rect != capture_bounds:
         raise RuntimeError("Window moved or resized during visual analysis; scan again when stable")
-    page = _reuse_page_identity(directory, screenshot, segmentation["page"])
+    screenshot.save(page_image)
+    page = (segmentation["page"] if manual_layout is not None
+            else _reuse_page_identity(directory, screenshot, segmentation["page"]))
     page_id = page["id"]
-    segmentation["regions"] = _reuse_region_identities(
-        directory,
-        page_id,
-        segmentation["regions"],
-        window_rect,
-    )
+    if manual_layout is None:
+        segmentation["regions"] = _reuse_region_identities(
+            directory, page_id, segmentation["regions"], window_rect)
     scan_id = knowledge.stable_id("scan", app_id, page_id, knowledge.utc_now())
     previous_page_records = [
         record
@@ -1970,12 +2024,24 @@ def scan_window(
         "scan_id": scan_id,
         "capture_geometry": "visible-window-bounds+local-edge-crop",
     }
+    if manual_layout is not None:
+        existing_page = directory / "pages" / f"{knowledge.slugify(page_id)}.md"
+        if existing_page.is_file():
+            previous_page, _body = knowledge.read_markdown(existing_page)
+            page_record = {**previous_page, **page_record}
+        page_record.update(region_source="manual", observed_window_size={
+            "width": window_rect["width"], "height": window_rect["height"]},
+            capture_geometry="visible-window-bounds", window_class=selected["class_name"])
+        if strategy == "local-visual":
+            page_record["local_annotations"] = local_reports
     knowledge.save_page(directory, page_record)
+    previous_regions = {r["id"]: r for _p, r in knowledge.iter_records(directory, "region")} if manual_layout is not None else {}
     for region in segmentation["regions"]:
         region_record = {key: value for key, value in region.items() if key != "rect"}
         knowledge.save_region(
             directory,
             {
+                **previous_regions.get(f"{page_id}.{region['id']}", {}),
                 **region_record,
                 "id": f"{page_id}.{region['id']}",
                 "page_id": page_id,
@@ -1984,14 +2050,58 @@ def scan_window(
                     region["rect"], window_rect, relative=True
                 ),
                 "geometry_role": "visual-hint-only",
+                **({"source": "manual"} if manual_layout is not None else {}),
             },
         )
 
     semantic_candidates = []
+    control_scopes = {}
     visual_failures = []
     visual_targets = segmentation.get("controls", [])
-    effective_strategy = strategy
-    if strategy == "visual-first":
+    effective_strategy = ("local-visual" if strategy == "local-visual" else
+                          "manual-regions" if manual_layout is not None else strategy)
+
+    def region_of(rectangle: dict) -> str:
+        if manual_layout is not None:
+            return layout_rules.assign_region(
+                knowledge.normalized_rect(rectangle, window_rect), manual_layout["regions"])[0]
+        return _region_for_control(rectangle, window_rect, segmentation["regions"])
+
+    if strategy == "local-visual":
+        controls, semantics, visual_failures, local_paths = local_learning.resolve(
+            window, window_rect, visual_targets, max_controls, progress)
+        if navigation_context:
+            from ..library_actions import owned_windows
+
+            allowed = {w["handle"]: w for w in owned_windows(selected)}
+            for handle in navigation_context.get("popup_handles", []):
+                if handle not in allowed:
+                    raise ValueError("展开窗口已失效或不属于所选软件")
+                popup = uiautomation.ControlFromHandle(handle)
+                if popup is None: continue
+                bounds = _window_rect(popup)
+                image = _screenshot_window(bounds)
+                targets, reports = local_learning.detect(image, bounds, segmentation, directory, progress, expanded=True)
+                found, meanings, missing, paths = local_learning.resolve(
+                    popup, bounds, targets, max(0,max_controls-len(controls)), progress)
+                dx, dy = bounds["left"]-window_rect["left"], bounds["top"]-window_rect["top"]
+                for target in targets:
+                    r = target["relative_rect"]
+                    r.update(left=r["left"]+dx, right=r["right"]+dx, top=r["top"]+dy, bottom=r["bottom"]+dy)
+                metadata = allowed[handle]
+                scope = {"kind":"owned", "class_name":metadata["class_name"], "title":metadata["title"]}
+                for index, (child, depth) in enumerate(found, 1):
+                    control_scopes[id(child)] = (popup, scope)
+                    semantics[len(controls)+1] = meanings[index]
+                    controls.append((child,depth))
+                local_paths.update(paths); visual_targets.extend(targets); visual_failures.extend(missing)
+                local_frames.append((bounds,image)); local_reports.extend(reports)
+        if manual_layout.get("window_scope",{}).get("kind") == "owned":
+            for control, _depth in controls:
+                control_scopes[id(control)] = (window,manual_layout["window_scope"])
+        segmentation["coverage"].update(detector="YOLO+RapidOCR", point_bindings=len(controls),
+                                          uia_enumerated=0, local_annotations=local_reports)
+    elif strategy == "visual-first":
         if visual_targets:
             progress(f"Resolving {len(visual_targets)} visual targets through local UIA")
             controls, semantics, visual_failures = controls_from_visual_targets(
@@ -2014,9 +2124,42 @@ def scan_window(
     else:
         progress("Traversing UI Automation controls")
         controls = _walk_controls(window, max(1, min(max_depth, 30)), max(1, max_controls))
+        if navigation_context:
+            from ..library_actions import owned_windows
+
+            expected = {"handle": selected["handle"], "process_id": selected["process_id"]}
+            allowed = {w["handle"]: w for w in owned_windows(expected)}
+            seen = {_control_key(c) for c, _d in controls}
+            for handle in navigation_context.get("popup_handles", []):
+                if handle not in allowed:
+                    raise ValueError("展开窗口已失效或不属于所选软件")
+                popup = uiautomation.ControlFromHandle(handle)
+                if popup is None:
+                    continue
+                metadata = allowed[handle]
+                for child, child_depth in _walk_controls(popup, max_depth, max(1, max_controls-len(controls))):
+                    if child is popup or _control_key(child) in seen or len(controls) >= max_controls:
+                        continue
+                    seen.add(_control_key(child))
+                    controls.append((child, child_depth))
+                    control_scopes[id(child)] = (popup, {
+                        "kind": "owned", "class_name": metadata["class_name"], "title": metadata["title"]})
+        if manual_layout is not None:
+            segmentation["coverage"]["uia_enumerated"] = len(controls)
+            controls = [(control, depth) for control, depth in controls if control is not window]
+            if manual_layout.get("restrict_regions"):
+                controls = [(control, depth) for control, depth in controls
+                            if region_of(_rect(control)) != "unassigned"]
+            if manual_layout.get("window_scope", {}).get("kind") == "owned":
+                for control, _depth in controls:
+                    control_scopes[id(control)] = (window, manual_layout["window_scope"])
         for index, (control, _depth) in enumerate(controls, start=1):
-            control_rect = _clip_rect(_rect(control), window_rect)
-            if not _valid_rect(control_rect, window_rect):
+            raw_rect = _rect(control)
+            scoped_popup = id(control) in control_scopes
+            control_rect = raw_rect if scoped_popup else _clip_rect(raw_rect, window_rect)
+            if (bool(getattr(control, "IsOffscreen", False))
+                    or control_rect["width"] <= 1 or control_rect["height"] <= 1
+                    or (not scoped_popup and not _valid_rect(control_rect, window_rect))):
                 continue
             control_type = (getattr(control, "ControlTypeName", "") or "Control")
             supported_actions = _control_actions(
@@ -2042,33 +2185,44 @@ def scan_window(
                         getattr(control, "IsKeyboardFocusable", False)
                     ),
                     "is_enabled": bool(getattr(control, "IsEnabled", True)),
-                    "region_id": _region_for_control(
-                        control_rect,
-                        window_rect,
-                        segmentation["regions"],
-                    ),
+                    "region_id": region_of(control_rect),
                     "supported_actions": supported_actions,
                     "relative_rect": _relative_rect(control_rect, window_rect),
                 }
             )
-        progress(
-            f"Understanding {len(semantic_candidates)} contextual controls with remote AI"
-        )
-        semantics = analyze_control_semantics(
-            screenshot,
-            semantic_candidates,
-            page,
-            segmentation["regions"],
-            api_url,
-            api_key,
-            model,
-            version,
-        )
+        if semantic_mode == "native":
+            from .manual_layout import native_semantics
+
+            progress(f"Reading {len(semantic_candidates)} native control labels")
+            semantics = {item["id"]: native_semantics(item) for item in semantic_candidates}
+        else:
+            progress(f"Understanding {len(semantic_candidates)} contextual controls with remote AI")
+            semantics = analyze_control_semantics(
+                screenshot, semantic_candidates, page, segmentation["regions"],
+                api_url, api_key, model, version)
+    from .. import reference_library
+    reference_description_error = ""
+    reference_description_report = {}
+    try:
+        reference_settings = (dict(api_url=api_url,api_key=api_key,api_model=model)
+                              if api_url and api_key and model else None)
+        additions = reference_library.descriptions(directory,semantics,progress=progress,settings=reference_settings,
+                                                  report=reference_description_report)
+        for identifier, fields in additions.items():
+            semantics[identifier].update(fields)
+        for item in reference_description_report.get("unmatched",[]):
+            semantics[item["id"]].update(description_status="unmatched",description_reason=item["reason"])
+    except (ValueError, RuntimeError) as error:
+        reference_description_error = str(error)
+        for semantic in semantics.values():
+            semantic.update(description_status="error",description_reason=reference_description_error)
+        progress("参考资料说明未能补充，继续保存定位和图片："+str(error))
     verification_screenshot = _screenshot_window(window_rect)
     counts = {"observed": 0, "verified": 0, "suspect": 0, "quarantined": 0}
     key_controls = 0
     in_bounds = 0
     saved_current = 0
+    preserved_current = 0
     verified_actions = 0
     failures = list(visual_failures)
     command_counts: dict[str, int] = {}
@@ -2081,19 +2235,42 @@ def scan_window(
     semantic_counts = {"verified": 0, "uncertain": 0, "manual": 0, "not-required": 0}
     verification_interval = max(1, len(controls) // 20)
     location_prefix_cache: dict = {}
+    from . import control_observation
+
+    observation_frames = {}
+
+    def observation_frame(rectangle):
+        frame = control_observation.union_bounds(window_rect, rectangle)
+        key = tuple(frame[k] for k in ("left", "top", "right", "bottom"))
+        if key not in observation_frames:
+            image = screenshot if frame == window_rect else _screenshot_window(frame)
+            for popup_bounds, popup_image in local_frames:
+                if (_clip_rect(rectangle,popup_bounds) == rectangle):
+                    image = image.copy()
+                    image.paste(popup_image,(popup_bounds["left"]-frame["left"],popup_bounds["top"]-frame["top"]))
+                    break
+            reference = image_storage.save_interaction_image(directory, image)
+            observation_frames[key] = (frame, image, reference)
+        return observation_frames[key]
     for index, (control, depth) in enumerate(controls, start=1):
         if index == 1 or index == len(controls) or index % verification_interval == 0:
             progress(f"Verifying controls {index}/{len(controls)}")
         try:
             control_rect = _rect(control)
-            if not _valid_rect(control_rect, window_rect):
+            scoped_popup = id(control) in control_scopes
+            if (bool(getattr(control, "IsOffscreen", False))
+                    or control_rect["width"] <= 1 or control_rect["height"] <= 1
+                    or (not scoped_popup and not _valid_rect(control_rect, window_rect))):
                 continue
             in_bounds += 1
-            control_rect = _clip_rect(control_rect, window_rect)
-            xpath = get_control_xpath(control)
+            if not scoped_popup:
+                control_rect = _clip_rect(control_rect, window_rect)
+            xpath = local_paths.get(id(control)) or get_control_xpath(control)
             location = stable_location(location_from_xpath(xpath))
             control_type = (getattr(control, "ControlTypeName", "") or "Control")
-            region_id = _region_for_control(control_rect, window_rect, segmentation["regions"])
+            region_id = (semantics.get(index,{}).get("region_id") if strategy == "local-visual" else None)
+            if not region_id or region_id == "unassigned":
+                region_id = region_of(control_rect)
             supported_actions = _control_actions(
                 control_type,
                 bool(getattr(control, "IsEnabled", True)),
@@ -2126,6 +2303,20 @@ def scan_window(
                 if previous:
                     control_id = previous["id"]
             observed_ids.add(control_id)
+            if previous and navigation_context and control_id in navigation_context["path"]:
+                # The clicked entry may now be gone while its UIA proxy lingers.
+                # Its image was saved before input; never replace it with the result.
+                preserved_current += 1
+                continue
+            if previous.get("window_scope", {}).get("kind") == "owned" and not scoped_popup:
+                # A closed native popup cannot be recaptured from the main frame.
+                preserved_current += 1
+                continue
+            if manual_layout is not None and previous.get("location"):
+                previous_location = normalize_location(previous["location"])
+                previous_mode = previous_location.get("PARAMETERS", {}).get("match_mode")
+                if previous_mode in {"identity", "position"}:
+                    location = with_match_mode(location, previous_mode)
             if previous.get("semantic_source") == "manual":
                 semantic = {
                     "semantic_name": previous.get("semantic_name", ""),
@@ -2148,6 +2339,7 @@ def scan_window(
                     "enabling_condition": previous.get("enabling_condition", ""),
                     "relationships": previous.get("relationships", []),
                     "visual_components": previous.get("visual_components", []),
+                    "description_source": "manual",
                 }
             native_identity = semantic_identity.native_metadata(control)
             binding = semantic_identity.check(semantic, native_identity)
@@ -2199,7 +2391,10 @@ def scan_window(
                 command_counts[base_command] = command_counts.get(base_command, 0) + 1
                 if command_counts[base_command] > 1:
                     command = f"{base_command}-{command_counts[base_command]}"
-            crop = _crop_control(screenshot, control_rect, window_rect)
+            # Owned dialogs/menus can extend outside the main frame. Keep their
+            # complete UIA crop instead of clipping it to the main screenshot.
+            observed_bounds, observed_image, observed_reference = observation_frame(control_rect)
+            crop = _crop_control(observed_image, control_rect, observed_bounds)
             image_path, image_variants, image_sha256 = _save_control_images(
                 directory,
                 control_id,
@@ -2212,7 +2407,8 @@ def scan_window(
             location_detail = "not required for structural control"
             similarity = _image_similarity(
                 crop,
-                _crop_control(verification_screenshot, control_rect, window_rect),
+                _screenshot_window(control_rect) if scoped_popup
+                else _crop_control(verification_screenshot, control_rect, window_rect),
             )
             template_result = {"ok": False, "score": 0.0, "detail": "not checked"}
             if supported_actions and verified_actions < max(0, verify_limit):
@@ -2220,22 +2416,20 @@ def scan_window(
                 location_ok, verified_rect, location_detail = _verify_location(
                     location,
                     control_rect,
-                    window,
+                    control_scopes.get(id(control), (window,))[0],
                     location_prefix_cache,
                 )
                 if location_ok:
-                    verification_crop = _crop_control(
-                        verification_screenshot,
-                        verified_rect,
-                        window_rect,
-                    )
+                    verification_crop = (_screenshot_window(verified_rect) if scoped_popup else _crop_control(
+                        verification_screenshot, verified_rect, window_rect))
                     similarity = _image_similarity(crop, verification_crop)
-                template_result = _template_verification(
+                template_result = ({"ok": False, "score": 0.0, "detail": "Scoped popup uses UIA only"}
+                                   if scoped_popup else _template_verification(
                     crop,
                     verification_screenshot,
                     verified_rect if location_ok else control_rect,
                     window_rect,
-                )
+                ))
                 verified_actions += 1
             elif supported_actions:
                 location_detail = "verification limit reached"
@@ -2368,6 +2562,25 @@ def scan_window(
                 "scan_id": scan_id,
                 "scan_strategy": effective_strategy,
             }
+            if manual_layout is not None:
+                record["region_source"] = "manual"
+                record["region_assignment"] = layout_rules.assign_region(
+                    record["normalized_rect"], manual_layout["regions"])[1]
+                record["visual_observation"] = control_observation.describe(
+                    observed_reference, observed_bounds, control_rect, window_rect, phase="located")
+                record["visual_observation"]["purpose"] = "learning-reference"
+                if strategy == "local-visual":
+                    record["detection"] = {"method":"local-yolo-rapidocr+get_control_info",
+                        "analysis_result":semantics[index].get("analysis_result", ""),
+                        "normalized_rect":knowledge.normalized_rect(semantics[index]["relative_rect"],window_rect,relative=True)}
+            if navigation_context and (_control_key(control) not in navigation_context.get("before_keys", set())
+                    and control_id not in navigation_context.get("before_ids", set())):
+                path = navigation_context["path"]
+                if control_id not in path:
+                    record.update(navigation_path=list(path), navigation_source="expanded-learning",
+                                  window_scope=control_scopes.get(id(control), (None, {"kind": "main"}))[1])
+            for key in ("description_source","description_status","description_reason","description_method","description_basis","reference_evidence"):
+                if key in semantic: record[key]=semantic[key]
             record = knowledge.merge_control_state(previous, record)
             blocker = runtime_blockers.get(knowledge.control_anchor(record))
             if blocker:
@@ -2405,14 +2618,11 @@ def scan_window(
                 "visual-instance", control_id, visual_identity_counts[control_id]
             )
         observed_ids.add(control_id)
-        crop = screenshot.crop(
-            (
-                rectangle["left"],
-                rectangle["top"],
-                rectangle["right"],
-                rectangle["bottom"],
-            )
-        )
+        absolute = {**rectangle, "left":window_rect["left"]+rectangle["left"],
+                    "right":window_rect["left"]+rectangle["right"],
+                    "top":window_rect["top"]+rectangle["top"], "bottom":window_rect["top"]+rectangle["bottom"]}
+        bounds, image, reference = observation_frame(absolute)
+        crop = _crop_control(image, absolute, bounds)
         previous = previous_by_id.get(control_id, {})
         image_path, image_variants, image_sha256 = _save_control_images(
             directory, control_id, crop, previous
@@ -2421,9 +2631,7 @@ def scan_window(
         semantic_status = (
             "verified" if confidence >= SEMANTIC_CONFIDENCE_THRESHOLD else "uncertain"
         )
-        knowledge.save_control(
-            directory,
-            {
+        visual_record = {
                 "id": control_id,
                 "app_id": app_id,
                 "app_name": actual_name,
@@ -2452,7 +2660,14 @@ def scan_window(
                     rectangle, window_rect, relative=True
                 ),
                 "geometry_role": "visual-hint-only",
-                "location": {},
+                "location": ({**location_from_xpath([], parameters={"region_id":region_id,
+                    "normalized_rect":knowledge.normalized_rect(rectangle,window_rect,relative=True),
+                    "locator_kind":"visual-observation"}), "WindowName":actual_name,
+                    "Img":str(image_path.relative_to(directory)).replace("\\", "/")}
+                    if strategy == "local-visual" else {}),
+                **({"visual_observation":{**control_observation.describe(reference,bounds,absolute,window_rect,phase="located"),
+                      "purpose":"learning-reference"}, "analysis_result":target.get("analysis_result", "")}
+                   if strategy == "local-visual" else {}),
                 "actions": [],
                 "supported_actions": [],
                 "is_key": True,
@@ -2464,6 +2679,8 @@ def scan_window(
                     "location": "not-available",
                     "image": "observed",
                     "detail": failure.get("error", "visual-only observation"),
+                    "reason": failure.get("reason", ""),
+                    "diagnostics": failure.get("diagnostics", {}),
                     "verified_at": knowledge.utc_now(),
                 },
                 "function_verification": {
@@ -2477,25 +2694,42 @@ def scan_window(
                 "notes": "Visual entity retained even though no distinct UIA node resolved.",
                 "scan_id": scan_id,
                 "scan_strategy": effective_strategy,
-            },
-        )
+            }
+        if strategy == "local-visual":
+            if previous.get("semantic_source") == "manual":
+                for key in ("semantic_name","intent","description","aliases","risk","semantic_source",
+                            "semantic_confidence","semantic_status"):
+                    if key in previous: visual_record[key]=previous[key]
+            visual_record = knowledge.merge_control_state(previous,visual_record)
+        knowledge.save_control(directory,visual_record)
         counts["observed"] += 1
         semantic_counts[semantic_status] += 1
         key_controls += 1
         saved_current += 1
         visual_observations += 1
 
-    if (controls or visual_observations) and saved_current == 0:
+    if (controls or visual_observations) and saved_current == 0 and preserved_current == 0:
         raise RuntimeError(
             "UIA returned controls but none remained inside the refreshed window bounds; "
             "the window likely moved or changed during scanning"
         )
 
     retained_unobserved = 0
+    archived_layout_records = 0
+    if strategy == "local-visual" and saved_current:
+        archived_layout_records = local_learning.archive_layout_records(directory,previous_page_records,observed_ids,
+            {r["id"] for r in manual_layout["regions"]},scan_id)
+        if navigation_context:
+            local_learning.expanded_regions(directory,controls,navigation_context,window_rect,
+                                            observation_frame,app_id,page_id)
     for previous in previous_page_records:
         if previous.get("id") in observed_ids:
             continue
-        if effective_strategy == "visual-first":
+        if effective_strategy in {"visual-first", "local-visual"} or previous.get("navigation_path") or navigation_context:
+            retained_unobserved += 1
+            continue
+        if manual_layout is not None and manual_layout.get("restrict_regions") and previous.get("region_id") not in {
+                r["id"] for r in manual_layout["regions"]}:
             retained_unobserved += 1
             continue
         previous["status"] = "quarantined"
@@ -2517,6 +2751,18 @@ def scan_window(
         for _path, record in knowledge.iter_records(directory, "control")
         if record.get("scan_id") == scan_id
     ]
+    if manual_layout is not None and any(r.get("region_id") == "unassigned" for r in scanned_records):
+        knowledge.save_region(directory, {
+            "id": f"{page_id}.unassigned", "page_id": page_id, "app_id": app_id,
+            "name": "待归档", "description": "未被区域覆盖或跨区归属不明确的控件",
+            "source": "manual", "classification_only": True,
+            "geometry_role": "visual-hint-only",
+        })
+    if manual_layout is not None:
+        from .dynamic_regions import synchronize
+
+        synchronize(directory, [r for _p, r in knowledge.iter_records(directory, "control")],
+                    {r["id"] for r in scanned_records})
     annotated_path, annotation_markers = visualization.save_scan_annotation(
         directory,
         page_id,
@@ -2561,8 +2807,14 @@ def scan_window(
         "overlay": overlay,
         "regions": len(segmentation["regions"]),
         "strategy": effective_strategy,
+        "reference_description_error": reference_description_error,
+        "reference_descriptions": reference_description_report,
+        "archived_layout_records": archived_layout_records,
         "visual_targets": len(visual_targets),
         "coverage": segmentation.get("coverage", {}),
+        **({"unassigned_controls": sum(r.get("region_id") == "unassigned" for r in scanned_records),
+            "region_source": "manual", "semantic_mode": semantic_mode}
+           if manual_layout is not None else {}),
         "visual_only_observations": visual_observations,
         "uia_controls_seen": len(controls),
         "controls_in_bounds": in_bounds,
@@ -2595,6 +2847,7 @@ def scan_window(
         ),
         "failures": failures[:50],
         "truncated": (len(controls) >= max_controls or len(visual_targets) > max_controls
+                      or segmentation.get("coverage", {}).get("uia_enumerated", 0) >= max_controls
                       or segmentation.get("coverage", {}).get("desktop_limit_reached", False)),
         "elapsed_seconds": elapsed,
         "stage_timings": stage_timings,

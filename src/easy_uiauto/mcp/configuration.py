@@ -87,6 +87,15 @@ def load_gui_configuration() -> dict[str, str]:
     }
 
 
+def save_knowledge_directory(directory: str) -> str:
+    """Local learning can configure a vault without requiring a remote API."""
+    path = Path(os.path.expandvars(directory.strip())).expanduser()
+    if not directory.strip() or not path.is_absolute(): raise ValueError("知识库路径须为绝对路径")
+    path = path.resolve(); path.mkdir(parents=True, exist_ok=True)
+    _write_user_environment(KNOWLEDGE_DIR, str(path))
+    return str(path)
+
+
 def api_endpoints(api_url: str) -> tuple[str, str]:
     """Accept a provider base, versioned base, models URL or chat-completions URL."""
     value = api_url.strip()
@@ -153,11 +162,9 @@ def fetch_models(api_url: str, api_key: str, timeout: float = 20) -> list[str]:
     return models
 
 
-def save_gui_configuration(knowledge_dir: str, api_url: str, api_key: str,
-                           api_model: str) -> dict[str, str]:
-    """Validate the entire form before persisting any of its four values."""
-    if os.name != "nt":
-        raise RuntimeError("配置窗口的持久化保存仅支持 Windows")
+def validate_gui_configuration(knowledge_dir: str, api_url: str, api_key: str,
+                               api_model: str) -> dict[str, str]:
+    """Normalize the form without writing settings or creating directories."""
     if not knowledge_dir.strip():
         raise ValueError("请选择或填写知识库路径")
     directory = Path(os.path.expandvars(knowledge_dir.strip())).expanduser()
@@ -169,6 +176,18 @@ def save_gui_configuration(knowledge_dir: str, api_url: str, api_key: str,
         raise ValueError("请填写有效的 API Key")
     if not api_model:
         raise ValueError("请输入或选择 API Model")
+    return {"knowledge_dir": str(directory.resolve()), "api_url": chat_url,
+            "api_key": api_key, "api_model": api_model}
+
+
+def save_gui_configuration(knowledge_dir: str, api_url: str, api_key: str,
+                           api_model: str) -> dict[str, str]:
+    """Validate the entire form before persisting any of its four values."""
+    if os.name != "nt":
+        raise RuntimeError("配置窗口的持久化保存仅支持 Windows")
+    validated = validate_gui_configuration(knowledge_dir, api_url, api_key, api_model)
+    directory = Path(validated["knowledge_dir"])
+    chat_url, api_key, api_model = (validated[k] for k in ("api_url", "api_key", "api_model"))
     directory.mkdir(parents=True, exist_ok=True)
     values = {
         KNOWLEDGE_DIR: str(directory), VISION_API_URL: chat_url,

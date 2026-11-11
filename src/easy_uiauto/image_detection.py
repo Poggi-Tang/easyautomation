@@ -17,6 +17,8 @@ from pathlib import Path
 from urllib import request
 from uuid import uuid4
 
+from .image_model_paths import ocr_model_paths, yolo_path
+
 MODEL_ID = "microsoft/OmniParser-v2.0/icon_detect_v3"
 MODEL_URL = "https://huggingface.co/microsoft/OmniParser-v2.0/resolve/main/icon_detect_v3/model.pt"
 MODEL_SHA256 = "11c6cbb77f22569fab22d86c76407a83ec81ab89dbfe28279854822d6e3fb00c"
@@ -33,14 +35,7 @@ def file_sha256(path):
 
 
 def default_weights() -> Path:
-    configured = os.environ.get("EASY_UIAUTO_MODEL_DIR")
-    if configured:
-        return Path(configured).expanduser() / "omniparser" / "icon_detect_v3" / "model.pt"
-    cache = Path(os.environ.get("LOCALAPPDATA", Path.home() / ".cache")) / "easy-uiauto"
-    preferred = cache / "models" / "omniparser" / "icon_detect_v3" / "model.pt"
-    # Reuse the model already downloaded by the local experiment.
-    previous = Path.home() / ".codex" / "models" / "omniparser" / "icon_detect_v3" / "model.pt"
-    return preferred if preferred.is_file() or not previous.is_file() else previous
+    return yolo_path()
 
 
 def ensure_weights(path: Path, *, offline=False, progress=print) -> Path:
@@ -101,11 +96,10 @@ def check_runtime(runtime_dir=""):
         raise RuntimeError(
             'Local image dependencies unavailable. Install: python -m pip install ".[image]"'
         ) from error
-    models = Path(rapidocr.__file__).parent / "models"
-    for name in ("PP-OCRv6_det_small.onnx", "PP-OCRv6_rec_small.onnx"):
-        if not (models / name).is_file():
+    for path in ocr_model_paths(Path(rapidocr.__file__).parent).values():
+        if not path.is_file():
             raise FileNotFoundError(
-                f"Bundled OCR model missing: {models / name}. Install rapidocr==3.10.0."
+                f"OCR model missing: {path}. 请在标注模型中选择文件或下载模型。"
             )
     return rapidocr
 
@@ -444,13 +438,13 @@ def run_ocr(image, *, threads=4, runtime_dir="", recover_small_text=True, progre
     import numpy as np
 
     rapidocr = _rapidocr_module(runtime_dir)
-    models = Path(rapidocr.__file__).parent / "models"
+    models = ocr_model_paths(Path(rapidocr.__file__).parent)
     started = time.perf_counter()
     engine = rapidocr.RapidOCR(params={
         "Global.max_side_len": max(4096, max(image.size)), "Global.use_cls": False,
         "Global.log_level": "warning", "Det.limit_side_len": 1280, "Det.limit_type": "min",
-        "Det.model_path": str(models / "PP-OCRv6_det_small.onnx"),
-        "Rec.model_path": str(models / "PP-OCRv6_rec_small.onnx"),
+        "Det.model_path": str(models["det"]),
+        "Rec.model_path": str(models["rec"]),
         "EngineConfig.onnxruntime.intra_op_num_threads": threads,
         "EngineConfig.onnxruntime.inter_op_num_threads": 1,
     })

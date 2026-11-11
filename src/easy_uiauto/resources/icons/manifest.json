@@ -1,0 +1,471 @@
+{
+  "version": 1,
+  "viewBox": "0 0 24 24",
+  "strokeWidth": 1.75,
+  "semanticCount": 49,
+  "assetCount": 50,
+  "palette": {
+    "blue": "#2563EB",
+    "gray": "#475569",
+    "purple": "#7C3AED",
+    "green": "#15803D",
+    "amber": "#B45309",
+    "red": "#DC2626"
+  },
+  "states": {
+    "disabled": "#9CA3AF",
+    "selected": "#FFFFFF"
+  },
+  "icons": [
+    {
+      "id": "library",
+      "label": "知识库",
+      "group": "navigation",
+      "color": "#2563EB",
+      "file": "library.svg",
+      "concept": "library",
+      "number": 1
+    },
+    {
+      "id": "window",
+      "label": "软件窗口",
+      "group": "navigation",
+      "color": "#2563EB",
+      "file": "window.svg",
+      "concept": "window",
+      "number": 2
+    },
+    {
+      "id": "book-open",
+      "label": "使用知识",
+      "group": "navigation",
+      "color": "#2563EB",
+      "file": "book-open.svg",
+      "concept": "book-open",
+      "number": 3
+    },
+    {
+      "id": "documents",
+      "label": "文档资料",
+      "group": "navigation",
+      "color": "#475569",
+      "file": "documents.svg",
+      "concept": "documents",
+      "number": 4
+    },
+    {
+      "id": "controls",
+      "label": "控件库",
+      "group": "navigation",
+      "color": "#2563EB",
+      "file": "controls.svg",
+      "concept": "controls",
+      "number": 5
+    },
+    {
+      "id": "control",
+      "label": "单个控件",
+      "group": "navigation",
+      "color": "#2563EB",
+      "file": "control.svg",
+      "concept": "control",
+      "number": 6
+    },
+    {
+      "id": "region",
+      "label": "区域",
+      "group": "navigation",
+      "color": "#2563EB",
+      "file": "region.svg",
+      "concept": "region",
+      "number": 7
+    },
+    {
+      "id": "layers",
+      "label": "区域状态",
+      "group": "navigation",
+      "color": "#2563EB",
+      "file": "layers.svg",
+      "concept": "layers",
+      "number": 8
+    },
+    {
+      "id": "workflow",
+      "label": "组合动作",
+      "group": "navigation",
+      "color": "#2563EB",
+      "file": "workflow.svg",
+      "concept": "workflow",
+      "number": 9
+    },
+    {
+      "id": "folder-open",
+      "label": "打开文件夹",
+      "group": "common",
+      "color": "#2563EB",
+      "file": "folder-open.svg",
+      "concept": "folder-open",
+      "number": 10
+    },
+    {
+      "id": "search",
+      "label": "搜索",
+      "group": "common",
+      "color": "#475569",
+      "file": "search.svg",
+      "concept": "search",
+      "number": 11
+    },
+    {
+      "id": "settings",
+      "label": "设置",
+      "group": "common",
+      "color": "#475569",
+      "file": "settings.svg",
+      "concept": "settings",
+      "number": 12
+    },
+    {
+      "id": "model-chip",
+      "label": "标注模型",
+      "group": "common",
+      "color": "#7C3AED",
+      "file": "model-chip.svg",
+      "concept": "model-chip",
+      "number": 13
+    },
+    {
+      "id": "add",
+      "label": "新增",
+      "group": "common",
+      "color": "#2563EB",
+      "file": "add.svg",
+      "concept": "add",
+      "number": 14
+    },
+    {
+      "id": "save",
+      "label": "保存",
+      "group": "common",
+      "color": "#2563EB",
+      "file": "save.svg",
+      "concept": "save",
+      "number": 15
+    },
+    {
+      "id": "edit",
+      "label": "编辑",
+      "group": "common",
+      "color": "#475569",
+      "file": "edit.svg",
+      "concept": "edit",
+      "number": 16
+    },
+    {
+      "id": "refresh",
+      "label": "刷新",
+      "group": "common",
+      "color": "#2563EB",
+      "file": "refresh.svg",
+      "concept": "refresh",
+      "number": 17
+    },
+    {
+      "id": "download",
+      "label": "下载",
+      "group": "common",
+      "color": "#2563EB",
+      "file": "download.svg",
+      "concept": "download",
+      "number": 18
+    },
+    {
+      "id": "import",
+      "label": "导入",
+      "group": "common",
+      "color": "#2563EB",
+      "file": "import.svg",
+      "concept": "import",
+      "number": 19
+    },
+    {
+      "id": "export",
+      "label": "导出",
+      "group": "common",
+      "color": "#2563EB",
+      "file": "export.svg",
+      "concept": "export",
+      "number": 20
+    },
+    {
+      "id": "trash",
+      "label": "删除",
+      "group": "common",
+      "color": "#DC2626",
+      "file": "trash.svg",
+      "concept": "trash",
+      "number": 21
+    },
+    {
+      "id": "minus",
+      "label": "移除",
+      "group": "common",
+      "color": "#475569",
+      "file": "minus.svg",
+      "concept": "minus",
+      "number": 22
+    },
+    {
+      "id": "play",
+      "label": "运行",
+      "group": "common",
+      "color": "#15803D",
+      "file": "play.svg",
+      "concept": "play",
+      "number": 23
+    },
+    {
+      "id": "stop",
+      "label": "停止",
+      "group": "common",
+      "color": "#DC2626",
+      "file": "stop.svg",
+      "concept": "stop",
+      "number": 24
+    },
+    {
+      "id": "more",
+      "label": "更多",
+      "group": "common",
+      "color": "#475569",
+      "file": "more.svg",
+      "concept": "more",
+      "number": 25
+    },
+    {
+      "id": "sliders",
+      "label": "属性与参数",
+      "group": "common",
+      "color": "#475569",
+      "file": "sliders.svg",
+      "concept": "sliders",
+      "number": 26
+    },
+    {
+      "id": "back",
+      "label": "返回",
+      "group": "common",
+      "color": "#475569",
+      "file": "back.svg",
+      "concept": "back",
+      "number": 27
+    },
+    {
+      "id": "close",
+      "label": "关闭 / 取消",
+      "group": "common",
+      "color": "#475569",
+      "file": "close.svg",
+      "concept": "close",
+      "number": 28
+    },
+    {
+      "id": "arrow-up",
+      "label": "上移",
+      "group": "common",
+      "color": "#475569",
+      "file": "arrow-up.svg",
+      "concept": "arrow-up",
+      "number": 29
+    },
+    {
+      "id": "arrow-down",
+      "label": "下移",
+      "group": "common",
+      "color": "#475569",
+      "file": "arrow-down.svg",
+      "concept": "arrow-down",
+      "number": 30
+    },
+    {
+      "id": "copy",
+      "label": "复制",
+      "group": "common",
+      "color": "#475569",
+      "file": "copy.svg",
+      "concept": "copy",
+      "number": 31
+    },
+    {
+      "id": "toggle-on",
+      "label": "启用参考",
+      "group": "common",
+      "color": "#2563EB",
+      "file": "toggle-on.svg",
+      "concept": "toggle",
+      "number": 32
+    },
+    {
+      "id": "capture",
+      "label": "截图",
+      "group": "learning",
+      "color": "#2563EB",
+      "file": "capture.svg",
+      "concept": "capture",
+      "number": 33
+    },
+    {
+      "id": "scan",
+      "label": "学习区域",
+      "group": "learning",
+      "color": "#7C3AED",
+      "file": "scan.svg",
+      "concept": "scan",
+      "number": 34
+    },
+    {
+      "id": "target",
+      "label": "拾取目标",
+      "group": "learning",
+      "color": "#2563EB",
+      "file": "target.svg",
+      "concept": "target",
+      "number": 35
+    },
+    {
+      "id": "target-check",
+      "label": "验证定位",
+      "group": "learning",
+      "color": "#2563EB",
+      "file": "target-check.svg",
+      "concept": "target-check",
+      "number": 36
+    },
+    {
+      "id": "split",
+      "label": "细分区域",
+      "group": "learning",
+      "color": "#2563EB",
+      "file": "split.svg",
+      "concept": "split",
+      "number": 37
+    },
+    {
+      "id": "expand",
+      "label": "学习展开内容",
+      "group": "learning",
+      "color": "#2563EB",
+      "file": "expand.svg",
+      "concept": "expand",
+      "number": 38
+    },
+    {
+      "id": "route",
+      "label": "插入前置步骤",
+      "group": "learning",
+      "color": "#2563EB",
+      "file": "route.svg",
+      "concept": "route",
+      "number": 39
+    },
+    {
+      "id": "record",
+      "label": "录制",
+      "group": "learning",
+      "color": "#DC2626",
+      "file": "record.svg",
+      "concept": "record",
+      "number": 40
+    },
+    {
+      "id": "check-list",
+      "label": "预期检查",
+      "group": "learning",
+      "color": "#2563EB",
+      "file": "check-list.svg",
+      "concept": "check-list",
+      "number": 41
+    },
+    {
+      "id": "results",
+      "label": "运行结果",
+      "group": "learning",
+      "color": "#2563EB",
+      "file": "results.svg",
+      "concept": "results",
+      "number": 42
+    },
+    {
+      "id": "globe",
+      "label": "网页",
+      "group": "learning",
+      "color": "#2563EB",
+      "file": "globe.svg",
+      "concept": "globe",
+      "number": 43
+    },
+    {
+      "id": "status-success",
+      "label": "成功",
+      "group": "status",
+      "color": "#15803D",
+      "file": "status-success.svg",
+      "concept": "status-success",
+      "number": 44
+    },
+    {
+      "id": "status-warning",
+      "label": "提醒",
+      "group": "status",
+      "color": "#B45309",
+      "file": "status-warning.svg",
+      "concept": "status-warning",
+      "number": 45
+    },
+    {
+      "id": "status-error",
+      "label": "失败",
+      "group": "status",
+      "color": "#DC2626",
+      "file": "status-error.svg",
+      "concept": "status-error",
+      "number": 46
+    },
+    {
+      "id": "status-pending",
+      "label": "待验证",
+      "group": "status",
+      "color": "#475569",
+      "file": "status-pending.svg",
+      "concept": "status-pending",
+      "number": 47
+    },
+    {
+      "id": "status-busy",
+      "label": "处理中",
+      "group": "status",
+      "color": "#2563EB",
+      "file": "status-busy.svg",
+      "concept": "status-busy",
+      "number": 48
+    },
+    {
+      "id": "status-blocked",
+      "label": "已隔离",
+      "group": "status",
+      "color": "#B45309",
+      "file": "status-blocked.svg",
+      "concept": "status-blocked",
+      "number": 49
+    },
+    {
+      "id": "toggle-off",
+      "label": "停用参考",
+      "group": "common",
+      "color": "#475569",
+      "file": "toggle-off.svg",
+      "concept": "toggle",
+      "number": 32
+    }
+  ]
+}

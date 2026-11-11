@@ -30,7 +30,7 @@ def resolver(monkeypatch):
         monkeypatch.setitem(sys.modules, fullname, module)
         spec.loader.exec_module(module)
     selected = {
-        "strict_control_resolution", "_observe_match", "observe_control", "find_control",
+        "strict_control_resolution", "_selector_index", "_observe_match", "observe_control", "find_control",
     }
     tree = ast.parse((SOURCE / "utils.py").read_text(encoding="utf-8"))
     nodes = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name in selected]
@@ -45,6 +45,10 @@ def resolver(monkeypatch):
     }
     exec(compile(ast.Module(body=nodes, type_ignores=[]), str(SOURCE / "utils.py"), "exec"), namespace)
     namespace["ActionError"] = sys.modules[f"{package}.mcp.results"].ActionError
+    controller = ModuleType(f"{package}.ctrl")
+    namespace["activate_target"] = lambda _control: None
+    controller.Controller = SimpleNamespace(_activate_target=lambda control: namespace["activate_target"](control))
+    monkeypatch.setitem(sys.modules, controller.__name__, controller)
 
     def native_window(window_name, first_step):
         root = namespace["uiautomation"].GetRootControl()
@@ -53,6 +57,8 @@ def resolver(monkeypatch):
         selector = {"ControlType": "WindowControl", "Name": window_name}
         selector.update({key: first_step[key] for key in ("ClassName", "AutomationId", "foundIndex")
                          if first_step.get(key) not in (None, "")})
+        if sum(child.Name == window_name for child in root.children) > 1:
+            raise namespace["ActionError"]("ambiguous_match", "Multiple visible windows match")
         return namespace["_observe_match"](root, selector, search_depth=1, absent_code="window_invalid")
 
     namespace["_native_window_scope"] = native_window
@@ -108,13 +114,13 @@ def test_absence_and_invalid_window_are_distinct(resolver):
     assert error_code(resolver, {"WindowName": "Editor", "Name": "Save"}) == "control_not_found"
 
 
-def test_ambiguous_selector_requires_explicit_index(resolver):
+def test_identity_returns_first_and_position_uses_explicit_index(resolver):
     first, second = Control("Save"), Control("Save")
     desktop(resolver, [first, second])
-    location = {"WindowName": "Editor", "Name": "Save"}
-    assert error_code(resolver, location) == "ambiguous_match"
-    assert resolver["observe_control"]({**location, "foundIndex": 2}) is second
-    assert error_code(resolver, {**location, "foundIndex": 3}) == "control_not_found"
+    location = {"WindowName": "Editor", "Name": "Save", "ControlType": "ButtonControl"}
+    assert resolver["observe_control"]({**location, "foundIndex": 2}) is first
+    assert resolver["observe_control"]({**location, "foundIndex": 2, "match_mode": "position"}) is second
+    assert error_code(resolver, {**location, "foundIndex": 3, "match_mode": "position"}) == "control_not_found"
 
 
 def test_duplicate_windows_are_ambiguous(resolver):
@@ -123,11 +129,11 @@ def test_duplicate_windows_are_ambiguous(resolver):
     assert error_code(resolver, {"WindowName": "Editor"}) == "ambiguous_match"
 
 
-def test_stable_id_ignores_changed_caption_without_activation(resolver):
+def test_id_only_lookup_does_not_require_a_caption_or_activation(resolver):
     button = Control("New caption", automation_id="save")
     desktop(resolver, [button])
     assert resolver["observe_control"]({
-        "WindowName": "Editor", "Name": "Old caption", "AutomationId": "save",
+        "WindowName": "Editor", "AutomationId": "save",
     }) is button
 
 
@@ -154,6 +160,16 @@ def test_backend_failure_never_becomes_absence(resolver):
     assert error_code(resolver, {"WindowName": "Editor", "Name": "Save"}) == "action_failed"
     resolver["uiautomation"].GetRootControl = lambda: None
     assert error_code(resolver, {"WindowName": "Editor"}) == "action_failed"
+
+
+def test_explicit_desktop_root_uses_same_strict_xpath_rules(resolver):
+    button = Control("Save")
+    desktop(resolver, [button])
+    assert resolver["observe_control"]({"Xpath": [
+        {"ControlType": "DesktopControl", "Name": "Desktop", "searchDepth": 0},
+        {"ControlType": "WindowControl", "Name": "Editor", "searchDepth": 1},
+        {"ControlType": "ButtonControl", "Name": "Save", "searchDepth": 2},
+    ]}) is button
 
 
 @pytest.mark.parametrize("location", [
@@ -201,15 +217,16 @@ def test_only_mutation_scope_activates_resolved_window(resolver):
     button = Control("Save")
     desktop(resolver, [button])
     calls = []
-    resolver['set_top_window'] = lambda title: calls.append(title) or True
+    resolver['activate_target'] = lambda control: calls.append(control)
     location = {'WindowName': 'Editor', 'Name': 'Save'}
     assert resolver['find_control'](location, strict=True) is button
     assert calls == []
     with resolver['strict_control_resolution'](activate=True):
         assert resolver['find_control'](location) is button
-    assert calls == ['Editor']
+    assert calls == [button]
     assert resolver['_ACTIVATE_RESOLVED_WINDOW'].get() is False
-    resolver['set_top_window'] = lambda title: False
+    def denied(_control): raise RuntimeError("Activation denied")
+    resolver['activate_target'] = denied
     with pytest.raises(resolver['ActionError']) as raised:
         with resolver['strict_control_resolution'](activate=True):
             resolver['find_control'](location)
@@ -219,7 +236,7 @@ def test_only_mutation_scope_activates_resolved_window(resolver):
 
 def test_missing_control_is_never_activated(resolver):
     desktop(resolver)
-    resolver['set_top_window'] = lambda title: pytest.fail('Missing control must not activate')
+    resolver['activate_target'] = lambda control: pytest.fail('Missing control must not activate')
     with pytest.raises(resolver['ActionError']):
         with resolver['strict_control_resolution'](activate=True):
             resolver['find_control']({'WindowName': 'Editor', 'Name': 'Save'})

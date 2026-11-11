@@ -505,7 +505,7 @@ def deny_network(event, args):
         raise RuntimeError("Installation self-check must work without network access")
 sys.addaudithook(deny_network)
 from PIL import Image, ImageDraw, ImageFont
-for name in ("tkinter", "pyautogui", "pynput", "uiautomation", "mcp", "cv2", "torch", "onnxruntime", "rapidocr"):
+for name in ("tkinter", "PySide6.QtWidgets", "pyautogui", "pynput", "uiautomation", "mcp", "cv2", "torch", "onnxruntime", "rapidocr"):
     importlib.import_module(name)
 import tkinter
 tkinter.Tcl().eval("info patchlevel")

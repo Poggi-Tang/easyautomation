@@ -57,6 +57,13 @@ Prefer verified application knowledge over rediscovering the interface.
 
 ## Fallback Order
 
+Preserve stored XPath selection modes. The default identity mode selects the first
+matching Name within its parent context and ignores historical foundIndex; with no
+Name, AutomationId can identify the target. Position mode selects a positive 1-based
+same-type direct-child ordinal, ignoring recorded Name, class and ID. Use explicit
+position mode when the user intends a particular repeated cell or row; do not infer
+it from a nonzero historical index. Never switch modes automatically after failure.
+
 1. Verified stored LOCATION.
 2. A unique stored multi-state control image.
 3. Unique local OCR text.

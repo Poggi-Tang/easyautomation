@@ -17,7 +17,7 @@ def test_native_labels_recover_actions_without_reusing_misaligned_visual_meaning
     window = FakeControl("Example", "WindowControl", (0, 0, 400, 300), [menu])
     monkeypatch.setattr(scanner, "get_control_xpath", lambda control: [dict(
         Name=control.Name, ControlType=control.ControlTypeName)])
-    monkeypatch.setattr(scanner, "control_from_visual_target", lambda *_a: None)
+    monkeypatch.setattr(scanner, "control_from_visual_target", lambda *_a, **_kw: None)
     target = dict(semantic_name="Go to", intent="goto", actions=["click"],
                   relative_rect=dict(left=10, top=10, right=100, bottom=30, width=90, height=20))
     controls, semantics, failures = scanner.controls_from_visual_targets(
@@ -40,7 +40,8 @@ class FakeControl:
     ) -> None:
         self.Name = name
         self.ControlTypeName = control_type
-        self.ControlType = hash(control_type)
+        from easy_uiauto.utils import CONTROL_TYPE_IDS
+        self.ControlType = CONTROL_TYPE_IDS[control_type]
         self.ClassName = control_type
         self.AutomationId = automation_id
         self.FrameworkId = "Fake"
@@ -63,6 +64,24 @@ class FakeControl:
 
     def GetParentControl(self):
         return self._parent
+
+    def Refind(self, **_options):
+        return True
+
+    def Control(self, foundIndex=1, searchDepth=0xFFFFFFFF, **conditions):
+        matches = []
+
+        def visit(parent, remaining):
+            for child in parent.GetChildren():
+                if all(getattr(child, key) == value for key, value in conditions.items()):
+                    matches.append(child)
+                if remaining > 1:
+                    visit(child, remaining - 1)
+
+        visit(self, searchDepth)
+        if foundIndex <= len(matches):
+            return matches[foundIndex - 1]
+        return SimpleNamespace(Refind=lambda **_options: False)
 
 
 def _test_screen() -> Image.Image:
@@ -146,6 +165,7 @@ def test_location_resolution_reuses_shared_xpath_prefixes() -> None:
         window,
         cache,
     )
+    initial_lookups = calls["window"]
     second = scanner.resolve_location(
         {
             "WindowName": "Example",
@@ -157,15 +177,15 @@ def test_location_resolution_reuses_shared_xpath_prefixes() -> None:
 
     assert first is save
     assert second is open_control
-    assert calls["window"] == 1
+    assert initial_lookups > 0 and calls["window"] == initial_lookups
 
 
-def test_location_uses_unique_automation_id_before_xpath(monkeypatch) -> None:
+def test_location_uses_recorded_name_in_identity_mode(monkeypatch) -> None:
     class SearchResult:
         def __init__(self, found_index: int) -> None:
             self.found_index = found_index
 
-        def Exists(self, *_args) -> bool:
+        def Refind(self, **_options) -> bool:
             return self.found_index == 1
 
     queries = []
@@ -174,8 +194,8 @@ def test_location_uses_unique_automation_id_before_xpath(monkeypatch) -> None:
         queries.append(kwargs)
         return SearchResult(kwargs["foundIndex"])
 
-    monkeypatch.setattr(scanner.uiautomation, "Control", find_control)
     window = SimpleNamespace(
+        Control=find_control,
         GetChildren=lambda: (_ for _ in ()).throw(AssertionError("XPath was traversed"))
     )
     location = {
@@ -193,7 +213,9 @@ def test_location_uses_unique_automation_id_before_xpath(monkeypatch) -> None:
     }
 
     assert scanner.resolve_location(location, window=window).found_index == 1
-    assert queries[0]["searchDepth"] == 30
+    assert queries[0]["searchDepth"] == 1
+    assert queries[0]["Name"] == "Old contact"
+    assert "AutomationId" not in queries[0]
 
 
 def test_location_falls_back_to_property_combination_after_xpath(monkeypatch) -> None:
@@ -214,8 +236,6 @@ def test_location_falls_back_to_property_combination_after_xpath(monkeypatch) ->
             },
         ],
     }
-    monkeypatch.setattr(scanner, "_resolve_unique_automation_id", lambda *_args: None)
-
     assert scanner.resolve_location(location, window=window) is button
 
 
@@ -387,7 +407,7 @@ def test_distinct_visual_entity_sharing_a_uia_control_is_kept_independently(monk
             },
         },
     ]
-    monkeypatch.setattr(scanner, "control_from_visual_target", lambda *_args: control)
+    monkeypatch.setattr(scanner, "control_from_visual_target", lambda *_args, **_kw: control)
     monkeypatch.setattr(
         scanner,
         "get_control_xpath",

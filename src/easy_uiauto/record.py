@@ -31,8 +31,10 @@ class RecordThread(threading.Thread):
     录制动作线程；控件高亮由独立 Tk 线程通过队列更新。
     """
 
-    def __init__(self, action_callback=None, close_callback=None):
+    def __init__(self, action_callback=None, close_callback=None, *, match_mode="identity"):
         super().__init__()
+        from .mcp.protocol import normalize_match_mode
+        self.match_mode = normalize_match_mode(match_mode)
         self.test_id = 0
         self.combo_handled = False
         self.daemon = True
@@ -327,7 +329,7 @@ class RecordThread(threading.Thread):
         current_time = time.time()
         CoInitialize()
         if pressed:
-            Xpath, control = get_control_info(x, y)
+            Xpath, control = get_control_info(x, y, match_mode=self.match_mode)
             if control:
                 # 锁定并跟踪该控件（不再 hide/show）
                 self.track_control(control)
@@ -335,7 +337,7 @@ class RecordThread(threading.Thread):
                 if not self.dragging:
                     if len(Xpath) == 0:
                         # 获取失败，重新获取
-                        Xpath, control = get_control_info(x, y)
+                        Xpath, control = get_control_info(x, y, match_mode=self.match_mode)
                         action_data = format_action_data_by_xpath(action_name="点击",
                                                                   test_id=self.test_id,
                                                                   Xpath=Xpath,
@@ -374,9 +376,9 @@ class RecordThread(threading.Thread):
         else:
             if self.last_click_time and current_time - self.last_click_time > 0.2 and (
                     x, y) != self.last_click_position:
-                src_xpath, src_control = get_control_info(self.last_click_position[0], self.last_click_position[1])
+                src_xpath, src_control = get_control_info(self.last_click_position[0], self.last_click_position[1], match_mode=self.match_mode)
                 self.track_control(src_control)
-                dest_xpath, dest_control = get_control_info(x, y)
+                dest_xpath, dest_control = get_control_info(x, y, match_mode=self.match_mode)
                 self.track_control(dest_control)
                 if len(dest_xpath) == 0:
                     drag_parameters = {}
@@ -530,12 +532,15 @@ def record_help():
     push_message("\033[1;31mESC键: 停止录制\033[0m")
 
 
-def run_record(write_file=True):
+def run_record(write_file=True, *, match_mode="identity"):
     """
     录制示例
     :param write_file: 将录制数据写入到文件
+    :param match_mode: identity 按名称取第一个；position 按同类型兄弟序号
     :return:
     """
+    from .mcp.protocol import normalize_match_mode
+    match_mode = normalize_match_mode(match_mode)
     if write_file:
         global RUN_TIME
         with open(f"Record{RUN_TIME}.py", "a", encoding="utf-8") as f:
@@ -549,6 +554,7 @@ def run_record(write_file=True):
     record_thread = RecordThread(
         action_callback=on_action_callback if write_file else None,
         close_callback=on_close_callback,
+        match_mode=match_mode,
     )
     try:
         # 启动录制

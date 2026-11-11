@@ -70,6 +70,130 @@ def test_small_visual_target_rejects_named_full_desktop_container():
     ) is None
 
 
+@pytest.mark.parametrize("lookup_fails", [False, True])
+def test_visual_resolution_distinguishes_empty_lookup_from_uia_errors(monkeypatch, lookup_fails):
+    window = FakeControl("Example", "WindowControl", (0, 0, 400, 300))
+
+    def lookup(*_):
+        if lookup_fails:
+            raise RuntimeError("provider unavailable")
+        return None
+
+    monkeypatch.setattr(scanner.uiautomation, "ControlFromPoint", lookup)
+    controls, _, failures = scanner.controls_from_visual_targets(
+        window, scanner._rect(window), [target(20)], 20,
+    )
+    assert controls == []
+    assert len(failures) == 1
+    failure = failures[0]
+    assert failure["reason"] == ("uia_lookup_failed" if lookup_fails else "no_uia_candidate")
+    assert failure["diagnostics"]["candidate_count"] == 0
+    assert failure["diagnostics"]["lookup_error_count"] == (5 if lookup_fails else 0)
+    assert failure["diagnostics"]["rejected_candidates"] == []
+    if lookup_fails:
+        assert all("provider unavailable" in item["error"]
+                   for item in failure["diagnostics"]["lookup_errors"])
+
+
+@pytest.mark.parametrize("control_type,name,rect,semantic,reason,rejection", [
+    ("WindowControl", "Example", (0, 0, 400, 300), {},
+     "geometry_rejected", "window_itself"),
+    ("PaneControl", "Canvas", (0, 0, 400, 300), {},
+     "geometry_rejected", "area_too_large"),
+    ("ButtonControl", "Icon", (20, 20, 25, 25), {},
+     "geometry_rejected", "area_too_small"),
+    ("ButtonControl", "Icon", (180, 20, 240, 60), {},
+     "geometry_rejected", "insufficient_overlap"),
+    ("ButtonControl", "Save", (20, 20, 80, 60),
+     {"semantic_name": "Open", "intent": "open-file"},
+     "semantic_rejected", "semantic_conflict"),
+    ("ButtonControl", "Save", (20, 20, 80, 60), {},
+     "semantic_rejected", "semantic_unresolved"),
+])
+def test_visual_resolution_reports_candidates_rejected_by_each_filter(
+    monkeypatch, control_type, name, rect, semantic, reason, rejection,
+):
+    control = FakeControl(name, control_type, rect)
+    window = (control if control_type == "WindowControl" else
+              FakeControl("Example", "WindowControl", (0, 0, 400, 300), [control]))
+    monkeypatch.setattr(scanner.uiautomation, "ControlFromPoint", lambda *_: control)
+    forbidden = lambda *_: pytest.fail("diagnostics must not activate windows or traverse the tree")
+    monkeypatch.setattr(scanner, "_activate_window", forbidden)
+    monkeypatch.setattr(scanner, "_walk_controls", forbidden)
+    # The native-label supplement is independent of visual-target binding.
+    monkeypatch.setattr(scanner, "_native_action_controls", lambda _: iter(()))
+
+    controls, _, failures = scanner.controls_from_visual_targets(
+        window, scanner._rect(window), [target(20, **semantic)], 20,
+    )
+    assert controls == []
+    assert len(failures) == 1
+    failure = failures[0]
+    assert failure["reason"] == reason
+    assert "candidates" in failure["error"]
+    assert "no UIA control" not in failure["error"]
+    diagnostics = failure["diagnostics"]
+    assert diagnostics["candidate_count"] >= 1
+    candidate = next(item for item in diagnostics["rejected_candidates"]
+                     if item["reason"] == rejection)
+    assert candidate["name"] == name
+    if reason == "semantic_rejected":
+        assert diagnostics["geometry_matched"] == 1
+        assert candidate["semantic_binding"]["native_identity"] == "save"
+    else:
+        assert diagnostics["geometry_matched"] == 0
+
+
+def test_visual_resolution_reports_low_score_separately():
+    pane = FakeControl("", "PaneControl", (10, 10, 130, 90))
+    window = FakeControl("Example", "WindowControl", (0, 0, 400, 300), [pane])
+    diagnostics = {}
+    assert scanner.control_from_visual_target(
+        window, scanner._rect(window), target(20), point_lookup=lambda *_: pane,
+        diagnostics=diagnostics,
+    ) is None
+    assert diagnostics["reason"] == "score_rejected"
+    assert diagnostics["geometry_matched"] == diagnostics["semantics_matched"] == 1
+    assert diagnostics["best_score"] < 0
+
+
+def test_visual_resolution_keeps_success_after_one_failed_sample():
+    button = FakeControl("Icon", "ButtonControl", (20, 20, 80, 60))
+    window = FakeControl("Example", "WindowControl", (0, 0, 400, 300), [button])
+    calls = 0
+
+    def lookup(*_):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise RuntimeError("transient point error")
+        return button
+
+    diagnostics = {}
+    assert scanner.control_from_visual_target(
+        window, scanner._rect(window), target(20), point_lookup=lookup,
+        diagnostics=diagnostics,
+    ) is button
+    assert diagnostics["reason"] == "resolved"
+    assert diagnostics["candidate_count"] == 2
+    assert diagnostics["lookup_error_count"] == 1
+    assert diagnostics["sample_points"][0]["status"] == "error"
+
+
+def test_visual_resolution_bounds_rejection_details_and_counts_all_candidates():
+    parent = None
+    for index in range(20):
+        parent = FakeControl(f"Panel {index}", "PaneControl", (0, 0, 400, 300), parent=parent)
+    window = FakeControl("Example", "WindowControl", (0, 0, 400, 300))
+    diagnostics = {}
+    assert scanner.control_from_visual_target(
+        window, scanner._rect(window), target(20), point_lookup=lambda *_: parent,
+        diagnostics=diagnostics,
+    ) is None
+    assert diagnostics["candidate_count"] == diagnostics["rejection_count"] == 16
+    assert len(diagnostics["rejected_candidates"]) == 8
+
+
 def test_disjoint_controls_with_identical_xpath_do_not_merge(monkeypatch):
     first = FakeControl("Item", "ButtonControl", (20, 20, 80, 60))
     second = FakeControl("Item", "ButtonControl", (120, 20, 180, 60))
@@ -123,6 +247,11 @@ def test_coarse_canvas_keeps_two_independent_non_executable_records(monkeypatch,
     assert all(record["status"] == "observed" and not record["actions"] for record in records)
     assert result["annotated_controls"] == 2
     assert result["commands"] == 0
+    assert all(item["reason"] == "geometry_rejected" for item in result["failures"])
+    for record in records:
+        assert record["verification"]["reason"] == "geometry_rejected"
+        assert record["verification"]["diagnostics"]["candidate_count"] == 2
+        assert record["verification"]["diagnostics"]["rejected_candidates"]
 
 
 def test_native_desktop_coverage_includes_omitted_shortcut_on_second_monitor(monkeypatch):
@@ -271,7 +400,9 @@ def test_clipped_fragment_with_caption_difference_uses_complete_bounds():
     assert controls[0]["relative_rect"] == complete["relative_rect"]
 
 
-def test_ancestor_automation_id_never_resolves_as_leaf(monkeypatch):
+@pytest.mark.parametrize("index", [1, 64])
+@pytest.mark.parametrize("mode", ["identity", "position"])
+def test_ancestor_automation_id_never_resolves_as_leaf(monkeypatch, index, mode):
     icon = FakeControl("App", "ListItemControl", (20, 20, 80, 60))
     listing = FakeControl("Desktop", "ListControl", (0, 0, 400, 300), [icon], "1")
     window = FakeControl("Example", "WindowControl", (0, 0, 400, 300), [listing])
@@ -279,14 +410,20 @@ def test_ancestor_automation_id_never_resolves_as_leaf(monkeypatch):
         _ for _ in ()).throw(AssertionError("An ancestor ID must not short-circuit the leaf")))
     location = {
         "WindowName": "Example", "Name": "App", "ControlType": "ListItemControl",
-        "foundIndex": 64, "Xpath": [
+        "foundIndex": index, "Xpath": [
             {"ControlType": "WindowControl", "Name": "Example", "searchDepth": 1},
             {"ControlType": "ListControl", "AutomationId": "1", "searchDepth": 2},
-            {"ControlType": "ListItemControl", "Name": "App", "foundIndex": 64,
-             "searchDepth": 3},
+            {"ControlType": "ListItemControl", "Name": "App", "foundIndex": index,
+             "searchDepth": 3, "match_mode": mode},
         ],
     }
-    assert scanner.resolve_location(location, window=window) is icon
+    if index == 1 or mode == "identity":
+        assert scanner.resolve_location(location, window=window) is icon
+    else:
+        from easy_uiauto.mcp.results import ActionError
+        with pytest.raises(ActionError) as raised:
+            scanner.resolve_location(location, window=window)
+        assert raised.value.reason == "index_out_of_range"
 
 
 @pytest.mark.parametrize("length,size", [(1281, 1280), (2000, 1280), (2449, 1280),

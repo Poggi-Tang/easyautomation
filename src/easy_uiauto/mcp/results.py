@@ -9,10 +9,11 @@ import re
 class ActionError(RuntimeError):
     """A machine-readable failure, including through legacy string handlers."""
 
-    def __init__(self, code: str, message: str, retryable: bool = False):
+    def __init__(self, code: str, message: str, retryable: bool = False, *, reason: str = ""):
         self.code = code
         self.retryable = retryable
         self.message = message
+        self.reason = reason
         super().__init__(f"[{code}] {message}")
 
 

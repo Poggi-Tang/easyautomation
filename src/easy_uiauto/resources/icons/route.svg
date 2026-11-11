@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" color="#2563EB" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="插入前置步骤">
+  <title>插入前置步骤</title>
+  <circle cx="5" cy="5" r="2"/><circle cx="5" cy="13" r="2"/>
+  <path d="M5 7v4M7 13h4a2 2 0 0 1 2 2v2a2 2 0 0 0 2 2h3m-2-2 2 2-2 2M21 15v6"/>
+</svg>

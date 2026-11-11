@@ -1,4 +1,5 @@
 include annotate-image.cmd
+include knowledge-library.cmd
 include install-full.cmd
 include download-offline.cmd
 include README.zh-CN.md
@@ -10,5 +11,10 @@ include src/easy_uiauto/bin/easy-uiauto-config.exe
 recursive-include scripts *.py
 recursive-include scripts *.ps1
 recursive-include docs *.md
+recursive-include third_party *.txt *.md
 recursive-include docs/examples/IEEE9 *.bmp *.png *.json *.csv *.html *.log
 recursive-include src/easy_uiauto/resources *.png
+recursive-include src/easy_uiauto/resources *.ico
+recursive-include src/easy_uiauto/resources/icons *.svg *.json *.md
+include docs/gui-icons-preview.html
+recursive-include docs/assets/gui-icons *.png *.json

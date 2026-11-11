@@ -268,7 +268,7 @@ class ScreenLineBox:
     def _make_bar(self):
         w = tk.Toplevel(self.root)
         w.overrideredirect(True)
-        w.configure(bg=self.NORMAL_COLOR)
+        w.configure(bg=self.color)
         if self.topmost:
             w.wm_attributes("-topmost", True)
 
@@ -388,6 +388,9 @@ class ScreenLineBox:
         if not self._ever_drawn_valid:
             self._ever_drawn_valid = True
             self._enter_normal_mode()
+        # A caller may hide the old selection while resolving a new one.
+        # Every subsequent valid rectangle must become visible again.
+        if not self._is_shown:
             self._reveal()
 
         # ★只有在需要并且达到检测周期时才检测遮挡

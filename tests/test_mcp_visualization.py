@@ -95,6 +95,17 @@ def test_legacy_visual_components_get_separate_observation_markers(tmp_path) -> 
         assert image.getpixel((200, 150)) != (255, 255, 255)
 
 
+def test_native_widget_evidence_does_not_create_extra_annotation_targets():
+    record = _control("save")
+    record["visual_components"] = [{
+        "semantic_name": "N", "entity_type": "text-label", "observed_value": "N",
+        "normalized_rect": {"left": .05, "top": .08, "right": .1, "bottom": .12},
+        "native_evidence": True,
+    }]
+    markers = visualization.control_markers([record], _rect(0, 0, 400, 300), _rect(0, 0, 400, 300))
+    assert len(markers) == 1 and markers[0]["control_id"] == "save"
+
+
 def test_show_page_controls_lists_only_executable_controls(monkeypatch, tmp_path) -> None:
     directory = knowledge.initialize_app("example", "Example", tmp_path)
     verified = _control("save")

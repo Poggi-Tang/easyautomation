@@ -27,11 +27,20 @@
 
 ## 包含的能力
 
+- **知识库管理 GUI**：以知识库为根，按软件组织“使用知识、控件库、组合动作”。
+  QtWidgets 主窗支持同位置的不同 Tab 状态、区域前置步骤、跨区域动作与参数化预期，
+  并分开查看学习参考和运行证据。
+  控件库支持选择软件窗口、悬浮拾取区域、控件学习及多级菜单回放；滚轮切换控件父子层级，Ctrl 确认区域。
+  右上角浮窗显示 AutomationID、Name、ClassName 和 ControlType；使用知识维护软件操作说明，
+  组合动作通过表单引用已有控件，编排操作及预期检查，保存独立的运行结果和前后截图。
+  源码双击 `knowledge-library.cmd`，安装后运行 `easy_uiauto_library`。
+  详见[使用说明](docs/knowledge-gui.zh-CN.md)。
+
 - **桌面自动化**：点击、双击、右键、拖拽、滚动、键盘输入、组合键、
   窗口激活和文本填写。
 - **动作录制**：录制真实操作、高亮当前控件，并生成包含完整 `LOCATION`
   的可复用 Python 动作。
-- **MCP 服务**：在 Codex、Claude Code 或其他 MCP 客户端中调用同一套能力。
+- **MCP 服务**：在 Codex、Claude Code、DeepSeek Harness（DSH）等 MCP 客户端中调用同一套能力。
 - **视觉优先学习**：先从截图中找出关键区域和控件，再映射到本地稳定的
   UIA 控件；默认不遍历完整控件树。
 - **状态语义理解**：区分稳定功能和动态值，保留联系人名称、头像等实体，
@@ -48,10 +57,10 @@
   Markdown/YAML/PNG，可直接用 Obsidian 或 Git 管理。
 - **稳定记录**：持久化结构化 `LOCATION` 和窗口内归一化视觉提示，不保存
   PID、窗口句柄或桌面绝对坐标。
-- **分层定位兜底**：依次使用唯一 `AutomationId`、上下文 XPath、稳定属性组合、
+- **分层定位兜底**：使用带定位模式的上下文 XPath、属性组合、
   多状态控件图、本地 OCR，最后才使用显式开启的远程视觉定位。
-- **快速定位锚点**：优先使用窗口内唯一的 `AutomationId`，缺失或重复时再
-  使用 XPath 层级消歧。
+- **定位方式切换**：默认按 `Name` 返回第一个匹配控件，也可切换为按同类型
+  `foundIndex` 定位；未提供名称时支持 `AutomationId`。
 
 ## 能力成熟度
 
@@ -309,12 +318,34 @@ easy_uiauto --uninstall-claude-code
 Codex 会写入全局 `config.toml`；Claude Code 会写入 `user` 作用域，因此对本机所有
 项目生效。安装、更新或卸载后需要重启相应客户端。
 
+### DeepSeek Harness（DSH）
+
+DSH 通过官方 `@deepseek-ai/dsh-mcp-client` 插件接入。下载
+[配置示例](docs/examples/dsh/easy-uiauto.cordis.yml)，将 `command` 改为已安装
+easy-uiauto 的 `python.exe` 完整路径，然后启动：
+
+```cmd
+dsh web --patch "C:\configs\easy-uiauto.cordis.yml"
+```
+
+在 `easy_uiauto_config` 中保存知识库和视觉 API 配置，并将包内两个 Skill
+复制到 `$DSH_HOME/skills`（默认 `%USERPROFILE%\.dsh\skills`）。完整步骤、
+PowerShell 安装命令和超时排查见 [DSH 配置说明](docs/dsh-setup.zh-CN.md)。
+DSH 对话模型与 easy-uiauto 的视觉接口分别配置。
+
+### TCP 服务
+
 也提供常驻 TCP 服务：
 
 ```bash
 easy_uiauto_service --help
 python -m easy_uiauto.mcp.service --port 9876
 ```
+
+TCP 的 `get_control_tree` 与 MCP 共用独立检查进程，默认最多读取 500 个节点、限时 15 秒。
+Python 客户端可通过关键字参数 `max_nodes`、`timeout_seconds` 调整；超时会返回部分结果，
+服务仍能响应后续请求。读取不会激活窗口，启动不再遍历桌面。兼容入口 `compile_window`
+执行有界读取，`--cache-depth` 指定它的默认读取深度。
 
 
 ### 动作结果与等待验证
@@ -356,6 +387,20 @@ easy_uiauto_ui show <app-id>
 再把坐标映射到本地 UIA 控件。最终保存稳定 `LOCATION`、控件图、功能含义、同义词、
 风险和生成的命令。支持位于副屏上的窗口。扫描还会保存 `<页面-id>.annotated.png`，
 并在当前窗口短暂绘制相同编号的控件框；不需要实时框选时可传入 `--no-overlay`。
+
+可显式使用 `easy_uiauto_ui scan "窗口标题" --strategy visual-first`，或通过 MCP 调用
+`scan_window_knowledge(window_name="窗口标题", strategy="visual-first")`。该策略使用
+Python `uiautomation.ControlFromPoint` 对视觉目标取点，再检查父级候选、几何范围和原生
+语义；不会完整枚举 UIA 树。`full-uia` 与它共用同一个 `uiautomation` 底层。
+`uia_controls_seen` 是本轮选中的控件数（含有界的原生文字补充），不能用来判断软件暴露的
+全部节点数。`ok=true` 表示扫描完成；是否产生可执行知识还要查看 `commands`。
+
+视觉目标绑定失败时，`failures` 中的 `reason` 区分 `no_uia_candidate`（取点未收集到控件）、
+`uia_lookup_failed`（UIA 读取异常）、`geometry_rejected`（几何筛选拒绝）、
+`semantic_rejected`（语义检查拒绝）和 `score_rejected`（评分不足）。`diagnostics` 保留
+绝对目标框、采样点、候选数及具体拒绝依据；后面三种情况都表示已经取得候选，不能解释为
+“软件没有暴露控件”。候选和异常明细各最多八条，完整数量见 `rejection_count` 和
+`lookup_error_count`。观察记录的 `verification` 同时保存这些诊断，便于后续排查。
 
 桌面扫描会额外枚举 Explorer 暴露的桌面图标，补齐视觉漏识别的快捷方式和文件；返回的
 `coverage` 包含分块数、桌面项数和补充数。超过扫描上限时会明确返回 `truncated=true`。
@@ -653,10 +698,11 @@ easy_uiauto_ui learn-effect <app-id> <command> --recover
 easy_uiauto_ui teach <app-id> <control-id> "控件含义" intent "功能说明"
 ```
 
-运行时依次使用唯一 `AutomationId` → 上下文 XPath → `Name`/`ClassName`/`ControlType`
-属性组合 → 多状态控件图 → 本地 OCR → 显式开启的远程视觉。
+运行时使用带定位模式的上下文 XPath → 属性组合 → 多状态控件图 → 本地 OCR →
+显式开启的远程视觉。身份模式按 `Name`，未提供名称时可用 `AutomationId`；
+位置模式按父级下同类型控件的序号选择。
 最后一级需要传入 `--allow-vision-fallback` 或 `allow_vision_fallback=true`。
-控件失效、缺失或匹配不唯一时会进入隔离区，不会继续点击。单条和批量命令默认会用
+控件失效、缺失或证据校验失败时会进入隔离区，不会继续点击。单条和批量命令默认会用
 红框预览实际解析出的目标；可通过 `--no-highlight` 或 `highlight=false` 关闭约 100 ms
 的可视预览等待。
 
@@ -756,8 +802,39 @@ MCP 客户端配置可使用 `python -m easy_uiauto.mcp.server` 启动服务。
 ```
 
 `find_control` 也可直接接收包含 `LOCATION` 的完整录制动作，或者
-`get_control_at_position` 的完整返回结果。旧的扁平参数仍兼容。存在 AutomationId 时会先
-在目标窗口内查找，并忽略动态 Name、`foundIndex` 和历史坐标；ID 缺失或重复时再使用 XPath。
+`get_control_at_position` 的完整返回结果，旧的扁平参数仍兼容。
+
+`LOCATION.WindowName` 和 XPath 中的窗口 `Name` 使用 **UIA 名称**，它可能与标题栏的
+Win32 标题不同。回放通过窗口句柄绑定 UIA 并核对记录的名称、类名等属性；定位成功后，
+使用该控件所属顶层窗口的当前句柄激活，等待 5 ms 再验证前台状态。
+句柄每次回放重新获取，不写入永久定位记录。单独调用 `activate_window` 或
+`set_top_window` 时，传入的是原生窗口的完整标题。
+
+Python、录制回放、MCP 和 TCP 共用两种定位方式：
+
+- `identity`（默认）：在窗口和父级路径范围内按 `Name`、类型与类名取第一个匹配控件。
+  例如前五个单元格都叫 `1.0`，返回第一个；历史 `foundIndex` 不参与选择。
+  有名称时不使用 AutomationId 改选其他控件；未提供名称时可按 AutomationId 查找。
+- `position`：按已定位父级的同类型直接子控件计算 `foundIndex`，从 1 开始。
+  Name、AutomationId 和类名变化不影响该位置；缺少类型、序号非法或越界时明确失败。
+  窗口仍通过标题等信息限定，位置模式不表示屏幕绝对坐标。
+
+```python
+from easy_uiauto import find_control, run_action, run_record
+
+control = find_control(location)                         # 默认身份模式
+control = find_control(location, match_mode="position")  # 整条路径切换为位置模式
+run_action(recorded_action, match_mode="position")       # 不修改原录制记录
+run_record(match_mode="position")                       # 按位置模式录制
+```
+
+MCP 的 `find_control`、`click`、`type_text`、`set_text`、`run_action` 也接受 `match_mode`。
+XPath 每一层可单独保存 `"match_mode": "identity"` 或 `"position"`，用于组合身份父级与位置子项；
+显式传入方法参数时覆盖整条路径。完整 LOCATION 也可传入顶层 `match_mode`，规范化后通过
+现有 `PARAMETERS` 和 XPath 保存，因此旧动作方法的参数格式保持兼容。
+未标记模式的旧记录默认采用身份模式；需要复现原位置时显式切换为 `position`。
+位置模式需要完整父级路径；旧路径若省略了中间容器，应重新录制以补全。
+模式失败时不会自动切换，单独查找控件不会激活窗口。
 
 ## Python API 示例
 

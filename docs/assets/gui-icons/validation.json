@@ -1,0 +1,24 @@
+{
+  "svg_assets": 50,
+  "semantic_icons": 49,
+  "qt_renders": 750,
+  "sizes": [
+    16,
+    20,
+    24,
+    32,
+    48
+  ],
+  "states": [
+    "normal",
+    "disabled",
+    "selected"
+  ],
+  "checks": [
+    "SVG structure",
+    "Qt rendering",
+    "palette",
+    "transparent padding",
+    "no clipping"
+  ]
+}

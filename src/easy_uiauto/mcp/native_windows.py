@@ -132,3 +132,66 @@ def matching_windows(title, *, handle=0, partial=False):
         return exact
     return [window for window in windows if window["visible"] and window["title"]
             and title.casefold() in window["title"].casefold()]
+
+
+def menu_owner(handle: int) -> int:
+    """Native popup menus may have no GW_OWNER; query their active menu loop."""
+    class GUIThreadInfo(ctypes.Structure):
+        _fields_ = [("cbSize", wintypes.DWORD), ("flags", wintypes.DWORD),
+                    ("hwndActive", wintypes.HWND), ("hwndFocus", wintypes.HWND),
+                    ("hwndCapture", wintypes.HWND), ("hwndMenuOwner", wintypes.HWND),
+                    ("hwndMoveSize", wintypes.HWND), ("hwndCaret", wintypes.HWND),
+                    ("rcCaret", wintypes.RECT)]
+    user32, _callback = _api()
+    info = GUIThreadInfo(cbSize=ctypes.sizeof(GUIThreadInfo))
+    query = user32.GetGUIThreadInfo
+    query.argtypes, query.restype = [wintypes.DWORD, ctypes.POINTER(GUIThreadInfo)], wintypes.BOOL
+    thread = user32.GetWindowThreadProcessId(handle, None)
+    if thread and query(thread, ctypes.byref(info)) and info.flags & 4:
+        return int(info.hwndMenuOwner or 0)
+    return 0
+
+
+def allow_foreground(process_id: int) -> bool:
+    """The foreground GUI grants only its own worker permission to activate a window."""
+    try:
+        user32=ctypes.WinDLL("user32",use_last_error=True)
+        call=user32.AllowSetForegroundWindow
+        call.argtypes,call.restype=[wintypes.DWORD],wintypes.BOOL
+        return bool(call(int(process_id)))
+    except (OSError,ValueError):return False
+
+
+def request_close_window(handle: int) -> bool:
+    """Ask a selected window to close asynchronously, honoring application prompts."""
+    user32=ctypes.WinDLL('user32',use_last_error=True)
+    post=user32.PostMessageW
+    post.argtypes,post.restype=[wintypes.HWND,wintypes.UINT,wintypes.WPARAM,wintypes.LPARAM],wintypes.BOOL
+    return bool(post(int(handle),0x0010,0,0))
+
+
+def process_elevated(process_id: int) -> bool:
+    """Read TokenElevation; access denial is unknown, never proof of elevation."""
+    kernel=ctypes.WinDLL("kernel32",use_last_error=True)
+    security=ctypes.WinDLL("advapi32",use_last_error=True)
+    kernel.OpenProcess.argtypes=[wintypes.DWORD,wintypes.BOOL,wintypes.DWORD]
+    kernel.OpenProcess.restype=wintypes.HANDLE
+    kernel.CloseHandle.argtypes=[wintypes.HANDLE];kernel.CloseHandle.restype=wintypes.BOOL
+    security.OpenProcessToken.argtypes=[wintypes.HANDLE,wintypes.DWORD,ctypes.POINTER(wintypes.HANDLE)]
+    security.OpenProcessToken.restype=wintypes.BOOL
+    security.GetTokenInformation.argtypes=[wintypes.HANDLE,ctypes.c_int,wintypes.LPVOID,
+                                           wintypes.DWORD,ctypes.POINTER(wintypes.DWORD)]
+    security.GetTokenInformation.restype=wintypes.BOOL
+    process=kernel.OpenProcess(0x1000,False,process_id)  # PROCESS_QUERY_LIMITED_INFORMATION
+    if not process:raise ctypes.WinError(ctypes.get_last_error())
+    token=wintypes.HANDLE()
+    try:
+        if not security.OpenProcessToken(process,8,ctypes.byref(token)):  # TOKEN_QUERY
+            raise ctypes.WinError(ctypes.get_last_error())
+        value,length=wintypes.DWORD(),wintypes.DWORD()
+        if not security.GetTokenInformation(token,20,ctypes.byref(value),ctypes.sizeof(value),ctypes.byref(length)):
+            raise ctypes.WinError(ctypes.get_last_error())
+        return bool(value.value)
+    finally:
+        if token:kernel.CloseHandle(token)
+        kernel.CloseHandle(process)

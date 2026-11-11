@@ -7,13 +7,17 @@ import tkinter
 import threading
 import time
 from contextlib import contextmanager
+from functools import wraps
+from inspect import signature
+import ast
+import json
 from queue import Empty, Queue
 from weakref import WeakSet
 
 import uiautomation
 
 from .draw import ScreenLineBox
-from .utils import find_control, package_location, correct_ctrl_position, push_message, VK_KEY_NAME
+from .utils import find_control, package_location, correct_ctrl_position, push_message, VK_KEY_NAME, strict_control_resolution
 
 
 _preview_lock = threading.RLock()
@@ -212,6 +216,7 @@ def locate_and_prepare(LOCATION, PARAMETERS, timeout=3.0, interval=0.2):
         try:
             control = find_control(LOCATION)
             if control:
+                Controller._activate_target(control)
                 try:
                     correct_x, correct_y = correct_ctrl_position(control)
                 except Exception as e:
@@ -294,7 +299,66 @@ def update_message_type(current_message_type):
     _message_type = current_message_type
 
 
+def _parameters(value):
+    """Decode legacy action arguments as data, never as executable Python."""
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except json.JSONDecodeError:
+            value = ast.literal_eval(value)
+    if not isinstance(value, dict):
+        raise ValueError("PARAMETERS must be an object")
+    return value
+
+
+def _action_message(failure_template):
+    """Keep legacy messages while sharing cancellation-safe action bookkeeping."""
+    def decorate(function):
+        parameters = signature(function)
+
+        @wraps(function)
+        def wrapped(*args, **kwargs):
+            bound = parameters.bind(*args, **kwargs)
+            level = _MESSAGE.INFO
+            original_error = None
+            try:
+                if "PARAMETERS" in bound.arguments:
+                    bound.arguments["PARAMETERS"] = _parameters(bound.arguments["PARAMETERS"])
+                # Locate without activation; each action activates only after its preflight.
+                with strict_control_resolution(activate=False):
+                    return function(*bound.args, **bound.kwargs)
+            except Exception as error:
+                original_error = error
+                level = _MESSAGE.ERROR
+                return failure_template.format(**bound.arguments, error=error)
+            except BaseException as error:
+                original_error = error
+                raise
+            finally:
+                try:
+                    update_message_type(level)
+                except Exception as error:
+                    if original_error is None:
+                        raise
+                    original_error.add_note(f"Message cleanup also failed: {error}")
+
+        return wrapped
+    return decorate
+
+
 class Controller:
+    @classmethod
+    def _activate_target(cls, control):
+        """Activate an already verified target by handle, never by a second lookup."""
+        top = control.GetTopLevelControl() if hasattr(control, "GetTopLevelControl") else control
+        if getattr(top, "ClassName", "") in {"Progman", "WorkerW", "Shell_TrayWnd", "Shell_SecondaryTrayWnd"}:
+            return
+        handle = int(getattr(top, "NativeWindowHandle", 0) or 0)
+        if not handle:
+            from .mcp.results import ActionError
+            raise ActionError("window_invalid", "Resolved control has no activatable top-level window handle")
+        cls.activate_window_handle(handle, top)
+
     """将原有顶层控制函数迁移为类方法，保持行为不变并复用公共构造逻辑。"""
 
     @classmethod
@@ -424,12 +488,14 @@ class Controller:
             uiautomation.ShowWindow(handle, uiautomation.SW.Restore)
         if uiautomation.GetForegroundWindow() != handle:
             uiautomation.SetForegroundWindow(handle)
+            time.sleep(0.005)
             if uiautomation.GetForegroundWindow() != handle and control is not None:
                 control.SetFocus()
         deadline = time.monotonic() + 0.5
         while uiautomation.GetForegroundWindow() != handle:
             if time.monotonic() >= deadline:
-                raise RuntimeError("[window_invalid] Could not activate the target window")
+                from .mcp.results import ActionError
+                raise ActionError("window_invalid", "Could not activate the target window")
             time.sleep(0.02)
         return {"executed": True, "method": "uia-window-activate"}
 
@@ -456,6 +522,7 @@ class Controller:
                           destination, wheel_times, state):
         started = time.monotonic()
         pointer_actions = {"click", "double-click", "right-click", "middle-click", "hover",
+                           "double-right-click", "double-middle-click",
                            "left-down", "left-up", "right-down", "right-up", "drag",
                            "wheel-up", "wheel-down"}
         if action in pointer_actions:
@@ -473,7 +540,15 @@ class Controller:
             if action in {"wheel-up", "wheel-down"} and int(wheel_times) < 0:
                 raise ValueError("wheel_times must not be negative")
             state["attempted"] = True
-            if action in {"click", "double-click", "right-click", "middle-click", "hover"}:
+            if action in {"double-right-click", "double-middle-click"}:
+                name = "RightClick" if action == "double-right-click" else "MiddleClick"
+                method = getattr(control if control is not None else uiautomation, name)
+                for delay in (uiautomation.GetDoubleClickTime() / 2000, 0):
+                    if control is not None:
+                        method(x=x, y=y, simulateMove=False, waitTime=delay)
+                    else:
+                        method(px, py, waitTime=delay)
+            elif action in {"click", "double-click", "right-click", "middle-click", "hover"}:
                 methods = {"click": "Click", "double-click": "DoubleClick", "right-click": "RightClick",
                            "middle-click": "MiddleClick", "hover": "MoveCursorToInnerPos"}
                 if control is not None:
@@ -546,225 +621,141 @@ class Controller:
                 "duration_seconds": round(time.monotonic() - started, 4)}
 
     @classmethod
+    @_action_message('步骤：{ActionTitle} 控件【{Name}】 执行动作 点击 异常：{error}')
     def left_click(cls, ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex,
                       AutomationId, Xpath, Img, PARAMETERS):
-        _MESSAGE_TYPE = _MESSAGE.INFO
-        MESSAGE = ""
+        control, x, y = prepare_control(WindowName, Name, ClassName, ControlType,
+                                        foundIndex, AutomationId, Xpath, Img, PARAMETERS)
+        cls.execute_resolved("click", control=control, x=x, y=y)
 
-        try:
-            # 准备控件
-            control, x, y = prepare_control(WindowName, Name, ClassName, ControlType,
-                                            foundIndex, AutomationId, Xpath, Img, PARAMETERS)
-            cls.execute_resolved("click", control=control, x=x, y=y)
-
-            MESSAGE = f"步骤：{ActionTitle} 控件【{Name}】 执行动作 点击 成功！"
-
-        except Exception as e:
-            _MESSAGE_TYPE = _MESSAGE.ERROR
-            MESSAGE = f"步骤：{ActionTitle} 控件【{Name}】 执行动作 点击 异常：{e}"
-
-        finally:
-            update_message_type(_MESSAGE_TYPE)
-            return MESSAGE
+        return f"步骤：{ActionTitle} 控件【{Name}】 执行动作 点击 成功！"
 
     @classmethod
+    @_action_message('步骤：{ActionTitle} 控件【{Name}】 执行动作 鼠标左键按下 异常：{error}')
     def mouse_left_press(cls, ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
                             PARAMETERS):
-        _MESSAGE_TYPE = _MESSAGE.INFO
-        MESSAGE = ""
-        try:
-            LOCATION = cls._make_location(WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
-                                           PARAMETERS)
+        LOCATION = cls._make_location(WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
+                                       PARAMETERS)
 
-            control = find_control(LOCATION)
-            if control:
-                x, y = get_pos(control, PARAMETERS)
-                cls.execute_resolved("left-down", control=control, x=x, y=y)
-            else:
-                raise Exception("未找到控件！")
-            MESSAGE = f"步骤：{ActionTitle} 控件【{Name}】 执行动作 鼠标左键按下 成功！"
-        except Exception as e:
-            _MESSAGE_TYPE = _MESSAGE.ERROR
-            MESSAGE = f"步骤：{ActionTitle} 控件【{Name}】 执行动作 鼠标左键按下 异常：{e}"
-        finally:
-            update_message_type(_MESSAGE_TYPE)
-            return MESSAGE
+        control = find_control(LOCATION)
+        if control:
+            x, y = get_pos(control, PARAMETERS)
+            cls.execute_resolved("left-down", control=control, x=x, y=y)
+        else:
+            raise Exception("未找到控件！")
+        return f"步骤：{ActionTitle} 控件【{Name}】 执行动作 鼠标左键按下 成功！"
 
     @classmethod
+    @_action_message('步骤：{ActionTitle} 控件【{Name}】 执行动作 鼠标左键释放 异常：{error}')
     def mouse_left_release(cls, ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
                               PARAMETERS):
-        _MESSAGE_TYPE = _MESSAGE.INFO
-        MESSAGE = ""
-        try:
-            LOCATION = cls._make_location(WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
-                                           PARAMETERS)
+        LOCATION = cls._make_location(WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
+                                       PARAMETERS)
 
-            control = find_control(LOCATION)
-            if control:
-                x, y = get_pos(control, PARAMETERS)
-                cls.execute_resolved("left-up", control=control, x=x, y=y)
-                MESSAGE = f"步骤：{ActionTitle} 控件【{Name}】 执行动作 鼠标左键释放 成功！"
-            else:
-                raise Exception("未找到控件！")
-        except Exception as e:
-            _MESSAGE_TYPE = _MESSAGE.ERROR
-            MESSAGE = f"步骤：{ActionTitle} 控件【{Name}】 执行动作 鼠标左键释放 异常：{e}"
-        finally:
-            update_message_type(_MESSAGE_TYPE)
-            return MESSAGE
+        control = find_control(LOCATION)
+        if control:
+            x, y = get_pos(control, PARAMETERS)
+            cls.execute_resolved("left-up", control=control, x=x, y=y)
+            return f"步骤：{ActionTitle} 控件【{Name}】 执行动作 鼠标左键释放 成功！"
+        else:
+            raise Exception("未找到控件！")
 
     @classmethod
+    @_action_message('步骤：{ActionTitle} 控件【{Name}】 执行动作 右键点击 异常：{error}')
     def right_click(cls, ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
                        PARAMETERS):
-        _MESSAGE_TYPE = _MESSAGE.INFO
-        MESSAGE = ""
-        try:
-            LOCATION = cls._make_location(WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
-                                           PARAMETERS)
+        LOCATION = cls._make_location(WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
+                                       PARAMETERS)
 
-            control = find_control(LOCATION)
-            if control:
-                x, y = get_pos(control, PARAMETERS)
-                cls.execute_resolved("right-click", control=control, x=x, y=y)
-            else:
-                raise Exception("未找到控件！")
-            MESSAGE = f"步骤：{ActionTitle} 控件【{Name}】 执行动作 右键点击 成功！"
-        except Exception as e:
-            _MESSAGE_TYPE = _MESSAGE.ERROR
-            MESSAGE = f"步骤：{ActionTitle} 控件【{Name}】 执行动作 右键点击 异常：{e}"
-        finally:
-            update_message_type(_MESSAGE_TYPE)
-            return MESSAGE
+        control = find_control(LOCATION)
+        if control:
+            x, y = get_pos(control, PARAMETERS)
+            cls.execute_resolved("right-click", control=control, x=x, y=y)
+        else:
+            raise Exception("未找到控件！")
+        return f"步骤：{ActionTitle} 控件【{Name}】 执行动作 右键点击 成功！"
 
     @classmethod
+    @_action_message('步骤：{ActionTitle} 控件【{Name}】 执行动作 鼠标右键按下 异常：{error}')
     def mouse_right_press(cls, ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
                              PARAMETERS):
-        _MESSAGE_TYPE = _MESSAGE.INFO
-        MESSAGE = ""
-        try:
-            LOCATION = cls._make_location(WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
-                                           PARAMETERS)
+        LOCATION = cls._make_location(WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
+                                       PARAMETERS)
 
-            control = find_control(LOCATION)
-            if control:
-                x, y = get_pos(control, PARAMETERS)
-                cls.execute_resolved("right-down", control=control, x=x, y=y)
-            else:
-                raise Exception("未找到控件！")
-            MESSAGE = f"步骤：{ActionTitle} 控件【{Name}】 执行动作 鼠标右键按下 成功！"
-        except Exception as e:
-            _MESSAGE_TYPE = _MESSAGE.ERROR
-            MESSAGE = f"步骤：{ActionTitle} 控件【{Name}】 执行动作 鼠标右键按下 异常：{e}"
-        finally:
-            update_message_type(_MESSAGE_TYPE)
-            return MESSAGE
+        control = find_control(LOCATION)
+        if control:
+            x, y = get_pos(control, PARAMETERS)
+            cls.execute_resolved("right-down", control=control, x=x, y=y)
+        else:
+            raise Exception("未找到控件！")
+        return f"步骤：{ActionTitle} 控件【{Name}】 执行动作 鼠标右键按下 成功！"
 
     @classmethod
+    @_action_message('步骤：{ActionTitle} 控件【{Name}】 执行动作 鼠标右键释放 异常：{error}')
     def mouse_right_release(cls, ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
                               PARAMETERS):
-        _MESSAGE_TYPE = _MESSAGE.INFO
-        MESSAGE = ""
-        try:
-            LOCATION = cls._make_location(WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
-                                           PARAMETERS)
+        LOCATION = cls._make_location(WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
+                                       PARAMETERS)
 
-            control = find_control(LOCATION)
-            if control:
-                x, y = get_pos(control, PARAMETERS)
-                cls.execute_resolved("right-up", control=control, x=x, y=y)
-                MESSAGE = f"步骤：{ActionTitle} 控件【{Name}】 执行动作 鼠标右键释放 成功！"
-            else:
-                raise Exception("未找到控件！")
-        except Exception as e:
-            _MESSAGE_TYPE = _MESSAGE.ERROR
-            MESSAGE = f"步骤：{ActionTitle} 控件【{Name}】 执行动作 鼠标右键释放 异常：{e}"
-        finally:
-            update_message_type(_MESSAGE_TYPE)
-            return MESSAGE
+        control = find_control(LOCATION)
+        if control:
+            x, y = get_pos(control, PARAMETERS)
+            cls.execute_resolved("right-up", control=control, x=x, y=y)
+            return f"步骤：{ActionTitle} 控件【{Name}】 执行动作 鼠标右键释放 成功！"
+        else:
+            raise Exception("未找到控件！")
 
     @classmethod
+    @_action_message('步骤：{ActionTitle} 控件【{Name}】 执行动作 中键点击 异常：{error}')
     def centre_click(cls, ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
                         PARAMETERS):
-        _MESSAGE_TYPE = _MESSAGE.INFO
-        MESSAGE = ""
-        try:
-            LOCATION = cls._make_location(WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
-                                           PARAMETERS)
+        LOCATION = cls._make_location(WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
+                                       PARAMETERS)
 
-            control = find_control(LOCATION)
-            if control:
-                x, y = get_pos(control, PARAMETERS)
-                cls.execute_resolved("middle-click", control=control, x=x, y=y)
-            else:
-                raise Exception("未找到控件！")
-            MESSAGE = f"步骤：{ActionTitle} 控件【{Name}】 执行动作 中键点击 成功！"
-        except Exception as e:
-            _MESSAGE_TYPE = _MESSAGE.ERROR
-            MESSAGE = f"步骤：{ActionTitle} 控件【{Name}】 执行动作 中键点击 异常：{e}"
-        finally:
-            update_message_type(_MESSAGE_TYPE)
-            return MESSAGE
+        control = find_control(LOCATION)
+        if control:
+            x, y = get_pos(control, PARAMETERS)
+            cls.execute_resolved("middle-click", control=control, x=x, y=y)
+        else:
+            raise Exception("未找到控件！")
+        return f"步骤：{ActionTitle} 控件【{Name}】 执行动作 中键点击 成功！"
 
     @classmethod
+    @_action_message('步骤：{ActionTitle} 控件【{Name}】 执行动作 双击 异常：{error}')
     def double_click(cls, ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
                         PARAMETERS):
-        _MESSAGE_TYPE = _MESSAGE.INFO
-        MESSAGE = ""
-        try:
-            LOCATION = cls._make_location(WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
-                                           PARAMETERS)
+        LOCATION = cls._make_location(WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
+                                       PARAMETERS)
 
-            control = find_control(LOCATION)
-            if control:
-                x, y = get_pos(control, PARAMETERS)
-                cls.execute_resolved("double-click", control=control, x=x, y=y)
-            else:
-                raise Exception("未找到控件！")
+        control = find_control(LOCATION)
+        if control:
+            x, y = get_pos(control, PARAMETERS)
+            cls.execute_resolved("double-click", control=control, x=x, y=y)
+        else:
+            raise Exception("未找到控件！")
 
-            MESSAGE = f"步骤：{ActionTitle} 控件【{Name}】 执行动作 双击 成功！"
-        except Exception as e:
-            _MESSAGE_TYPE = _MESSAGE.ERROR
-            MESSAGE = f"步骤：{ActionTitle} 控件【{Name}】 执行动作 双击 异常：{e}"
-        finally:
-            update_message_type(_MESSAGE_TYPE)
-            return MESSAGE
+        return f"步骤：{ActionTitle} 控件【{Name}】 执行动作 双击 成功！"
 
     @classmethod
+    @_action_message('步骤：{ActionTitle} 位置【{x}{y}】 执行动作 移动鼠标到坐标位置 异常：{error}')
     def mouse_move_pos(cls, ActionTitle, x, y):
-        _MESSAGE_TYPE = _MESSAGE.INFO
-        MESSAGE = ""
-        try:
-            cls.execute_resolved("hover", x=x, y=y)
-            MESSAGE = f"步骤：{ActionTitle} 位置【{x}{y}】 执行动作 移动鼠标到坐标位置 成功！"
-        except Exception as e:
-            _MESSAGE_TYPE = _MESSAGE.ERROR
-            MESSAGE = f"步骤：{ActionTitle} 位置【{x}{y}】 执行动作 移动鼠标到坐标位置 异常：{e}"
-        finally:
-            update_message_type(_MESSAGE_TYPE)
-            return MESSAGE
+        cls.execute_resolved("hover", x=x, y=y)
+        return f"步骤：{ActionTitle} 位置【{x}{y}】 执行动作 移动鼠标到坐标位置 成功！"
 
     @classmethod
+    @_action_message('步骤：{ActionTitle} 控件【{Name}】 执行动作 移动鼠标到坐标位置 异常：{error}')
     def mouse_move_control(cls, ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
                               PARAMETERS):
-        _MESSAGE_TYPE = _MESSAGE.INFO
-        MESSAGE = ""
-        try:
-            LOCATION = cls._make_location(WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
-                                           PARAMETERS)
+        LOCATION = cls._make_location(WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
+                                       PARAMETERS)
 
-            control = find_control(LOCATION)
-            if control:
-                x, y = get_pos(control, PARAMETERS)
-                cls.execute_resolved("hover", control=control, x=x, y=y)
-            else:
-                raise Exception("未找到控件！")
-            MESSAGE = f"步骤：{ActionTitle} 控件【{Name}】 执行动作 移动鼠标到坐标位置 成功！"
-        except Exception as e:
-            _MESSAGE_TYPE = _MESSAGE.ERROR
-            MESSAGE = f"步骤：{ActionTitle} 控件【{Name}】 执行动作 移动鼠标到坐标位置 异常：{e}"
-        finally:
-            update_message_type(_MESSAGE_TYPE)
-            return MESSAGE
+        control = find_control(LOCATION)
+        if control:
+            x, y = get_pos(control, PARAMETERS)
+            cls.execute_resolved("hover", control=control, x=x, y=y)
+        else:
+            raise Exception("未找到控件！")
+        return f"步骤：{ActionTitle} 控件【{Name}】 执行动作 移动鼠标到坐标位置 成功！"
 
     @classmethod
     def drag_control_by_control(cls, current_control, target_control):
@@ -772,187 +763,143 @@ class Controller:
                                     destination=_control_rectangle(target_control))
 
     @classmethod
+    @_action_message('步骤：{ActionTitle} 执行动作 拖动控件 异常：{error}')
     def drag_control(cls, ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
                         PARAMETERS):
-        _MESSAGE_TYPE = _MESSAGE.INFO
-        MESSAGE = ""
-        try:
-            LOCATION = {'WindowName': WindowName,
-                        'Name': Name,
-                        'ClassName': ClassName,
-                        'ControlType': ControlType,
-                        'foundIndex': foundIndex,
-                        'AutomationId': AutomationId,
-                        'Xpath': Xpath,
-                        'Img': Img,
-                        'PARAMETERS': {}
-                        }
-            DestCarl_Locators = {
-                'WindowName': PARAMETERS['目的控件父窗口名称'],
-                'Name': PARAMETERS['目的控件Name'],
-                'ClassName': PARAMETERS['目的控件ClassName'],
-                'ControlType': PARAMETERS['目的控件ControlType'],
-                'foundIndex': PARAMETERS['目的控件foundIndex'],
-                'AutomationId': PARAMETERS['目的控件AutomationId'],
-                'Xpath': PARAMETERS['目的控件Xpath'],
-            }
-            control = find_control(LOCATION)
-            DestCtrl = find_control(DestCarl_Locators)
-            cls.drag_control_by_control(control, DestCtrl)
+        LOCATION = {'WindowName': WindowName,
+                    'Name': Name,
+                    'ClassName': ClassName,
+                    'ControlType': ControlType,
+                    'foundIndex': foundIndex,
+                    'AutomationId': AutomationId,
+                    'Xpath': Xpath,
+                    'Img': Img,
+                    'PARAMETERS': {}
+                    }
+        DestCarl_Locators = {
+            'WindowName': PARAMETERS['目的控件父窗口名称'],
+            'Name': PARAMETERS['目的控件Name'],
+            'ClassName': PARAMETERS['目的控件ClassName'],
+            'ControlType': PARAMETERS['目的控件ControlType'],
+            'foundIndex': PARAMETERS['目的控件foundIndex'],
+            'AutomationId': PARAMETERS['目的控件AutomationId'],
+            'Xpath': PARAMETERS['目的控件Xpath'],
+        }
+        if "match_mode" in PARAMETERS:
+            from .mcp.protocol import with_match_mode
+            LOCATION = with_match_mode(LOCATION, PARAMETERS["match_mode"])
+            DestCarl_Locators = with_match_mode(DestCarl_Locators, PARAMETERS["match_mode"])
+        control = find_control(LOCATION)
+        DestCtrl = find_control(DestCarl_Locators)
+        cls._activate_target(control)
+        cls.drag_control_by_control(control, DestCtrl)
 
-            MESSAGE = f"步骤：{ActionTitle} 执行动作 拖动控件 成功"
-        except BaseException as e:
-            _MESSAGE_TYPE = _MESSAGE.ERROR
-            MESSAGE = f"步骤：{ActionTitle} 执行动作 拖动控件 异常：{e}"
-        finally:
-            update_message_type(_MESSAGE_TYPE)
-            return MESSAGE
+        return f"步骤：{ActionTitle} 执行动作 拖动控件 成功"
 
     @classmethod
+    @_action_message('步骤：{ActionTitle} 控件【{Name}】 执行动作 设置文本 异常：{error}')
     def set_text(cls, ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
                     PARAMETERS):
-        _MESSAGE_TYPE = _MESSAGE.INFO
-        MESSAGE = ""
-        try:
-            LOCATION = cls._make_location(WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
-                                           PARAMETERS)
+        LOCATION = cls._make_location(WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
+                                       PARAMETERS)
 
-            control = find_control(LOCATION)
-            if control:
-                correct_ctrl_position(control)
-            if not control:
-                raise RuntimeError("未找到控件！")
-            cls.execute_resolved("send-keys", control=control, text=PARAMETERS["设置文本"])
-            MESSAGE = f"步骤：{ActionTitle} 控件【{Name}】 执行动作 设置文本 成功！"
-        except Exception as e:
-            _MESSAGE_TYPE = _MESSAGE.ERROR
-            MESSAGE = f"步骤：{ActionTitle} 控件【{Name}】 执行动作 设置文本 异常：{e}"
-        finally:
-            update_message_type(_MESSAGE_TYPE)
-            return MESSAGE
+        control = find_control(LOCATION)
+        if control:
+            cls._activate_target(control)
+            correct_ctrl_position(control)
+        if not control:
+            raise RuntimeError("未找到控件！")
+        cls.execute_resolved("send-keys", control=control, text=PARAMETERS["设置文本"])
+        return f"步骤：{ActionTitle} 控件【{Name}】 执行动作 设置文本 成功！"
 
     @classmethod
+    @_action_message('步骤：{ActionTitle}执行动作 输入 异常：{error}')
     def input_text(cls, ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
                       PARAMETERS):
-        _MESSAGE_TYPE = _MESSAGE.INFO
-        MESSAGE = ""
-        try:
-            LOCATION = cls._make_location(WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
-                                           PARAMETERS)
-            if WindowName:
-                control = find_control(LOCATION)
-                if control:
-                    cls.execute_resolved("click", control=control)
-                else:
-                    raise RuntimeError("未找到控件！")
-            cls.execute_resolved("paste-text", text=PARAMETERS['输入文本'])
-            MESSAGE = f"步骤：{ActionTitle}执行动作 输入 成功"
-        except Exception as e:
-            _MESSAGE_TYPE = _MESSAGE.ERROR
-            MESSAGE = f"步骤：{ActionTitle}执行动作 输入 异常：{e}"
-        finally:
-            update_message_type(_MESSAGE_TYPE)
-            return MESSAGE
+        LOCATION = cls._make_location(WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
+                                       PARAMETERS)
+        if WindowName:
+            control = find_control(LOCATION)
+            if control:
+                cls._activate_target(control)
+                cls.execute_resolved("click", control=control)
+            else:
+                raise RuntimeError("未找到控件！")
+        cls.execute_resolved("paste-text", text=PARAMETERS['输入文本'])
+        return f"步骤：{ActionTitle}执行动作 输入 成功"
 
     @classmethod
+    @_action_message('步骤：{ActionTitle}执行动作 键盘操作 异常：{error}')
     def key_click(cls, ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
                      PARAMETERS):
-        _MESSAGE_TYPE = _MESSAGE.INFO
-        MESSAGE = ""
-        try:
-            LOCATION = cls._make_location(WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
-                                           PARAMETERS)
-            if WindowName:
-                control = find_control(LOCATION)
-                if control:
-                    cls.execute_resolved("click", control=control)
-                else:
-                    raise RuntimeError("未找到控件！")
-            cls.press_key(PARAMETERS['键盘按键'])
-            MESSAGE = f"步骤：{ActionTitle}执行动作 键盘操作 成功"
-        except Exception as e:
-            _MESSAGE_TYPE = _MESSAGE.ERROR
-            MESSAGE = f"步骤：{ActionTitle}执行动作 键盘操作 异常：{e}"
-        finally:
-            update_message_type(_MESSAGE_TYPE)
-            return MESSAGE
+        LOCATION = cls._make_location(WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
+                                       PARAMETERS)
+        if WindowName:
+            control = find_control(LOCATION)
+            if control:
+                cls._activate_target(control)
+                cls.execute_resolved("click", control=control)
+            else:
+                raise RuntimeError("未找到控件！")
+        cls.press_key(PARAMETERS['键盘按键'])
+        return f"步骤：{ActionTitle}执行动作 键盘操作 成功"
 
     @classmethod
+    @_action_message('步骤：{ActionTitle}执行动作 键盘按下 异常：{error}')
     def key_press(cls, ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
                      PARAMETERS):
-        _MESSAGE_TYPE = _MESSAGE.INFO
-        MESSAGE = ""
-        try:
-            LOCATION = cls._make_location(WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
-                                           PARAMETERS)
-            if WindowName:
-                control = find_control(LOCATION)
-                if control:
-                    cls.execute_resolved("click", control=control)
-                else:
-                    raise RuntimeError("未找到控件！")
-            cls.key_down(PARAMETERS['键盘按键'])
-            MESSAGE = f"步骤：{ActionTitle}执行动作 键盘按下 成功"
-        except Exception as e:
-            _MESSAGE_TYPE = _MESSAGE.ERROR
-            MESSAGE = f"步骤：{ActionTitle}执行动作 键盘按下 异常：{e}"
-        finally:
-            update_message_type(_MESSAGE_TYPE)
-            return MESSAGE
+        LOCATION = cls._make_location(WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
+                                       PARAMETERS)
+        if WindowName:
+            control = find_control(LOCATION)
+            if control:
+                cls._activate_target(control)
+                cls.execute_resolved("click", control=control)
+            else:
+                raise RuntimeError("未找到控件！")
+        cls.key_down(PARAMETERS['键盘按键'])
+        return f"步骤：{ActionTitle}执行动作 键盘按下 成功"
 
     @classmethod
+    @_action_message('步骤：{ActionTitle}执行动作 键盘释放 异常：{error}')
     def key_release(cls, ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
                        PARAMETERS):
-        _MESSAGE_TYPE = _MESSAGE.INFO
-        MESSAGE = ""
-        try:
-            LOCATION = cls._make_location(WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
-                                           PARAMETERS)
-            if WindowName:
-                control = find_control(LOCATION)
-                if control:
-                    cls.execute_resolved("click", control=control)
-                else:
-                    raise RuntimeError("未找到控件！")
-            cls.key_up(PARAMETERS['键盘按键'])
-            MESSAGE = f"步骤：{ActionTitle}执行动作 键盘释放 成功"
-        except Exception as e:
-            _MESSAGE_TYPE = _MESSAGE.ERROR
-            MESSAGE = f"步骤：{ActionTitle}执行动作 键盘释放 异常：{e}"
-        finally:
-            update_message_type(_MESSAGE_TYPE)
-            return MESSAGE
+        LOCATION = cls._make_location(WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
+                                       PARAMETERS)
+        if WindowName:
+            control = find_control(LOCATION)
+            if control:
+                cls._activate_target(control)
+                cls.execute_resolved("click", control=control)
+            else:
+                raise RuntimeError("未找到控件！")
+        cls.key_up(PARAMETERS['键盘按键'])
+        return f"步骤：{ActionTitle}执行动作 键盘释放 成功"
 
     @classmethod
+    @_action_message('步骤：{ActionTitle}执行动作 组合键 异常：{error}')
     def key_group(cls, ActionTitle, WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
                      PARAMETERS):
-        _MESSAGE_TYPE = _MESSAGE.INFO
-        MESSAGE = ""
-        try:
-            LOCATION = cls._make_location(WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
-                                           PARAMETERS)
-            if WindowName:
-                control = find_control(LOCATION)
-                if control:
-                    cls.execute_resolved("click", control=control)
-                else:
-                    raise RuntimeError("未找到控件！")
-            keys = PARAMETERS['组合键'].replace('++', '+{PLUS}').split('+')
-            cls.hotkey(*(key if key != '{PLUS}' else '+' for key in keys))
-            MESSAGE = f"步骤：{ActionTitle}执行动作 组合键 成功"
-        except Exception as e:
-            _MESSAGE_TYPE = _MESSAGE.ERROR
-            MESSAGE = f"步骤：{ActionTitle}执行动作 组合键 异常：{e}"
-        finally:
-            update_message_type(_MESSAGE_TYPE)
-            return MESSAGE
+        LOCATION = cls._make_location(WindowName, Name, ClassName, ControlType, foundIndex, AutomationId, Xpath, Img,
+                                       PARAMETERS)
+        if WindowName:
+            control = find_control(LOCATION)
+            if control:
+                cls._activate_target(control)
+                cls.execute_resolved("click", control=control)
+            else:
+                raise RuntimeError("未找到控件！")
+        keys = PARAMETERS['组合键'].replace('++', '+{PLUS}').split('+')
+        cls.hotkey(*(key if key != '{PLUS}' else '+' for key in keys))
+        return f"步骤：{ActionTitle}执行动作 组合键 成功"
 
     @classmethod
     def activate_window(cls, WindowTitle):
         from .utils import _native_window_scope
 
         try:
-            window = _native_window_scope(WindowTitle, {})
+            if not WindowTitle: return False
+            window = _native_window_scope(WindowTitle, {}, native_title=True)
             cls.activate_window_handle(window.NativeWindowHandle, control=window)
             return True
         except Exception as error:
@@ -998,8 +945,8 @@ def get_pos(control, PARAMETERS: dict):
     :return
         tuple: (x, y) 坐标值
     """
-    if isinstance(PARAMETERS,str):
-        PARAMETERS = eval(PARAMETERS)
+    PARAMETERS = _parameters(PARAMETERS)
+    Controller._activate_target(control)
     correct_x, correct_y = correct_ctrl_position(control)
     show_ctrl_area(control)
     x, y = (int(PARAMETERS.get("x", correct_x)), int(PARAMETERS.get("y", correct_y)))
@@ -1438,7 +1385,7 @@ def generate_action_title(record_info):
 
 
 # @timeit
-def run_action(record_info):
+def run_action(record_info, *, match_mode=None):
     """
     执行动作
 
@@ -1448,12 +1395,13 @@ def run_action(record_info):
     :return
         str: 执行结果信息
     """
-    # 兼容LOCATION中可能存在PARAMETERS
-    if "PARAMETERS" not in record_info["LOCATION"]:
-        record_info["LOCATION"]["PARAMETERS"] = {}
+    from .mcp.protocol import normalize_location, with_match_mode
+
+    location = (with_match_mode(record_info["LOCATION"], match_mode) if match_mode is not None
+                else normalize_location(record_info["LOCATION"]))
     func = Execute_Function.get(record_info["ACTION"])
-    ActionTitle = generate_action_title(record_info)
-    result = func(ActionTitle, **record_info["LOCATION"])
+    ActionTitle = generate_action_title({**record_info, "LOCATION": location})
+    result = func(ActionTitle, **location)
     return result
 
 

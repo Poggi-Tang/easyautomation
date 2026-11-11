@@ -132,20 +132,12 @@ def _build_location(
     found_index: int = 0,
     xpath: str = "",
     parameters: str = "",
+    match_mode: str | None = None,
 ) -> dict:
     """Build a LOCATION dict from tool parameters."""
-    location = {
-        "WindowName": window_name or "",
-        "Name": name or "",
-        "ClassName": class_name or "",
-        "ControlType": control_type or "",
-        "foundIndex": found_index or "",
-        "AutomationId": automation_id or "",
-        "Xpath": json.loads(xpath) if xpath else [],
-        "Img": "",
-        "PARAMETERS": json.loads(parameters) if parameters else {},
-    }
-    return location
+    from .protocol import build_location
+    return build_location(window_name, name, class_name, control_type, automation_id,
+                          found_index, xpath, parameters, match_mode)
 
 
 def _screen_region(
@@ -521,6 +513,8 @@ def _normalize_xpath_step(step: dict) -> dict:
         normalized["found_index"] = found_index
     if search_depth not in (None, ""):
         normalized["search_depth"] = search_depth
+    if "match_mode" in step:
+        normalized["match_mode"] = step["match_mode"]
     return normalized
 
 
@@ -898,12 +892,13 @@ def find_control(
     automation_id: str = "",
     found_index: int = 0,
     xpath: str = "",
+    match_mode: Optional[str] = None,
 ) -> str:
     """Find a control from a complete easy_uiauto LOCATION object.
 
     Prefer ``location`` from an easy_uiauto recorded action or from
-    ``get_control_at_position``. Lookup uses window-scoped AutomationId first,
-    contextual XPath second, and the Name/ClassName/ControlType combination third.
+    ``get_control_at_position``. Identity mode returns the first matching Name
+    (or AutomationId when Name is absent). Position mode uses type-sibling ordinals.
     Legacy individual selector arguments remain available for compatibility.
 
     Args:
@@ -914,7 +909,8 @@ def find_control(
         class_name: Control class name.
         control_type: Control type (e.g., "ButtonControl", "EditControl").
         automation_id: UIA AutomationId.
-        found_index: Explicit 1-based duplicate index (0 requires a unique match).
+        found_index: 1-based type-sibling index, used only in position mode.
+        match_mode: identity (default) or position; overrides recorded step modes.
         xpath: JSON string of XPath path list, e.g. '[{"ControlType":"WindowControl","Name":"Notepad"}]'.
     """
     try:
@@ -931,6 +927,9 @@ def find_control(
                 xpath=xpath,
             )
 
+        if match_mode is not None:
+            from .protocol import with_match_mode
+            resolved_location = with_match_mode(resolved_location, match_mode)
         ctrl = _find_control(resolved_location, debug=False)
         if not ctrl or ctrl is False:
             return f"Error: Control not found with the given parameters"
@@ -1158,8 +1157,17 @@ async def scan_window_knowledge(
     """Scan one application window into an Obsidian-compatible UI knowledge vault.
 
     The default visual-first strategy asks AI for only important controls and
-    regions, resolves their pixel targets through UIA, selects a stable ancestor,
-    and verifies LOCATION plus control images. Use full-uia only for diagnostics.
+    regions, resolves their pixel targets through Python uiautomation.ControlFromPoint,
+    selects a stable ancestor, and verifies LOCATION plus control images. It does not
+    enumerate the full UIA tree. Both strategies use the same uiautomation backend;
+    full-uia is for diagnostics, not a backend switch.
+
+    uia_controls_seen counts selected controls, including the bounded native-label
+    supplement, not all nodes exposed by the application. ok=true means the scan
+    completed; check commands before claiming executable knowledge was learned.
+    Visual binding failures include reason and diagnostics distinguishing empty or
+    failed point lookup, geometry rejection, semantic rejection and low scores.
+    They do not establish that the application exposes no child controls.
 
     Args:
         window_name: Exact or partial title of the visible application window.
@@ -1718,6 +1726,7 @@ def click(
     click_type: str = "single",
     x_offset: int = -1,
     y_offset: int = -1,
+    match_mode: Optional[str] = None,
 ) -> str:
     """Click on a UI control.
 
@@ -1730,7 +1739,8 @@ def click(
         class_name: Control class name.
         control_type: Control type (e.g., "ButtonControl").
         automation_id: UIA AutomationId.
-        found_index: Explicit 1-based duplicate index (0 requires a unique match).
+        found_index: 1-based type-sibling index, used only in position mode.
+        match_mode: identity (default) or position; overrides recorded step modes.
         xpath: JSON XPath path string.
         button: Mouse button - "left", "right", or "middle".
         click_type: Click type - "single", "double".
@@ -1747,7 +1757,7 @@ def click(
         location = _build_location(
             window_name=window_name, name=name, class_name=class_name,
             control_type=control_type, automation_id=automation_id,
-            found_index=found_index, xpath=xpath, parameters=params,
+            found_index=found_index, xpath=xpath, parameters=params, match_mode=match_mode,
         )
 
         if click_type == "double":
@@ -1952,6 +1962,7 @@ def type_text(
     found_index: int = 0,
     xpath: str = "",
     method: str = "clipboard",
+    match_mode: Optional[str] = None,
 ) -> str:
     """Type text into a control.
 
@@ -1965,7 +1976,8 @@ def type_text(
         class_name: Target control class name.
         control_type: Target control type (e.g., "EditControl").
         automation_id: Target AutomationId.
-        found_index: 1-based index for duplicate controls.
+        found_index: 1-based type-sibling index, used only in position mode.
+        match_mode: identity (default) or position; overrides recorded step modes.
         xpath: Target XPath JSON string.
         method: "clipboard" (default, paste via Ctrl+V) or "sendkeys" (direct SendKeys).
     """
@@ -1977,7 +1989,7 @@ def type_text(
             location = _build_location(
                 window_name=window_name, name=name, class_name=class_name,
                 control_type=control_type, automation_id=automation_id,
-                found_index=found_index, xpath=xpath,
+                found_index=found_index, xpath=xpath, match_mode=match_mode,
             )
             result = Controller.input_text(
                 ActionTitle=f"Type text into {name or control_type or 'control'}",
@@ -1989,13 +2001,13 @@ def type_text(
                 AutomationId=automation_id,
                 Xpath=location["Xpath"],
                 Img="",
-                PARAMETERS={"输入文本": text},
+                PARAMETERS={**location["PARAMETERS"], "输入文本": text},
             )
         else:
             location = _build_location(
                 window_name=window_name, name=name, class_name=class_name,
                 control_type=control_type, automation_id=automation_id,
-                found_index=found_index, xpath=xpath,
+                found_index=found_index, xpath=xpath, match_mode=match_mode,
             )
             result = Controller.set_text(
                 ActionTitle=f"Set text on {name or control_type or 'control'}",
@@ -2007,7 +2019,7 @@ def type_text(
                 AutomationId=automation_id,
                 Xpath=location["Xpath"],
                 Img="",
-                PARAMETERS={"设置文本": text},
+                PARAMETERS={**location["PARAMETERS"], "设置文本": text},
             )
         if _result_ok(result):
             _auto_learn_location(f"Type text into {name or control_type or 'control'}", location)
@@ -2027,6 +2039,7 @@ def set_text(
     automation_id: str = "",
     found_index: int = 0,
     xpath: str = "",
+    match_mode: Optional[str] = None,
 ) -> str:
     """Set text directly on a control via SendKeys (replaces existing text).
 
@@ -2040,7 +2053,8 @@ def set_text(
         class_name: Target control class name.
         control_type: Target control type.
         automation_id: Target AutomationId.
-        found_index: 1-based index for duplicate controls.
+        found_index: 1-based type-sibling index, used only in position mode.
+        match_mode: identity (default) or position; overrides recorded step modes.
         xpath: Target XPath JSON string.
     """
     try:
@@ -2050,7 +2064,7 @@ def set_text(
         location = _build_location(
             window_name=window_name, name=name, class_name=class_name,
             control_type=control_type, automation_id=automation_id,
-            found_index=found_index, xpath=xpath,
+            found_index=found_index, xpath=xpath, match_mode=match_mode,
         )
         result = Controller.set_text(
             ActionTitle=f"Set text on {name or control_type}",
@@ -2062,7 +2076,7 @@ def set_text(
             AutomationId=automation_id,
             Xpath=location["Xpath"],
             Img="",
-            PARAMETERS={"设置文本": text},
+            PARAMETERS={**location["PARAMETERS"], "设置文本": text},
         )
         if _result_ok(result):
             _auto_learn_location(f"Set text on {name or control_type}", location)
@@ -2153,7 +2167,7 @@ def hotkey(
 
 @mcp.tool()
 @_action_result()
-def run_action(action_json: str) -> str:
+def run_action(action_json: str, match_mode: Optional[str] = None) -> str:
     """Execute one easy-uiauto recorded action.
 
     Args:
@@ -2166,6 +2180,9 @@ def run_action(action_json: str) -> str:
             raise ActionError("invalid_argument", "action_json must be a JSON object")
         if CURRENT_MODE == "learn" and _recorded_action_is_mutating(action):
             return "Error: Current mode is learn; mutating recorded actions are blocked"
+        if match_mode is not None:
+            from .protocol import with_match_mode
+            action = {**action, "LOCATION": with_match_mode(action["LOCATION"], match_mode)}
         result = _run_action_easy(action)
         if _result_ok(result):
             _auto_learn_recorded_action(action)
@@ -2251,7 +2268,7 @@ def run_actions(
                 recorded = params.get("action")
                 if recorded is None:
                     recorded = json.loads(params.get("action_json", "{}"))
-                result = run_action(json.dumps(recorded, ensure_ascii=False))
+                result = run_action(json.dumps(recorded, ensure_ascii=False), match_mode=params.get("match_mode"))
             else:
                 handler = handlers.get(method)
                 if handler is None:

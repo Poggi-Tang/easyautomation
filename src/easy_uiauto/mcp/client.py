@@ -90,8 +90,19 @@ class UIAutomationClient:
     def activate_window(self, title: str) -> str:
         return self._call("activate_window", window_name=title)
 
-    def get_control_tree(self, window_name: str, max_depth: int = 5) -> dict | str:
-        return self._call("get_control_tree", window_name=window_name, max_depth=max_depth)
+    def get_control_tree(self, window_name: str, max_depth: int = 5, *,
+                         max_nodes: int = 500, timeout_seconds: float = 15.0) -> dict:
+        """Wait for the bounded inspection plus transport overhead, then restore the socket."""
+        sock = self._sock
+        previous = sock.gettimeout() if sock is not None else None
+        try:
+            if sock is not None and previous is not None:
+                sock.settimeout(max(previous, timeout_seconds + 5.0))
+            return self._call("get_control_tree", window_name=window_name, max_depth=max_depth,
+                              max_nodes=max_nodes, timeout_seconds=timeout_seconds)
+        finally:
+            if sock is not None:
+                sock.settimeout(previous)
 
     def find_control(self, **kwargs) -> dict | str:
         return self._call("find_control", **kwargs)
@@ -103,21 +114,25 @@ class UIAutomationClient:
         return self._call("click", **kwargs)
 
     def smart_find(self, window_name: str, name: str = "", control_type: str = "",
-                   class_name: str = "", max_depth: int = 6) -> dict | str:
-        """Find a control using a direct control-tree walk."""
+                   class_name: str = "", max_depth: int = 6, *,
+                   match_mode: str | None = None, found_index: int = 0, xpath: str = "") -> dict | str:
+        """Find by first identity match, or an explicit type-sibling position."""
         return self._call("smart_find", window_name=window_name, name=name,
-                         control_type=control_type, class_name=class_name, max_depth=max_depth)
+                         control_type=control_type, class_name=class_name, max_depth=max_depth,
+                         match_mode=match_mode, found_index=found_index, xpath=xpath)
 
     def smart_click(self, window_name: str = "", name: str = "", control_type: str = "",
-                    class_name: str = "", button: str = "left", click_type: str = "single") -> str:
-        """Click a control by walking the control tree + pyautogui coordinate click."""
+                    class_name: str = "", button: str = "left", click_type: str = "single", *,
+                    match_mode: str | None = None, found_index: int = 0, xpath: str = "") -> str:
+        """Locate with the shared mode rules, then execute through Controller."""
         return self._call("smart_click", window_name=window_name, name=name,
                          control_type=control_type, class_name=class_name,
-                         button=button, click_type=click_type)
+                         button=button, click_type=click_type,
+                         match_mode=match_mode, found_index=found_index, xpath=xpath)
 
-    def run_action(self, action: dict) -> str:
+    def run_action(self, action: dict, *, match_mode: str | None = None) -> str:
         """Execute a recorded-style action dict directly via easy-uiauto run_action."""
-        return self._call("run_action", action=action)
+        return self._call("run_action", action=action, match_mode=match_mode)
 
     def run_actions(self, actions: list[dict], stop_on_error: bool = True,
                     delay_ms: int = 0) -> dict:

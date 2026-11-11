@@ -32,11 +32,23 @@ images, coordinates, recognition evidence and a local HTML viewer.
 
 ## What It Includes
 
+- **Knowledge GUI**: organize each application into usage instructions, a control
+  library with separate Tab states, and cross-region action sequences in a QtWidgets
+  workspace. Parameters apply to inputs and assertions; runtime evidence stays separate
+  from learning images.
+  Select an application window, hover to add or modify
+  regions, scroll through parent/child controls and press Ctrl to confirm. A floating
+  inspector shows AutomationID, Name, ClassName and ControlType. Learn nested controls
+  and replay menus. Use forms to reference existing controls and compose ordered
+  actions with assertions, with separate runtime results and before/after images.
+  Run `easy_uiauto_library` after installing `easy-uiauto[gui]`, or double-click
+  `knowledge-library.cmd` in a checkout. See the [GUI guide](docs/knowledge-gui.zh-CN.md).
+
 - **Desktop automation**: click, double-click, right-click, drag, scroll,
   keyboard input, hotkeys, window activation, and text entry.
 - **Action recording**: record real operations, highlight the selected control,
   and generate reusable Python actions with a complete `LOCATION`.
-- **MCP server**: use the same automation surface from Codex, Claude Code, or
+- **MCP server**: use the same automation surface from Codex, Claude Code, DeepSeek Harness (DSH), or
   another MCP client.
 - **Visual-first learning**: identify the important regions and controls in one
   screenshot, then map them back to stable local UIA controls without walking the
@@ -58,10 +70,10 @@ images, coordinates, recognition evidence and a local HTML viewer.
   and version control.
 - **Stable records**: persist structured `LOCATION` identities and normalized
   visual hints, never process IDs, window handles, or absolute desktop rectangles.
-- **Layered lookup**: unique `AutomationId`, contextual XPath, stable property
+- **Layered lookup**: contextual XPath with explicit selection modes, property
   combinations, saved image states, local OCR, then opt-in remote vision.
-- **Fast anchors**: use a unique window-scoped `AutomationId` before XPath, while
-  keeping hierarchy as the fallback for missing or duplicate IDs.
+- **Selection modes**: return the first matching `Name` by default, or select a
+  same-type sibling by `foundIndex`; ID-only selectors remain available.
 
 ## Capability Status
 
@@ -285,12 +297,37 @@ easy_uiauto --uninstall-claude-code
 Codex registration uses its global `config.toml`. Claude Code uses the `user`
 scope. Restart the client after installing, updating, or removing the server.
 
+### DeepSeek Harness (DSH)
+
+Connect through the official `@deepseek-ai/dsh-mcp-client` plugin. Copy the
+[example overlay](docs/examples/dsh/easy-uiauto.cordis.yml), set `command` to the
+absolute path of the Python that has easy-uiauto installed, and start DSH:
+
+```cmd
+dsh web --patch "C:\configs\easy-uiauto.cordis.yml"
+```
+
+Save the knowledge-vault and vision settings with `easy_uiauto_config`, then copy
+the two bundled skills into `$DSH_HOME/skills` (default `%USERPROFILE%\.dsh\skills`).
+DSH's conversation model and easy-uiauto's vision endpoint are configured separately.
+See the [DSH setup guide (Chinese)](docs/dsh-setup.zh-CN.md) for installation,
+verification, and timeout troubleshooting.
+
+### TCP Service
+
 The long-running TCP service is also available:
 
 ```bash
 easy_uiauto_service --help
 python -m easy_uiauto.mcp.service --port 9876
 ```
+
+TCP `get_control_tree` uses the same isolated inspection worker as MCP, with
+defaults of 500 nodes and a 15-second timeout. Python clients can pass
+`max_nodes` and `timeout_seconds` as keyword arguments; a timeout returns partial
+results and leaves the service available. Reads do not activate windows, and
+startup no longer walks the desktop. `compile_window` remains a bounded read;
+`--cache-depth` sets its default depth.
 
 
 ### Action outcomes and condition checks
@@ -389,6 +426,23 @@ records, control crops, meaning, aliases, risk, and generated commands. Secondar
 monitors are supported. The scan also saves `<page-id>.annotated.png` and briefly
 draws the same numbered controls over the live window. Use `--no-overlay` when
 visual feedback is not wanted.
+
+Select it explicitly with `easy_uiauto_ui scan "Window title" --strategy visual-first`
+or MCP `scan_window_knowledge(window_name="Window title", strategy="visual-first")`.
+It samples visual targets through Python `uiautomation.ControlFromPoint` and checks
+ancestors, geometry and native semantic consistency without enumerating the full UIA
+tree. Both strategies use the same `uiautomation` backend. `uia_controls_seen` counts
+selected controls, including the bounded native-label supplement, not all nodes exposed
+by the application. `ok=true` means scanning completed; check `commands` for executable
+knowledge.
+
+Visual binding failures include `reason`: `no_uia_candidate` for empty point lookup,
+`uia_lookup_failed` for UIA read errors, `geometry_rejected`, `semantic_rejected`, or
+`score_rejected`. The latter three mean candidates were collected and rejected, not
+that the application exposes no controls. `diagnostics` includes absolute target/sample
+coordinates, candidate counts and rejection evidence. Rejection and error detail lists
+are capped at eight each; `rejection_count` and `lookup_error_count` keep full counts.
+Visual observations also retain these diagnostics in their `verification` records.
 
 Desktop scans also enumerate Explorer's exposed desktop items to supplement
 shortcuts and files omitted by vision. For desktops, vision analyzes only the
@@ -762,9 +816,9 @@ easy_uiauto_ui learn-effect <app-id> <command> --recover
 easy_uiauto_ui teach <app-id> <control-id> "Meaning" intent "Description"
 ```
 
-Runtime lookup follows unique `AutomationId` → contextual XPath → `Name`/`ClassName`/`ControlType`
+Runtime lookup follows contextual XPath with the selected mode → property selectors
 combination → saved image states → local OCR → opt-in remote vision. Enable the last step with `--allow-vision-fallback` or
-`allow_vision_fallback=true`. Stale, missing, or ambiguous controls are moved to
+`allow_vision_fallback=true`. Stale, missing, or mismatched controls are moved to
 quarantine instead of being clicked. Single and batch commands preview their
 resolved targets in red by default; pass `--no-highlight` or `highlight=false`
 to remove the roughly 100 ms visual-preview wait.
@@ -883,8 +937,42 @@ flat selector. Obtain it from a recorded action or from
 
 `find_control` also accepts a complete recorded action containing `LOCATION`
 and the complete result from `get_control_at_position`. Legacy flat arguments
-remain supported. A present AutomationId is tried before the stored XPath and ignores
-dynamic Name, `foundIndex`, and recorded geometry; XPath handles missing or duplicate IDs.
+remain supported.
+
+`LOCATION.WindowName` and window XPath `Name` values are UIA names, which may
+differ from the native window caption. Playback binds UIA through native HWNDs,
+checks the recorded UIA identity, then activates the resolved top-level HWND
+and waits 5 ms before checking foreground state. Handles are resolved anew on
+each playback rather than stored permanently. Explicit `activate_window` and
+`set_top_window` calls take the exact native caption.
+
+Python, recorded playback, MCP, and TCP share two selection modes:
+
+- `identity` (default) returns the first matching Name within the window/parent
+  path, using type and class as context. Five cells named `1.0` select the first;
+  recorded ordinals are ignored. AutomationId is used when Name is absent.
+- `position` selects a direct child by its 1-based same-type `foundIndex`,
+  ignoring recorded Name, AutomationId and class. Type and a positive index are
+  required; invalid or out-of-range indices fail without switching modes.
+  Window scoping remains in effect; this is not an absolute screen coordinate.
+
+```python
+from easy_uiauto import find_control, run_action, run_record
+
+control = find_control(location)                         # identity
+control = find_control(location, match_mode="position")
+run_action(recorded_action, match_mode="position")        # leaves the record unchanged
+run_record(match_mode="position")
+```
+
+MCP `find_control`, `click`, `type_text`, `set_text`, and `run_action` also accept
+`match_mode`. Each XPath step can store its own mode; an explicit method argument
+overrides the entire path. A LOCATION-level `match_mode` is normalized into the
+existing PARAMETERS and XPath fields, preserving legacy action signatures.
+Unmarked older records now default to identity; select position explicitly when
+the recorded ordinal is intended. Positional paths need complete parent ancestry;
+re-record older paths that omitted intermediate containers. Lookup alone does not
+activate a window.
 
 ## Python API Examples
 

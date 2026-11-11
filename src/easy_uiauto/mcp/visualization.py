@@ -80,6 +80,8 @@ def control_markers(
     if include_components:
         for record in records:
             for index, component in enumerate(record.get("visual_components", []), start=1):
+                if isinstance(component, dict) and component.get("native_evidence"):
+                    continue
                 if not isinstance(component, dict) or not isinstance(
                     component.get("normalized_rect"), dict
                 ):

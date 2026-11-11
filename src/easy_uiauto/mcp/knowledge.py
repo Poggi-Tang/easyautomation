@@ -272,6 +272,13 @@ def runtime_quarantined(record: dict) -> bool:
 def merge_control_state(previous: dict, record: dict) -> dict:
     """Refresh observations without erasing runtime failures or learned effects."""
     record = dict(record)
+    if (previous.get("description_source")=="interaction-observation"
+            and record.get("semantic_source")!="manual"):
+        for key in ("description","description_source","description_status","description_effect_record"):
+            if key in previous:record[key]=previous[key]
+    for key in ("navigation_path", "navigation_source", "window_scope", "last_click_execution", "visual_observation", "hierarchy_parent", "region_behavior", "entry_steps"):
+        if key not in record and key in previous:
+            record[key] = previous[key]
     function = previous.get("function_verification", {})
     incoming_function = record.get("function_verification", {})
     if (previous.get("intent") == record.get("intent")
@@ -480,6 +487,7 @@ def iter_records(directory: Path, kind: str | None = None) -> list[tuple[Path, d
         "region": ["regions/*.md"],
         "application": ["app.md"],
         "interaction": ["interactions/*.md"],
+        "reference": ["references/*.md"],
     }
     selected = patterns.get(kind, [pattern for values in patterns.values() for pattern in values])
     records = []

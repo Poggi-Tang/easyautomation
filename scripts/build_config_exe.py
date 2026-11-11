@@ -23,11 +23,14 @@ def main():
     work = args.work_dir.resolve()
     work.mkdir(parents=True, exist_ok=True)
     source = root / "src" / "easy_uiauto" / "mcp"
+    resources = source.parent / "resources"
     # Running the file directly keeps easy_uiauto.__init__ and its UIA, mouse,
     # screenshot and recording dependencies out of this small configuration EXE.
     subprocess.run([
         sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean",
-        "--onefile", "--windowed", "--noupx", "--icon", "NONE",
+        "--onefile", "--windowed", "--noupx", "--icon", str(resources / "easy-uiauto.ico"),
+        "--add-data", f"{resources / 'easy-uiauto.ico'}{os.pathsep}resources",
+        "--add-data", f"{resources / 'easy-uiauto.png'}{os.pathsep}resources",
         "--name", "easy-uiauto-config",
         "--distpath", str(args.output_dir.resolve()),
         "--workpath", str(work / "work"), "--specpath", str(work),

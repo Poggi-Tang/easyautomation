@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" color="#475569" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="属性与参数">
+  <title>属性与参数</title>
+  <path d="M3 5h3M10 5h11M3 12h11M18 12h3M3 19h5M12 19h9"/>
+  <circle cx="8" cy="5" r="2"/><circle cx="16" cy="12" r="2"/><circle cx="10" cy="19" r="2"/>
+</svg>

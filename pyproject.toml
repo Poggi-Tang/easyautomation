@@ -45,6 +45,14 @@ vision = [
     "opencv-python>=4.8",
     "pytesseract>=0.3.10",
 ]
+gui = [
+    "pypdf>=5,<7",
+    "pypdfium2>=4.30,<6",
+    "PySide6-Essentials>=6.10,<6.11",
+    "Pillow>=10.0",
+    "numpy>=1.26",
+    "opencv-python>=4.8",
+]
 image = [
     "torch>=2.0",
     "rapidocr==3.10.0",
@@ -54,6 +62,9 @@ image = [
     "opencv-python>=4.8",
 ]
 full = [
+    "pypdf>=5,<7",
+    "pypdfium2>=4.30,<6",
+    "PySide6-Essentials>=6.10,<6.11",
     "mcp[cli]>=1.0.0,<2.0.0",
     "opencv-python>=4.8",
     "pytesseract>=0.3.10",
@@ -80,13 +91,14 @@ easy_uiauto_setup = "easy_uiauto.deployment:main"
 
 [project.gui-scripts]
 easy_uiauto_config = "easy_uiauto.mcp.config_launcher:main"
+easy_uiauto_library = "easy_uiauto.library_launcher:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
 include-package-data = true
 
 [tool.setuptools.package-data]
-easy_uiauto = ["py.typed", "skills/*/SKILL.md", "skills/*/agents/openai.yaml", "bin/*.exe", "resources/*.png"]
+easy_uiauto = ["py.typed", "skills/*/SKILL.md", "skills/*/agents/openai.yaml", "bin/*.exe", "resources/*.png", "resources/*.ico", "resources/icons/*.svg", "resources/icons/*.json", "resources/icons/*.md"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
