@@ -180,6 +180,36 @@ def test_failed_self_check_never_marks_installation_ready(tmp_path, monkeypatch)
     assert not (target / "verification.json").exists()
 
 
+def test_same_version_source_wheel_is_reinstalled_and_ocr_models_are_staged(tmp_path, monkeypatch):
+    root = bundle(tmp_path, monkeypatch)
+    wheel_path = wheel(root / "wheelhouse", "easy_uiauto", "1.2.3", extra="full", exe=True)
+    ocr = root / "models/rapidocr"
+    ocr.mkdir(parents=True)
+    (ocr / "PP-OCRv6_det_small.onnx").write_bytes(b"detector")
+    deployment.write_manifest(root, "1.2.3", {})
+    calls = []
+    monkeypatch.setattr(deployment, "require_windows", lambda: None)
+    monkeypatch.setattr(deployment, "ensure_vc_runtime", lambda *_: None)
+    monkeypatch.setattr(deployment, "extract_zip", lambda *_: None)
+    monkeypatch.setattr(deployment, "verify_runtime", lambda _: {"ok": True})
+    monkeypatch.setattr(deployment, "run", lambda args, **kwargs: calls.append(args))
+    target = tmp_path / "installed"
+    deployment.install_bundle(root, target, no_integrate=True)
+    reinstall = next(args for args in calls if "--force-reinstall" in args)
+    assert wheel_path in reinstall and "--no-index" in reinstall and "--no-deps" in reinstall
+    assert (target / "python/Lib/site-packages/rapidocr/models/PP-OCRv6_det_small.onnx").read_bytes() == b"detector"
+
+
+def test_gui_launcher_uses_the_installed_windowless_python(tmp_path):
+    module = tmp_path / "python/Lib/site-packages/easy_uiauto/library_launcher.py"
+    module.parent.mkdir(parents=True)
+    module.write_text("")
+    deployment.write_launchers(tmp_path)
+    launcher = (tmp_path / "easy_uiauto_library.cmd").read_text()
+    assert '"%~dp0python\\pythonw.exe"' in launcher
+    assert "-m easy_uiauto.library_launcher %*" in launcher
+
+
 def test_bad_download_never_replaces_a_verified_cache_file(tmp_path, monkeypatch):
     class Response:
         def __enter__(self):

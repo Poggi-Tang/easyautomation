@@ -1,5 +1,6 @@
 include annotate-image.cmd
 include knowledge-library.cmd
+include setup.bat
 include install-full.cmd
 include download-offline.cmd
 include README.zh-CN.md

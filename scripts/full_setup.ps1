@@ -8,6 +8,8 @@ param(
     [switch]$NoIntegrate
 )
 $ErrorActionPreference = "Stop"
+Import-Module (Join-Path $PSHOME "Modules\Microsoft.PowerShell.Utility\Microsoft.PowerShell.Utility.psd1")
+Import-Module (Join-Path $PSHOME "Modules\Microsoft.PowerShell.Archive\Microsoft.PowerShell.Archive.psd1")
 $OutputEncoding = [Text.UTF8Encoding]::new()
 [Console]::OutputEncoding = $OutputEncoding
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -53,6 +55,23 @@ if (Test-Path -LiteralPath $repositorySource) {
     }
 }
 $setupArguments = @("-I", "-X", "utf8", $deploymentFile, $Action, "--version", $packageVersion, "--cache", $cacheRoot)
+if (-not $Wheel -and (Test-Path -LiteralPath $repositoryManifest) -and (Test-Path -LiteralPath $repositorySource)) {
+    # A checkout installs its own source, never the same-numbered PyPI release.
+    $buildPython = Join-Path $bootstrapRoot "python.exe"
+    & $buildPython -I -m ensurepip
+    if ($LASTEXITCODE -ne 0) { throw "Could not prepare pip." }
+    & $buildPython -I -m pip --isolated install build pyinstaller==6.22.3
+    if ($LASTEXITCODE -ne 0) { throw "Could not install source build tools." }
+    $sourceRoot = Split-Path -Parent $repositoryManifest
+    & $buildPython (Join-Path $sourceRoot "scripts\build_config_exe.py") --bundle-package
+    if ($LASTEXITCODE -ne 0) { throw "Could not build the configuration app." }
+    $wheelOutput = Join-Path $cacheRoot ("source-wheel-" + [Guid]::NewGuid().ToString("N"))
+    & $buildPython -I -m build --wheel --outdir $wheelOutput $sourceRoot
+    if ($LASTEXITCODE -ne 0) { throw "Could not build this source checkout." }
+    $builtWheels = @(Get-ChildItem -LiteralPath $wheelOutput -Filter *.whl)
+    if ($builtWheels.Count -ne 1) { throw "Expected one source wheel." }
+    $Wheel = $builtWheels[0].FullName
+}
 if ($Wheel) { $setupArguments += @("--wheel", $Wheel) }
 if ($Action -eq "download") {
     if (-not $Output) { $Output = Join-Path $env:USERPROFILE "Downloads\easy-uiauto-offline" }

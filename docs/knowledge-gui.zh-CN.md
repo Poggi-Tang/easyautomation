@@ -18,8 +18,18 @@ python -m easy_uiauto.library_launcher
 
 ## 安装与启动
 
+给其他人使用时，分发完整的 `easy-uiauto-gui-win-x64.zip`。对方只需完整解压，双击 **setup.bat**，按 Windows 提示授权，即可创建桌面快捷方式并打开 GUI。以后双击 **easy-uiauto GUI** 桌面快捷方式即可；移动解压目录后重新运行 `setup.bat` 更新快捷方式。
+
+完整 ZIP 已包含 Python、Qt、CPU 图像运行环境、YOLO 权重及 OCR 检测/识别模型，本地学习和回放无需联网或预装 Python。缺少 Visual C++ 运行库时使用包内安装程序补齐。不要只发送 EXE。知识库默认保存到用户目录下的 `easy_uiauto_vault`，可在界面更改；导入参考资料、生成说明需要另外配置 API。
+
+从 `uiauto-gui` 源码 ZIP 开始时，同样双击根目录 **setup.bat**：首次联网安装当前源码及完整依赖，默认保存到 `%LOCALAPPDATA%\easy-uiauto\gui`。首次安装会构建配置窗口并下载模型，耗时取决于网络；成功后重复运行会直接启动，源码变化后会重新安装。安装失败会保留错误提示，可重新运行。此 GUI 入口不注册 MCP、不修改用户 PATH、不安装 Codex/Claude Skills。
+
+可选参数：`setup.bat -Target "D:\easy-uiauto-gui"` 指定源码安装位置，`-NoLaunch` 仅准备环境，`-NoShortcut` 不创建桌面快捷方式。完整 ZIP 直接在解压位置运行，不使用 `-Target`。`knowledge-library.cmd` 也调用此一键入口。
+
+已有 Python 的开发者也可手动安装当前源码：
+
 ```console
-pip install "easy-uiauto[gui,image]"
+python -m pip install -e ".[gui,image]"
 easy_uiauto_library
 ```
 
@@ -27,7 +37,7 @@ easy_uiauto_library
 
 知识树、操作栏、菜单、步骤编辑和模型状态使用统一的 SVG 图标。对象类型与状态分别显示，按钮保留文字；下载/停止、启用/停用图标随状态同步切换。图标按显示缩放比例渲染，禁用时为灰色，深色选中背景上为白色。
 
-源码目录可双击 `knowledge-library.cmd`，或运行：
+已安装的开发环境中，可运行以下命令传入知识库路径：
 
 ```console
 python -m easy_uiauto.library_launcher --vault "D:\UI知识库"
@@ -58,12 +68,14 @@ python -m easy_uiauto.library_launcher --vault "D:\UI知识库"
 独立目录版可在安装 PyInstaller 的构建环境生成：
 
 ```console
-python scripts/build_library_exe.py --image-python "D:\本地标注环境\python.exe"
+python scripts/build_library_exe.py --image-python "D:\本地标注环境\python.exe" --package-dir "dist\gui-release"
 ```
 
 `--image-python` 指向已安装图片标注依赖的完整 Windows CPython 环境；构建时需已缓存官方 OmniParser 权重，也可用 `--image-weights` 指定。构建脚本将解释器、所需依赖、OCR 模型和 YOLO 权重复制到独立的 `_internal/image-runtime`，学习时才启动，不进入 GUI 启动路径。
 
 生成 `dist/easy-uiauto-library/easy-uiauto-library.exe`。EXE 内置管理员权限清单，双击启动时由 Windows 请求 UAC 授权；授权后，管理器及其学习、拾取、录制和回放工作进程均以管理员权限运行。分发时保留整个目录，包括 `_internal/image-runtime` 和第三方许可文件。
+
+使用 Python 3.13 构建。`--package-dir` 还会生成可直接分发的 ZIP 和 SHA256 文件，并附带 `setup.bat`、运行库安装程序及中文说明；该目录须为新的打包目录。打包前校验源文件、EXE 和三份模型，拒绝把 `--frontend-only` 构建当作完整包。GitHub Actions 的 **Build ready-to-use GUI** 工作流可手动选择 `uiauto-gui` 分支运行，下载产物中的 ZIP 后即可分发，无需先发布到 PyPI。
 
 目录版不收集 MCP 服务端及旧版管理界面；MCP 服务仍从安装的 Python 包启动。打开主界面时按需加载依赖，录制、UIA 操作和图像处理底层在实际使用时加载。Python 原有导入方法保持兼容。
 

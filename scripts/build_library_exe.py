@@ -2,12 +2,14 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import shutil
 from pathlib import Path
 import subprocess
 import sys
+import tomllib
 
 
 def copy_runtime_file(source, destination):
@@ -28,9 +30,11 @@ def bundle_image_runtime(python: Path, target: Path, root: Path, weights: Path):
     Package RECORDs include native DLLs, OCR models and license files.
     """
     probe = '''import json,sys
-from importlib.metadata import distribution
+from importlib.metadata import distribution, PackageNotFoundError
 from packaging.requirements import Requirement
-pending=['torch','rapidocr','onnxruntime','opencv-python-headless','Pillow','numpy','uiautomation','pyautogui','pynput','pyperclip','build']
+pending=['torch','rapidocr','onnxruntime','Pillow','numpy','uiautomation','pyautogui','pynput','pyperclip','build']
+try:distribution('opencv-python-headless');pending.append('opencv-python-headless')
+except PackageNotFoundError:pending.append('opencv-python')
 seen=set();files=[]
 while pending:
     name=pending.pop();dist=distribution(name);key=dist.metadata['Name'].lower().replace('_','-')
@@ -51,7 +55,7 @@ print(json.dumps(dict(base=sys.base_prefix,site=str(dist.locate_file('')),files=
     source, site = Path(manifest["base"]), Path(manifest["site"])
     if not (source/"python.exe").is_file():raise ValueError("Image runtime requires a complete Windows CPython directory")
     target.mkdir(parents=True,exist_ok=True)
-    for pattern in ("python*.exe","python*.dll","vcruntime*.dll","LICENSE*.txt"):
+    for pattern in ("python.exe","pythonw.exe","python3.dll","python313.dll","vcruntime*.dll","LICENSE*.txt"):
         for path in source.glob(pattern):copy_runtime_file(path,target/path.name)
     shutil.copytree(source/"DLLs",target/"DLLs",dirs_exist_ok=True,ignore=shutil.ignore_patterns("__pycache__"),copy_function=copy_runtime_file)
     shutil.copytree(source/"Lib",target/"Lib",dirs_exist_ok=True,
@@ -66,6 +70,19 @@ print(json.dumps(dict(base=sys.base_prefix,site=str(dist.locate_file('')),files=
                     ignore=shutil.ignore_patterns("__pycache__"))
     model=target/"models/omniparser/icon_detect_v3/model.pt";model.parent.mkdir(parents=True,exist_ok=True)
     copy_runtime_file(weights,model)
+    # RapidOCR wheels can omit downloaded weights from RECORD. Include the exact
+    # two models explicitly, even when packaging on a clean build machine.
+    from easy_uiauto import deployment
+    ocr_models = destination / "rapidocr/models"
+    for name in ("PP-OCRv6_det_small.onnx", "PP-OCRv6_rec_small.onnx"):
+        cached = site / "rapidocr/models" / name
+        model = ocr_models / name
+        url, digest = deployment.ASSETS[name]
+        if cached.is_file() and deployment.sha256(cached) == digest:
+            model.parent.mkdir(parents=True, exist_ok=True)
+            copy_runtime_file(cached, model)
+        else:
+            deployment.download(url, model, digest)
     (target/"runtime-manifest.json").write_text(json.dumps({"packages":manifest["packages"],"detector":"microsoft/OmniParser-v2.0/icon_detect_v3"},indent=2),encoding="utf-8")
 
 
@@ -96,8 +113,11 @@ def main():
     parser.add_argument("--image-python",type=Path,help="Redistributable Windows Python with image dependencies installed")
     parser.add_argument("--image-weights",type=Path,help="Pinned OmniParser model.pt (uses the standard model cache by default)")
     parser.add_argument("--frontend-only",action="store_true",help="Build just the GUI; deploy its EXE alongside an existing compatible _internal directory")
+    parser.add_argument("--package-dir",type=Path,help="Also write a complete GUI ZIP with setup.bat to a new directory")
     args=parser.parse_args()
     if os.name!="nt":parser.error("Build the Windows app on Windows")
+    if sys.version_info[:2] != (3,13):parser.error("Build the GUI with Python 3.13")
+    if args.frontend_only and args.package_dir:parser.error("A shareable ZIP requires the complete image runtime")
     if not args.frontend_only:
         if not args.image_python:parser.error("--image-python is required unless --frontend-only is specified")
         from easy_uiauto import image_detection
@@ -137,6 +157,17 @@ def main():
         print("Bundling the separate local image runtime",flush=True)
         bundle_image_runtime(args.image_python,target/"_internal/image-runtime",root,weights)
     write_notices(root,target)
+    def digest(path):
+        with path.open('rb') as stream:return hashlib.file_digest(stream,'sha256').hexdigest()
+    sources={path.relative_to(root).as_posix():digest(path)
+             for path in (root/'src/easy_uiauto').rglob('*')
+             if path.is_file() and path.suffix in {'.py','.svg','.ico','.png','.json'} and '__pycache__' not in path.parts}
+    (target/'gui-build.json').write_text(json.dumps(dict(
+        version=tomllib.loads((root/'pyproject.toml').read_text(encoding='utf-8'))['project']['version'],
+        frontend_only=args.frontend_only,exe_sha256=digest(target/'easy-uiauto-library.exe'),sources=sources),indent=2),encoding='utf-8')
+    if args.package_dir:
+        from package_gui import package_directory
+        package_directory(target,args.package_dir)
     print(target)
 
 

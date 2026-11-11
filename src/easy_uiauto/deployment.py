@@ -54,6 +54,12 @@ ASSETS = {
     "model.pt": (
         "https://huggingface.co/microsoft/OmniParser-v2.0/resolve/main/icon_detect_v3/model.pt",
         "11c6cbb77f22569fab22d86c76407a83ec81ab89dbfe28279854822d6e3fb00c"),
+    "PP-OCRv6_det_small.onnx": (
+        "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.10.0/onnx/PP-OCRv6/det/PP-OCRv6_det_small.onnx",
+        "090f04abcd9d9a7498bc4ebf677e4cb9bdce1fe4197ddb7e529f1ef44e1ff94f"),
+    "PP-OCRv6_rec_small.onnx": (
+        "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.10.0/onnx/PP-OCRv6/rec/PP-OCRv6_rec_small.onnx",
+        "6f327246b50388f3c176ae304bd95767ea6dc0c9ae92153ef8cbe210b3c14884"),
 }
 MODEL_RELATIVE = Path("models/omniparser/icon_detect_v3/model.pt")
 TORCH_INDEX = "https://download.pytorch.org/whl/cpu"
@@ -395,6 +401,10 @@ def download_bundle(output: Path, version: str, *, wheel: Path | None = None,
     model = root / MODEL_RELATIVE
     model.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(cache / "model.pt", model)
+    ocr_models = root / "models/rapidocr"
+    ocr_models.mkdir(parents=True, exist_ok=True)
+    for name in ("PP-OCRv6_det_small.onnx", "PP-OCRv6_rec_small.onnx"):
+        shutil.copy2(cache / name, ocr_models / name)
     print("[5/6] Writing offline installer and checksums", flush=True)
     shutil.copy2(Path(__file__), root / "deployment.py")
     (root / "install-offline.ps1").write_text(OFFLINE_PS, encoding="utf-8-sig")
@@ -407,8 +417,8 @@ def download_bundle(output: Path, version: str, *, wheel: Path | None = None,
         "Custom location / 指定安装位置:\n"
         '  install-offline.cmd -Target "D:\\easy-uiauto"\n'
         "Default / 默认: %LOCALAPPDATA%\\easy-uiauto\\full\n"
-        "Run the generated easy_uiauto_image.cmd, easy_uiauto_config.cmd or activate.cmd.\n"
-        "安装完成后可运行上述图片标注、配置窗口或环境激活入口。\n"
+        "Run easy_uiauto_library.cmd (GUI-enabled wheels), easy_uiauto_image.cmd or easy_uiauto_config.cmd.\n"
+        "包含 GUI 的安装包可运行 easy_uiauto_library.cmd 打开知识库；也提供图片标注、配置及 activate.cmd。\n"
         "Existing MCP clients are registered automatically; API settings stay in the configuration window.\n"
         "自动接入已安装的 MCP 客户端；远程 API 参数可在配置窗口中设置。\n",
         encoding="utf-8-sig")
@@ -440,6 +450,10 @@ def write_launchers(target: Path) -> None:
     for name, module in modules.items():
         (target / f"{name}.cmd").write_text(
             f'@echo off\r\n"%~dp0python\\python.exe" -I -X utf8 -m {module} %*\r\nexit /b %errorlevel%\r\n', encoding="ascii")
+    if (target / "python/Lib/site-packages/easy_uiauto/library_launcher.py").is_file():
+        (target / "easy_uiauto_library.cmd").write_text(
+            '@echo off\r\nstart "" "%~dp0python\\pythonw.exe" -I -X utf8 -m easy_uiauto.library_launcher %*\r\n',
+            encoding="ascii")
     (target / "activate.cmd").write_text(
         '@echo off\r\nset "PATH=%~dp0;%~dp0python;%~dp0python\\Scripts;%~dp0tesseract;%PATH%"\r\n', encoding="ascii")
 
@@ -505,7 +519,7 @@ def deny_network(event, args):
         raise RuntimeError("Installation self-check must work without network access")
 sys.addaudithook(deny_network)
 from PIL import Image, ImageDraw, ImageFont
-for name in ("tkinter", "PySide6.QtWidgets", "pyautogui", "pynput", "uiautomation", "mcp", "cv2", "torch", "onnxruntime", "rapidocr"):
+for name in ("tkinter", "pyautogui", "pynput", "uiautomation", "mcp", "cv2", "torch", "onnxruntime", "rapidocr"):
     importlib.import_module(name)
 import tkinter
 tkinter.Tcl().eval("info patchlevel")
@@ -514,8 +528,17 @@ from easy_uiauto import _highlight_worker
 from easy_uiauto import image_detection
 from easy_uiauto.mcp.diagnostics import _ocr_languages
 image_detection.check_runtime()
-weights = image_detection.ensure_weights(image_detection.default_weights(), offline=True)
 with tempfile.TemporaryDirectory() as scratch:
+    # Check this installation independently of any user's saved model overrides.
+    os.environ["EASY_UIAUTO_MODEL_PATHS_FILE"] = str(pathlib.Path(scratch) / "model-paths.json")
+    os.environ["EASY_UIAUTO_MODEL_DIR"] = str(pathlib.Path(sys.prefix).parent / "models")
+    weights = image_detection.ensure_weights(image_detection.default_weights(), offline=True)
+    has_gui = importlib.util.find_spec("easy_uiauto.library_launcher") is not None
+    if has_gui:
+        importlib.import_module("easy_uiauto.qt_ui.window")
+        from easy_uiauto.image_models import inspect_models
+        model_report = inspect_models()
+        assert model_report["ok"], model_report["message"]
     image = Image.new("RGB", (1440, 900), "white")
     draw = ImageDraw.Draw(image)
     draw.rectangle((20, 25, 200, 95), outline="black", width=1)
@@ -535,7 +558,7 @@ with tempfile.TemporaryDirectory() as scratch:
 gui = pathlib.Path(easy_uiauto.__file__).parent / "bin/easy-uiauto-config.exe"
 assert gui.is_file() and gui.read_bytes()[:2] == b"MZ", "Configuration EXE missing"
 print(json.dumps(dict(ok=True, version=easy_uiauto.__version__, python=__import__("sys").version.split()[0],
-    tesseract_languages=sorted(languages), rapidocr=True, yolo=True, configuration_exe=True)))
+    tesseract_languages=sorted(languages), rapidocr=True, yolo=True, configuration_exe=True, knowledge_gui=has_gui)))
 '''
     output = run([python, "-I", "-c", probe], log=log, timeout=300)
     result = json.loads(output.strip().splitlines()[-1])
@@ -580,6 +603,13 @@ def install_bundle(root: Path, target: Path, *, client="auto", no_integrate=Fals
          "--progress-bar", "off", "--no-warn-script-location",
          "--require-hashes", "--find-links", root / "wheelhouse", "-r", root / "requirements.lock"],
         env=env, log=log)
+    # Same-version source builds still need to replace the previously installed GUI.
+    project_wheels = list((root / "wheelhouse").glob("easy_uiauto-*.whl"))
+    if len(project_wheels) == 1:
+        run([python, "-I", "-m", "pip", "--isolated", "install", "--no-index", "--no-deps",
+             "--force-reinstall", project_wheels[0]], env=env, log=log)
+    if (root / "models/rapidocr").is_dir():
+        shutil.copytree(root / "models/rapidocr", site / "rapidocr/models", dirs_exist_ok=True)
     write_launchers(target)
     print("[4/5] Testing imports, OCR, YOLO inference and configuration resources", flush=True)
     result = verify_runtime(target)

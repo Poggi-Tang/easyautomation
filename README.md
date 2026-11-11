@@ -42,7 +42,10 @@ images, coordinates, recognition evidence and a local HTML viewer.
   and replay menus. Use forms to reference existing controls and compose ordered
   actions with assertions, with separate runtime results and before/after images.
   Run `easy_uiauto_library` after installing `easy-uiauto[gui]`, or double-click
-  `knowledge-library.cmd` in a checkout. See the [GUI guide](docs/knowledge-gui.zh-CN.md).
+  `setup.bat` after extracting the complete GUI ZIP. It creates a desktop shortcut
+  and launches the GUI with Python and local models already included. In a source
+  checkout, the same entry installs the current source and dependencies on first
+  use. See the [GUI guide](docs/knowledge-gui.zh-CN.md).
 
 - **Desktop automation**: click, double-click, right-click, drag, scroll,
   keyboard input, hotkeys, window activation, and text entry.
@@ -108,6 +111,11 @@ copy it to the offline PC, extract it, and double-click `install-offline.cmd`.
 To prepare the ZIP yourself on a connected Windows PC, download and run
 [download-offline.cmd](https://github.com/Poggi-Tang/easyautomation/releases/latest/download/download-offline.cmd).
 The ZIP and SHA256 file are saved to `%USERPROFILE%\Downloads\easy-uiauto-offline`.
+
+In a checkout, the installers build and use that checkout's wheel, including
+unreleased GUI changes. Use `-Wheel` to supply an existing wheel explicitly.
+Standalone release installers continue to use the corresponding PyPI release.
+For GUI use without MCP, PATH or skill integration, double-click `setup.bat`.
 
 From a repository checkout, you can specify directories:
 

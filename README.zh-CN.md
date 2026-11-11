@@ -33,7 +33,7 @@
   控件库支持选择软件窗口、悬浮拾取区域、控件学习及多级菜单回放；滚轮切换控件父子层级，Ctrl 确认区域。
   右上角浮窗显示 AutomationID、Name、ClassName 和 ControlType；使用知识维护软件操作说明，
   组合动作通过表单引用已有控件，编排操作及预期检查，保存独立的运行结果和前后截图。
-  源码双击 `knowledge-library.cmd`，安装后运行 `easy_uiauto_library`。
+  完整 GUI ZIP 解压后双击 `setup.bat`，自动创建桌面快捷方式并启动；源码目录的同名入口会安装当前代码及依赖。详见[GUI 部署说明](docs/knowledge-gui.zh-CN.md#安装与启动)。
   详见[使用说明](docs/knowledge-gui.zh-CN.md)。
 
 - **桌面自动化**：点击、双击、右键、拖拽、滚动、键盘输入、组合键、
@@ -91,6 +91,8 @@ Windows x64 用户下载并双击 [install-full.cmd](https://github.com/Poggi-Ta
 
 也可以在联网 Windows 电脑上下载并运行 [download-offline.cmd](https://github.com/Poggi-Tang/easyautomation/releases/latest/download/download-offline.cmd)，
 即可生成完整离线部署 ZIP 和 SHA256 校验文件，默认保存到 `%USERPROFILE%\Downloads\easy-uiauto-offline`。
+
+仓库中的 `install-full.cmd` / `download-offline.cmd` 会先构建当前源码的 wheel，再安装或生成离线包；传入 `-Wheel` 可明确使用已有 wheel。发布页下载的独立脚本仍使用对应的 PyPI 发布版本。只需要知识库 GUI 时使用 `setup.bat`，其默认不进行 MCP、PATH 或 Skills 集成。
 
 在仓库目录中，也可以指定安装位置和离线包输出位置：
 
