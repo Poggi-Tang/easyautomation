@@ -101,7 +101,7 @@ def test_locator_image_preview_uses_explicit_image_and_verify_passes_image_conte
     assert window.template_selector.count()==1 and window.template_preview.image_size==(24,16)
     assert window.template_path.text()==str(image.resolve()) and window.template_path.isReadOnly()
     calls=[]
-    monkeypatch.setattr(window,'maybe_save',lambda:True)
+    monkeypatch.setattr(window,'maybe_save',lambda *_:True)
     monkeypatch.setattr(window,'bound_window',lambda:dict(handle=1))
     monkeypatch.setattr(window,'start_task',lambda *a,**k:calls.append((a,k)))
     window.verify()

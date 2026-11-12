@@ -1,6 +1,6 @@
 # 在 Python 中导入 MCP 工具
 
-从 0.9.2 起，所有 54 个 MCP 工具都可以从 `easy_uiauto.mcp` 导入。导入后是在当前 Python
+从 0.9.2 起，所有 MCP 工具都可以从 `easy_uiauto.mcp` 导入。导入后是在当前 Python
 进程中直接调用函数，不会启动 MCP 服务，也不会连接 Codex 已经启动的 MCP 进程。
 
 ## 安装与解释器

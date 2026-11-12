@@ -1,12 +1,14 @@
 """Source documents become editable, cited Markdown learning references."""
 from __future__ import annotations
 
+from contextlib import contextmanager
 import hashlib
 from html.parser import HTMLParser
 import io
 import json
 from pathlib import Path
 import re
+import shutil
 from tempfile import TemporaryDirectory
 import unicodedata
 from urllib import error, parse, request
@@ -16,7 +18,9 @@ from zipfile import ZipFile
 
 from .mcp import configuration, image_storage, knowledge
 
-MAX_BYTES = 40 * 1024 * 1024
+COPY_BYTES = 1024 * 1024
+MAX_DOWNLOAD_BYTES = 256 * 1024 * 1024
+MAX_MARKUP_BYTES = 200 * 1024 * 1024
 CHUNK_CHARS = 10000
 MAX_CHARS = 1200000
 
@@ -226,47 +230,99 @@ def _decode(data):
     raise ValueError("无法识别文本编码，请另存为 UTF-8")
 
 
-def _read_source(source):
-    if re.match(r"https?://", source, re.I):
-        parts = parse.urlsplit(source)
-        if not parts.hostname or parts.username or parts.password:
-            raise ValueError("网页地址不能含账号密码")
+def _copy_source(source, destination, *, progress=lambda _:None, limit=None):
+    digest = hashlib.sha256(); total = 0; reported = 0
+    while block := source.read(COPY_BYTES):
+        total += len(block)
+        if limit is not None and total > limit:
+            raise ValueError("网页下载超过 256 MB，请先下载到本地，再通过文件导入")
+        destination.write(block); digest.update(block)
+        if total-reported >= 8*COPY_BYTES:
+            progress(f"读取参考资料：{total/(1024*1024):.0f} MB")
+            reported = total
+    return digest.hexdigest()
+
+
+@contextmanager
+def _read_source(source, progress=lambda _:None):
+    """Snapshot on disk so hashing, extraction and archival use the same bytes."""
+    with TemporaryDirectory(prefix="easy-uiauto-reference-") as temporary:
+        staged = Path(temporary)/"source"
+        if re.match(r"https?://", source, re.I):
+            parts = parse.urlsplit(source)
+            if not parts.hostname or parts.username or parts.password:
+                raise ValueError("网页地址不能含账号密码")
+            try:
+                with request.urlopen(request.Request(source, headers={"User-Agent": "easy-uiauto/reference"}), timeout=30) as response:
+                    final = response.geturl()
+                    if parse.urlsplit(final).scheme not in {"http", "https"}: raise ValueError("网页跳转地址无效")
+                    mime = response.headers.get_content_type()
+                    with staged.open("wb") as output:
+                        digest = _copy_source(response, output, progress=progress, limit=MAX_DOWNLOAD_BYTES)
+            except (error.URLError, TimeoutError) as exc:
+                raise RuntimeError("无法读取参考网页，请检查地址和网络") from exc
+            suffix = ".pdf" if mime == "application/pdf" else ".md" if mime in {"text/markdown", "text/plain"} else ".html"
+            title = parse.unquote(Path(parse.urlsplit(final).path).name) or parts.hostname
+        else:
+            path = Path(source).expanduser().resolve(strict=True)
+            if not path.is_file(): raise ValueError("请选择一个参考文件")
+            suffix, title, final = path.suffix.lower(), path.name, str(path)
+            with path.open("rb") as incoming, staged.open("wb") as output:
+                digest = _copy_source(incoming, output, progress=progress)
+        yield staged, suffix, title, final, digest
+
+
+def _read_markup(stream):
+    data = stream.read(MAX_MARKUP_BYTES+1)
+    if len(data) > MAX_MARKUP_BYTES:
+        raise ValueError("参考资料正文结构超过 200 MB，请拆分文档；内嵌图片不计入此限制")
+    return data
+
+
+def _archive_part(archive, name):
+    # Only parse document structure; media files may be arbitrarily large.
+    if archive.getinfo(name).file_size > MAX_MARKUP_BYTES:
+        raise ValueError("参考资料正文结构超过 200 MB，请拆分文档；内嵌图片不计入此限制")
+    with archive.open(name) as stream:return _read_markup(stream)
+
+
+def _text_source(stream):
+    for encoding in ("utf-8-sig", "utf-16", "gb18030"):
+        stream.seek(0)
+        reader = io.TextIOWrapper(stream, encoding=encoding)
         try:
-            with request.urlopen(request.Request(source, headers={"User-Agent": "easy-uiauto/reference"}), timeout=30) as response:
-                final = response.geturl()
-                if parse.urlsplit(final).scheme not in {"http", "https"}: raise ValueError("网页跳转地址无效")
-                data = response.read(MAX_BYTES+1)
-                mime = response.headers.get_content_type()
-        except (error.URLError, TimeoutError) as exc:
-            raise RuntimeError("无法读取参考网页，请检查地址和网络") from exc
-        suffix = ".pdf" if mime == "application/pdf" else ".md" if mime in {"text/markdown", "text/plain"} else ".html"
-        title = parse.unquote(Path(parse.urlsplit(final).path).name) or parts.hostname
-    else:
-        path = Path(source).expanduser().resolve(strict=True)
-        if not path.is_file(): raise ValueError("请选择一个参考文件")
-        if path.stat().st_size > MAX_BYTES: raise ValueError("单份参考资料不能超过 40 MB")
-        suffix, title, final, data = path.suffix.lower(), path.name, str(path), path.read_bytes()
-    if len(data) > MAX_BYTES: raise ValueError("单份参考资料不能超过 40 MB")
-    return data, suffix, title, final
+            text = reader.read(MAX_CHARS+1)
+            if len(text) > MAX_CHARS:raise ValueError("参考资料文字超过 120 万字符，请拆分导入")
+            return text
+        except UnicodeError:pass
+        finally:reader.detach()
+    raise ValueError("无法识别文本编码，请另存为 UTF-8")
 
 
 def extract(data, suffix, progress=lambda _: None):
-    """Preserve page/paragraph/branch origins before asking a model to interpret."""
-    blocks = []
+    """Accept bytes for callers or a path for large, disk-backed source documents."""
+    with (io.BytesIO(data) if isinstance(data, bytes) else Path(data).open("rb")) as stream:
+        return _extract_stream(stream, data, suffix, progress)
+
+
+def _extract_stream(stream, source, suffix, progress):
+    blocks = []; character_count = 0
+
     def add(origin, text):
+        nonlocal character_count
         text = str(text).strip()
+        character_count += len(text)
+        if character_count > MAX_CHARS:raise ValueError("参考资料文字超过 120 万字符，请拆分导入")
         if text: blocks.append(dict(origin=origin, text=text))
     if suffix in {".md", ".markdown", ".txt", ".html", ".htm"}:
-        text = _decode(data)
         if suffix in {".html", ".htm"}:
-            parser = _WebText(); parser.feed(text); text = "".join(parser.lines)
+            parser = _WebText(); parser.feed(_decode(_read_markup(stream))); text = "".join(parser.lines)
+        else:text = _text_source(stream)
         for i, part in enumerate(re.split(r"\n\s*\n", text), 1): add(f"段落 {i}", part)
     elif suffix in {".docx", ".xmind"}:
-        with ZipFile(io.BytesIO(data)) as archive:
-            if sum(info.file_size for info in archive.infolist()) > MAX_BYTES*5:
-                raise ValueError("参考文件解压后过大")
+        with ZipFile(stream) as archive:
             if suffix == ".docx":
-                document = _xml(archive.read("word/document.xml"))
+                document = _xml(_archive_part(archive, "word/document.xml"))
                 namespace="{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
                 body=document.find(namespace+"body")
                 def text(node):return " ".join(n.text or "" for n in node.iter(namespace+"t"))
@@ -282,9 +338,9 @@ def extract(data, suffix, progress=lambda _: None):
                     notes = node.get("notes", {}).get("plain", {}).get("content", "")
                     if notes: add("脑图备注："+" / ".join(here), notes)
                     for child in node.get("children", {}).get("attached", []): topic(child, here)
-                for sheet in json.loads(archive.read("content.json")): topic(sheet["rootTopic"], [])
+                for sheet in json.loads(_archive_part(archive, "content.json")): topic(sheet["rootTopic"], [])
             else:
-                root = _xml(archive.read("content.xml"))
+                root = _xml(_archive_part(archive, "content.xml"))
                 def topic_xml(node, path):
                     title = next((n.text or "" for n in node if n.tag.rsplit("}", 1)[-1] == "title"), "")
                     here = [*path, title]; add("脑图分支："+" / ".join(here), title)
@@ -301,10 +357,10 @@ def extract(data, suffix, progress=lambda _: None):
             here = [*path, title] if title else path
             if title: add("脑图分支："+" / ".join(here), title)
             for child in node: walk(child, here)
-        walk(_xml(data), [])
+        walk(_xml(_read_markup(stream)), [])
     elif suffix == ".pdf":
         from pypdf import PdfReader
-        pdf = PdfReader(io.BytesIO(data))
+        pdf = PdfReader(stream)
         if pdf.is_encrypted and not pdf.decrypt(""): raise ValueError("PDF 已加密，请先解除密码")
         if len(pdf.pages) > 1000: raise ValueError("单份 PDF 最多 1000 页，请拆分导入")
         renderer = None
@@ -315,7 +371,7 @@ def extract(data, suffix, progress=lambda _: None):
                 if len(text.strip()) < 8:
                     import pypdfium2
                     from .local_image_worker import read_text
-                    if renderer is None: renderer = pypdfium2.PdfDocument(data)
+                    if renderer is None: renderer = pypdfium2.PdfDocument(source if isinstance(source, bytes) else str(source))
                     with TemporaryDirectory(prefix="easy-uiauto-pdf-") as temp:
                         page_image=renderer[i];bitmap = page_image.render(scale=2)
                         try:
@@ -330,7 +386,6 @@ def extract(data, suffix, progress=lambda _: None):
     else:
         raise ValueError("支持 PDF、Word (.docx)、Markdown、网页、XMind、FreeMind 和 OPML")
     if not blocks: raise ValueError("资料未提取到可读内容，请检查文件或网页是否需要登录")
-    if sum(len(b["text"]) for b in blocks) > MAX_CHARS: raise ValueError("参考资料文字过多，请拆分导入")
     chunks, current, length = [], [], 0
     for block in blocks:
         for offset in range(0, len(block["text"]), CHUNK_CHARS):
@@ -400,8 +455,12 @@ def import_reference(directory, source, *, force=False, progress=lambda _:None, 
     directory=Path(directory)
     if not (directory/"app.md").is_file(): raise ValueError("请先添加软件")
     progress("读取参考资料")
-    data, suffix, title, origin = _read_source(str(source))
-    digest=hashlib.sha256(data).hexdigest()
+    with _read_source(str(source), progress) as (path, suffix, title, origin, digest):
+        return _import_staged(directory, path, suffix, title, origin, digest,
+                              force=force, progress=progress, settings=settings)
+
+
+def _import_staged(directory, path, suffix, title, origin, digest, *, force, progress, settings):
     identifier=knowledge.stable_id("reference", digest)
     existing=next((d for d in documents(directory) if d["id"]==identifier),None)
     if existing and not force: return existing
@@ -414,7 +473,7 @@ def import_reference(directory, source, *, force=False, progress=lambda _:None, 
     if (not isinstance(chunks,list) or not chunks or any(not isinstance(c,list) or not c or
             any(not isinstance(b,dict) or not isinstance(b.get("text"),str) or not isinstance(b.get("origin"),str)
                 for b in c) for c in chunks)):
-        chunks=extract(data,suffix,progress)
+        chunks=extract(path,suffix,progress)
         _write_json(extraction_path,chunks)
     settings = settings or configuration.load_gui_configuration()
     topics, blocks, number = [], [], 0
@@ -451,7 +510,12 @@ def import_reference(directory, source, *, force=False, progress=lambda _:None, 
         sources=directory/"references/sources";sources.mkdir(parents=True,exist_ok=True)
         asset=directory/record["source_asset"]
         if image_storage._safe_path(directory,asset) is None: raise ValueError("参考来源路径无效")
-        asset.write_bytes(data)
+        temporary=asset.with_name(asset.name+"."+uuid4().hex+".tmp")
+        try:
+            with path.open("rb") as incoming, temporary.open("wb") as output:
+                shutil.copyfileobj(incoming,output,length=COPY_BYTES)
+            temporary.replace(asset)
+        finally:temporary.unlink(missing_ok=True)
         _write_markdown(directory/"references"/(identifier+".md"),record,body)
     return {**record,"body":body,"document_path":f"references/{identifier}.md"}
 

@@ -2,10 +2,12 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from collections import OrderedDict
+from pathlib import Path
 from uuid import uuid4
 
-from PySide6.QtCore import QObject, QRunnable, Signal, Qt, QRectF
-from PySide6.QtGui import QColor, QPainter, QPen, QPixmap
+from PySide6.QtCore import QObject, QRunnable, Signal, Qt, QRectF, QThreadPool
+from PySide6.QtGui import QColor, QImage, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QFormLayout, QGraphicsScene,
     QGraphicsView, QHBoxLayout, QLabel, QLineEdit, QPushButton, QTreeWidget, QTreeWidgetItem,
     QVBoxLayout, QWidget, QDialog, QDialogButtonBox)
@@ -48,28 +50,65 @@ def button(text, slot, *, name="", icon_name=None):
 
 
 class ImageView(QGraphicsView):
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, *, async_load=False):
         super().__init__(parent); self.canvas = QGraphicsScene(self); self.setScene(self.canvas)
         self.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
         self.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
         self.setAccessibleName("区域与控件图片")
         self.image_size = (0, 0); self.fit_mode = True
+        self.async_load=async_load;self.image_jobs=[];self.image_cache=OrderedDict()
+        self.image_key=None;self.pending_key=None;self.request_serial=0;self.markers=();self.overlays=[]
 
     def show_image(self, path=None, markers=()):
-        self.canvas.clear(); self.image_size = (0, 0)
-        pixmap = QPixmap(str(path)) if path else QPixmap()
-        if pixmap.isNull(): self.canvas.addText("暂无图片；选择窗口并学习区域后可查看。"); return
+        self.markers=deepcopy(markers)
+        try:
+            stat=Path(path).stat() if path else None
+            key=(str(path),stat.st_mtime_ns,stat.st_size) if stat else None
+        except OSError:key=None
+        if key and key==self.image_key:
+            self.draw_markers();return
+        if key and key==self.pending_key:return
+        self.request_serial+=1;serial=self.request_serial;self.pending_key=None
+        if key in self.image_cache:
+            self.image_cache.move_to_end(key);self.display_image(key,self.image_cache[key]);return
+        if key and self.async_load:
+            self.pending_key=key;self.canvas.clear();self.overlays=[];self.image_key=None;self.image_size=(0,0)
+            self.canvas.addText("正在加载参考图…")
+            job=IoJob(lambda:QImage(str(path)));self.image_jobs.append(job)
+            def loaded(value,error):
+                from shiboken6 import isValid
+                self.image_jobs.remove(job)
+                if not isValid(self) or serial!=self.request_serial:return
+                self.pending_key=None
+                self.display_image(key,QPixmap.fromImage(value) if error is None else QPixmap())
+            job.signals.done.connect(loaded);QThreadPool.globalInstance().start(job)
+        else:self.display_image(key,QPixmap.fromImage(QImage(str(path))) if key else QPixmap())
+
+    def display_image(self,key,pixmap):
+        self.canvas.clear();self.overlays=[];self.image_size=(0,0);self.image_key=None
+        if pixmap.isNull():
+            self.canvas.setSceneRect(QRectF());self.canvas.addText("暂无图片；选择窗口并学习区域后可查看。");return
+        self.image_key=key;self.image_cache[key]=pixmap;self.image_cache.move_to_end(key)
+        # Bound memory as well as entry count; large desktop captures can exceed 4K.
+        while len(self.image_cache)>1 and (len(self.image_cache)>3 or
+                sum(p.width()*p.height()*4 for p in self.image_cache.values())>64*1024*1024):
+            self.image_cache.popitem(last=False)
         pixmap.setDevicePixelRatio(1.0)
         self.image_size = (pixmap.width(),pixmap.height()); self.canvas.addPixmap(pixmap)
         self.canvas.setSceneRect(QRectF(0,0,pixmap.width(),pixmap.height()))
-        for r, label, active in markers:
+        self.draw_markers();self.fit()
+
+    def draw_markers(self):
+        for item in self.overlays:self.canvas.removeItem(item)
+        self.overlays=[]
+        for r, label, active in self.markers:
             pen = QPen(QColor("#ff1744" if active else "#007c91"), 2 if active else 1); pen.setCosmetic(True)
             width,height=self.image_size
             x,y=r["left"]*width,r["top"]*height
-            self.canvas.addRect(x,y,(r["right"]-r["left"])*width,(r["bottom"]-r["top"])*height,pen)
+            self.overlays.append(self.canvas.addRect(x,y,(r["right"]-r["left"])*width,(r["bottom"]-r["top"])*height,pen))
             if label:
                 text=self.canvas.addText(label); text.setDefaultTextColor(pen.color()); text.setPos(x,max(0,y-23))
-        self.fit()
+                self.overlays.append(text)
 
     def fit(self):
         self.fit_mode=True

@@ -38,11 +38,16 @@ class KnowledgeLibrary:
                 "steps": region.get("entry_steps", defaults.get("steps", [])),
                 "condition": region.get("state_condition", defaults.get("condition"))}
 
-    def configure_region(self, app_id, region_id, *, steps, condition=None, state_name=""):
+    def configure_region(self, app_id, region_id, *, steps, condition=None, state_name="", name=None, description=None):
         from . import workflows
         records = self.read(app_id)
         region = next((r for r in records["regions"] if r["id"] == region_id), None)
         if region is None: raise ValueError("区域已不存在")
+        if name is not None:
+            if not name.strip():raise ValueError("区域名称不能为空")
+            region["name"] = name.strip()
+            region["edited_by_user"] = True
+        if description is not None:region["description"] = description
         if steps:
             report = workflows.readiness(dict(keyword="打开区域", parameters={}, steps=list(steps)), records["controls"])
             if not report["ready"]: raise ValueError("前置步骤尚不可执行："+"；".join(i["message"] for i in report["issues"]))
@@ -55,7 +60,7 @@ class KnowledgeLibrary:
             knowledge.save_region(self.directory(app_id), region); self._refresh(self.directory(app_id))
         return region
 
-    def configure_state(self, app_id: str, *, name: str, area_id: str = "", steps=(), condition=None):
+    def configure_state(self, app_id: str, *, name: str, area_id: str = "", steps=(), condition=None, _refresh_index=True):
         from . import workflows
 
         if not name.strip(): raise ValueError("状态名称不能为空")
@@ -78,7 +83,7 @@ class KnowledgeLibrary:
             page["region_state"] = dict(id=self.page_id, name=name.strip(), area_id=area_id,
                                         steps=steps, condition=condition)
             knowledge.save_page(directory, page)
-            self._refresh(directory)
+            if _refresh_index:self._refresh(directory)
         return page["region_state"]
 
     def save_variant(self, app_id: str, base_region: dict, result: dict, *, name: str, steps=(), condition=None):
@@ -96,9 +101,12 @@ class KnowledgeLibrary:
         if not normalized["Xpath"] or condition.get("kind", "exists") not in {"exists", "selected"}:
             raise ValueError("状态条件需要有效定位，类型为存在或选中")
         state_library = self.scoped("state-" + uuid4().hex[:12])
-        identifier = state_library.save_picked_region(app_id, result, name=base_region.get("name", name))
-        state_library.configure_state(app_id, name=name, area_id=self.area_id(app_id, base_region),
-                                      steps=steps, condition=condition)
+        with image_storage._vault_lock(self.root):
+            try:
+                identifier = state_library.save_picked_region(app_id, result, name=base_region.get("name", name), _refresh_index=False)
+                state_library.configure_state(app_id, name=name, area_id=self.area_id(app_id, base_region),
+                                              steps=steps, condition=condition, _refresh_index=False)
+            finally:self._refresh(self.directory(app_id))
         return identifier
 
     def area_id(self, app_id: str, region: dict) -> str:
@@ -335,7 +343,7 @@ class KnowledgeLibrary:
         path = self.directory(app_id) / "pages" / f"{self.page_id}.md"
         return knowledge.read_markdown(path)[0] if path.is_file() else {}
 
-    def save_capture(self, app_id: str, capture: dict) -> dict:
+    def save_capture(self, app_id: str, capture: dict, *, _refresh_index=True) -> dict:
         directory = self.directory(app_id)
         with image_storage._vault_lock(self.root):
             previous = self.page(app_id)
@@ -357,7 +365,7 @@ class KnowledgeLibrary:
             if capture.get("window_scope"):
                 record["window_scope"] = capture["window_scope"]
             knowledge.save_page(directory, record)
-            knowledge.rebuild_index(directory)
+            if _refresh_index:knowledge.rebuild_index(directory)
         return record
 
     def regions(self, app_id: str) -> list[dict]:
@@ -458,7 +466,7 @@ class KnowledgeLibrary:
             return record["id"]
 
     def save_region(self, app_id: str, name: str, rectangle: dict,
-                    region_id: str = "", *, description: str = "", control_record: dict | None = None) -> str:
+                    region_id: str = "", *, description: str = "", control_record: dict | None = None, _refresh_index=True) -> str:
         directory = self.directory(app_id)
         page = self.page(app_id)
         if not page:
@@ -498,10 +506,10 @@ class KnowledgeLibrary:
                 "source": "manual", "geometry_role": candidate.get("geometry_role", "visual-hint-only"), "image": image_ref,
             })
             self._reassign(directory, [*regions, candidate])
-            self._refresh(directory)
+            if _refresh_index:self._refresh(directory)
         return f"{self.page_id}.{identifier}"
 
-    def save_picked_region(self, app_id: str, result: dict, *, region_id="", name="", description="") -> str:
+    def save_picked_region(self, app_id: str, result: dict, *, region_id="", name="", description="", _refresh_index=True) -> str:
         """Validate selection and overlap before replacing the saved reference image."""
         from PIL import Image
 
@@ -521,13 +529,16 @@ class KnowledgeLibrary:
                 raise ValueError("要修改的区域已经不存在，请重新选择")
             manual_layout.validate_regions([*[r for r in existing if r["id"] != identifier],
                 dict(id=identifier, name=title, normalized_rect=selection["normalized_rect"])])
-            self.save_capture(app_id, capture)
-            saved = self.save_region(app_id, title, selection["normalized_rect"], region_id, description=description,
-                control_record={**selection, "location": location, "picked_image_size": size})
-            page = self.page(app_id)
-            if not page.get("requires_layout_review") or all(
-                    r.get("picked_image_size") == size for r in self.regions(app_id)):
-                self.confirm_layout(app_id)
+            try:
+                self.save_capture(app_id, capture, _refresh_index=False)
+                saved = self.save_region(app_id, title, selection["normalized_rect"], region_id, description=description,
+                    control_record={**selection, "location": location, "picked_image_size": size}, _refresh_index=False)
+                page = self.page(app_id)
+                if not page.get("requires_layout_review") or all(
+                        r.get("picked_image_size") == size for r in self.regions(app_id)):
+                    self.confirm_layout(app_id, _refresh_index=False)
+            finally:
+                if _refresh_index:self._refresh(self.directory(app_id))
         return saved
 
     def apply_automatic_layout(self, app_id: str, proposal: dict) -> dict:
@@ -585,7 +596,7 @@ class KnowledgeLibrary:
             self._refresh(directory)
             return {"suggested": len(prepared), "preserved": len(locked), "warning": proposal.get("warning", "")}
 
-    def confirm_layout(self, app_id: str) -> dict:
+    def confirm_layout(self, app_id: str, *, _refresh_index=True) -> dict:
         directory = self.directory(app_id)
         regions = manual_layout.validate_regions(self.layout_regions(app_id))
         page = self.page(app_id)
@@ -595,7 +606,7 @@ class KnowledgeLibrary:
         page["requires_layout_review"] = False
         with image_storage._vault_lock(self.root):
             knowledge.save_page(directory, page)
-            self._refresh(directory)
+            if _refresh_index:self._refresh(directory)
         return {"page": page, "regions": regions}
 
     def learning_layout(self, app_id: str, window: dict, *, region_id: str = "") -> dict:
@@ -618,6 +629,7 @@ class KnowledgeLibrary:
         for _path, record in knowledge.iter_records(directory, "control"):
             if record.get("page_id") != self.page_id or not record.get("normalized_rect"):
                 continue
+            original = dict(record)
             previous = record.get("region_id", "unassigned").removeprefix(self.page_id + ".")
             identifier, reason = manual_layout.assign_region(record["normalized_rect"], regions)
             record.update(region_id=identifier, region_assignment=reason, region_source="manual")
@@ -630,7 +642,7 @@ class KnowledgeLibrary:
             if command:
                 used_commands.add(command)
                 record["command"] = command
-            knowledge.save_control(directory, record)
+            if record != original:knowledge.save_control(directory, record)
 
     @staticmethod
     def _refresh(directory: Path):

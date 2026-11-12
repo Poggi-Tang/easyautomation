@@ -177,7 +177,8 @@ def test_learning_routes_to_review_and_requires_explicit_confirmation(app,librar
     before=deepcopy(library.read("demo"));calls=[];dialogs=[]
     def review(dialog):
         dialogs.append(dialog)
-        if confirm:dialog.accept()
+        if confirm:
+            dialog.accept();settle(app,lambda:not dialog.saving)
         else:dialog.reject()
         return dialog.result()
     monkeypatch.setattr(LayoutDialog,"exec",review)
@@ -191,6 +192,7 @@ def test_learning_routes_to_review_and_requires_explicit_confirmation(app,librar
         window.windows["demo"]=dict(title="Test",handle=123,process_id=456,class_name="Window")
         monkeypatch.setattr(window,"start_task",lambda *a,**kw:calls.append((a,kw)))
         window.learn()
+        settle(app,lambda:not window.jobs)
         assert len(dialogs)==1 and library.page("demo")["layout_confirmed"]==confirm
         assert len(calls)==int(confirm)
         if confirm:
@@ -237,6 +239,7 @@ def test_review_confirms_only_the_chosen_state(app,library,tmp_path):
     dialog=LayoutDialog(library,"demo",before,page_id=library.page_id,region_id=base)
     try:
         dialog.pages.setCurrentIndex(dialog.pages.findData(state_page));dialog.accept()
+        settle(app,lambda:not dialog.saving)
         assert dialog.confirmed_page_id==state_page
         assert library.scoped(state_page).page("demo")["layout_confirmed"]
         assert not library.page("demo")["layout_confirmed"]

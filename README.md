@@ -10,12 +10,12 @@ English | [简体中文](README.zh-CN.md)
 
 ![logo](https://github.com/Poggi-Tang/easyautomation/blob/main/src/image/easy-uiauto.png)
 
-**Turn a Windows desktop interface into inspectable, reusable UI commands.**
+Windows desktop automation with Python, MCP, and a GUI for managing controls and workflows.
 
 ## Start the GUI from this repository
 
 For a ready-to-use offline copy, download the complete GUI ZIP from the
-[v1.0.0 release](https://github.com/Poggi-Tang/easyautomation/releases/tag/v1.0.0),
+[latest release](https://github.com/Poggi-Tang/easyautomation/releases/latest),
 extract it and double-click `setup.bat`.
 
 On Windows x64, clone the **`uiauto-gui` branch** and double-click `setup.bat`:
@@ -35,23 +35,23 @@ and opens the GUI. Windows may request administrator approval.
 The default installation is `%LOCALAPPDATA%\easy-uiauto\gui`. To choose another
 directory, run `setup.bat -Target "D:\easy-uiauto-gui"`. Later, use the desktop
 shortcut to open the GUI; after `git pull`, run `setup.bat` again to update it.
-The GUI setup does not register MCP clients or change user PATH. The default
-`main` branch and the PyPI release have a separate release cycle; use `uiauto-gui`
-for this GUI. See the [GUI guide](docs/knowledge-gui.zh-CN.md).
+The GUI setup does not register MCP clients or change user PATH. GUI source is
+maintained on `uiauto-gui`; the default `main` branch does not include these changes.
+PyPI releases from 1.0.0 include the GUI. See the [GUI guide](docs/knowledge-gui.zh-CN.md).
 
 ## Overview
 
 `easy-uiauto` combines a Python automation library, an MCP server, action
 recording, and an Obsidian-compatible UI knowledge vault. It can locate controls
-through Windows UI Automation, learn the useful parts of a visible application,
-and expose verified operations as commands such as
+through Windows UI Automation, save controls from visible application regions,
+and generate commands such as
 `main.keypad.enter-digit-6.click`.
 
-The project is useful for Windows test automation, RPA, agent tooling, and
-building reusable operation knowledge for desktop software. Version `1.0.0`
-includes the Windows knowledge GUI and one-click installation.
+Use it to record desktop operations, write automated tests, or give an agent access
+to saved controls and workflows. Version `1.0.1` improves GUI responsiveness, removes
+the 40 MB local reference-file limit, and adds MCP access to GUI regions and workflows.
 
-Saved-image annotation defaults to the recommended **YOLO + RapidOCR**: provide an image path and
+Saved-image annotation uses **YOLO + RapidOCR** by default: provide an image path and
 an output directory to receive separate text, graphic and combined annotation
 images, coordinates, recognition evidence and a local HTML viewer.
 
@@ -61,33 +61,24 @@ images, coordinates, recognition evidence and a local HTML viewer.
 
 ## What It Includes
 
-- **Knowledge GUI**: organize each application into usage instructions, a control
-  library with separate Tab states, and cross-region action sequences in a QtWidgets
-  workspace. Parameters apply to inputs and assertions; runtime evidence stays separate
-  from learning images.
-  Select an application window, hover to add or modify
-  regions, scroll through parent/child controls and press Ctrl to confirm. A floating
-  inspector shows AutomationID, Name, ClassName and ControlType. Learn nested controls
-  and replay menus. Use forms to reference existing controls and compose ordered
-  actions with assertions, with separate runtime results and before/after images.
-  Run `easy_uiauto_library` after installing `easy-uiauto[gui]`, or double-click
-  `setup.bat` after extracting the complete GUI ZIP. It creates a desktop shortcut
-  and launches the GUI with Python and local models already included. In a source
-  checkout, the same entry installs the current source and dependencies on first
-  use. See the [GUI guide](docs/knowledge-gui.zh-CN.md).
+- **Knowledge GUI**: select a software window, mark regions, and learn their controls.
+  Keep separate Tab states, edit names and descriptions, import manuals, and compose
+  workflows with parameters and checks. Saved learning images and execution results
+  are shown separately. See the [GUI guide](docs/knowledge-gui.zh-CN.md).
 
 - **Desktop automation**: click, double-click, right-click, drag, scroll,
   keyboard input, hotkeys, window activation, and text entry.
 - **Action recording**: record real operations, highlight the selected control,
   and generate reusable Python actions with a complete `LOCATION`.
-- **MCP server**: use the same automation surface from Codex, Claude Code, DeepSeek Harness (DSH), or
-  another MCP client.
+- **MCP server**: call automation tools from Codex, Claude Code, DeepSeek Harness (DSH),
+  or another MCP client. Agents can learn into existing GUI regions and save workflows
+  in the same knowledge vault.
 - **Visual-first learning**: identify the important regions and controls in one
   screenshot, then map them back to stable local UIA controls without walking the
   whole tree by default.
-- **State-aware semantics**: distinguish stable functions from dynamic values,
-  retain names and avatars, connect related controls, and explain visible states such
-  as a Send button disabled while its message input is empty.
+- **Control metadata**: store names, aliases, current values and relationships.
+  Generated descriptions can explain visible states, such as a disabled Send button;
+  inferred descriptions remain separate from observed behavior.
 - **Semantic UI CLI**: turn verified controls into searchable application
   commands instead of rediscovering coordinates for every task.
 - **Control overlays**: number every learned or executable control in one
@@ -96,7 +87,7 @@ images, coordinates, recognition evidence and a local HTML viewer.
   export blue `G` graphics and orange `T` text with one-pixel boxes, adjacent IDs,
   local geometry correction and automatic small-text recovery.
 - **Effect learning**: compare before/after screenshots, inspect changed UIA
-  properties and new windows, and store an evidence-backed success condition.
+  properties and new windows, and save the observed result and success condition.
 - **Readable knowledge**: keep pages, controls, images, interactions, and
   quarantine records as Markdown/YAML/PNG files that work directly with Obsidian
   and version control.
@@ -111,11 +102,12 @@ images, coordinates, recognition evidence and a local HTML viewer.
 
 | Area | Status | Notes |
 | --- | --- | --- |
-| Python mouse, keyboard, window, and UIA APIs | Stable | The original library surface |
+| Python mouse, keyboard, window, and UIA APIs | Stable | Core automation APIs |
 | Recording and replay | Stable | Produces reusable structured actions |
 | MCP tools and client setup | Beta | Codex and Claude Code installers included |
+| GUI region learning and workflows | Beta | Local YOLO + RapidOCR; reference-assisted descriptions use the configured API |
 | Visual-first scan and generated UI CLI | Beta | Requires an OpenAI-compatible vision endpoint |
-| Local image annotation | Experimental | Default and recommended YOLO + RapidOCR; no API key; MCP and CMD support UI, control-block and electrical-diagram profiles |
+| Local image annotation | Experimental | YOLO + RapidOCR; no API key; supports software screenshots and model diagrams |
 | Before/after effect learning | Beta | Stores local evidence and learned success conditions |
 | Recursive workflow exploration | Experimental | Restricted to reversible commands and bounded depth |
 
@@ -313,14 +305,6 @@ easy_uiauto --quick-setup-codex \
   --vision-model your-vision-model
 ```
 
-You can also give Codex this deployment instruction:
-
-> Install the latest `easy-uiauto[mcp,vision]` from PyPI, then run
-> `easy_uiauto --full-setup-codex --vision-url URL --vision-model MODEL`; do not
-> inspect unrelated projects or search the web; report every validation result
-> and elapsed time, then ask me to restart Codex once. Do not request another
-> restart only because the vision environment variables changed.
-
 ```bash
 easy_uiauto --install-codex
 easy_uiauto --show-codex-config
@@ -434,15 +418,40 @@ the local `vision` dependencies; its result includes `image`, `rect_in_input`,
 
 The package includes two Codex skills:
 
-- `$easy-uiauto-learning` scans and explores visible Windows applications.
+- `$easy-uiauto-learning` learns controls, uses saved GUI regions and references,
+  and saves requested workflows.
 - `$easy-uiauto-operate` runs commands from an existing application vault.
 
-After setup and one Codex restart, a natural-language request is enough:
+After setup and restarting the MCP client, you can request a scan:
 
 ```text
 Use $easy-uiauto-learning to learn the currently open WeChat window and build
 its control knowledge and UI commands.
 ```
+
+### Learn into existing GUI regions
+
+Save the regions, descriptions and entry steps in the GUI first. Give the agent the
+same absolute vault path and the application name. For example:
+
+```text
+Use $easy-uiauto-learning. In vault D:/UI-Knowledge, learn the saved regions for
+My Application using my descriptions and enabled references. Keep the existing
+region IDs and boundaries, and save each control under its region and Tab state.
+Save a "Create project" workflow using the recorded controls, a project-name
+parameter and result checks. Keep missing steps as a draft and report them.
+Save the definition for review; I will specify execution testing separately.
+```
+
+`get_ui_library` reads the saved inputs. `get_ui_library_readiness` checks local
+models, and `start_ui_library_task` starts region learning, menu expansion,
+description supplementation or a saved workflow run. Use `get_ui_library_task`
+and `stop_ui_library_task` to track or stop that task. `save_ui_workflow` writes
+the GUI's workflow records; a ready definition is not an executed test result.
+
+Learning follows saved entry steps and can operate the target application. After
+the agent saves records, save any open GUI edits and refresh the tree. See the
+[detailed instructions](docs/knowledge-gui.zh-CN.md#让-agent-按人工划分学习并归档).
 
 ### Light Scan
 
@@ -535,10 +544,9 @@ verified owned modal windows, without generic browser-back keys. Learning owned
 dialogs preserves the application's main window name. Parent candidates are
 checked again after recursive exploration to avoid repeating a nested action.
 
-Client tool-call timeout does not mean the worker stopped: query
-`get_ui_learning_status` before retrying. Killing the MCP process ends its workers
-and loses in-memory task status. Markdown files use UTF-8; when inspecting them in
-PowerShell, use `Get-Content -Encoding UTF8` to avoid console decoding errors.
+Task status is held in memory and is lost when the MCP process exits. Saved
+knowledge remains on disk. Markdown files use UTF-8; in PowerShell, read them with
+`Get-Content -Encoding UTF8`.
 
 Use `--strategy full-uia` for diagnostics when visual targeting is not suitable.
 This mode walks the visible UIA tree and performs a separate semantic pass, so it
@@ -548,11 +556,8 @@ is slower and produces more records.
 
 Call MCP tool `analyze_ui_image(image_path="C:/images/screenshot.png")` to analyze a
 saved PNG, JPEG, or WebP without opening or controlling an application.
-**The default `engine="local"` uses YOLO + RapidOCR, the recommended combination.**
-In the project's `test1/test2/test3` software-screenshot comparison against the
-configured vision API and Tesseract with tessdata_best, this combination provided
-better text coverage and overall annotations. This is evidence from these examples,
-not an accuracy guarantee for other interfaces.
+The default `engine="local"` uses YOLO + RapidOCR. Review the output for missed
+controls, incorrect boxes and OCR errors before using its coordinates.
 
 Graphic detection uses Microsoft's official [OmniParser v2.0 icon_detect_v3 weights](https://huggingface.co/microsoft/OmniParser-v2.0/tree/main/icon_detect_v3),
 `model.pt`, with the **YOLOv9-E** architecture. Text recognition uses RapidOCR's
@@ -660,7 +665,7 @@ requires a text detector/OCR or review, not a closed circuit-symbol outline.
 
 ### Local image annotation from CMD
 
-CMD also defaults to the recommended YOLO + RapidOCR without reading vision API settings.
+CMD uses local YOLO + RapidOCR by default.
 Run directly from the checkout without starting Codex or an MCP server:
 
 ```cmd
@@ -747,7 +752,7 @@ omitted regions and rejected crop-edge predictions. This is a bounded detail pas
 not a claim of full native-resolution coverage. Disable it with MCP/Python
 `detail_recovery=False` or CMD `--no-detail-recovery`. Smaller images and model
 diagrams retain their single whole-image pass.
-Quality comes first: preserve the original 1280x1280 square YOLO input by default.
+The default YOLO input is a 1280x1280 square.
 UI YOLO and OCR run concurrently within one `--threads` budget (default 3+1); one-thread
 runs stay sequential. Model diagrams retain square, sequential inference.
 `raw-yolo.json` records actual input shapes; `inference_execution` records the
@@ -773,7 +778,7 @@ Reliable outer window frames are cropped before recognition by default. Use
 `--no-auto-crop` to retain the full input. `crop.offset` in `elements.json` records
 the origin in the original image; annotations and corrections match `analysis-input.png`.
 
-Both diagram profiles also detect connected color foreground without selecting
+The block-diagram profile also detects connected color foreground without selecting
 specific hues. Touching color patches and narrow dark dividers form one body;
 nearby text and connecting wires remain separate. Closed ports can extend the
 body's bounds. Neutral mux bars and tags with text touching their border are
@@ -881,6 +886,9 @@ applications/<app-id>/
 ├── regions/               functional regions
 ├── controls/              verified and observed controls
 ├── interactions/          before/after effect records
+├── references/            imported manuals and reference documents
+├── usage/                 user-written application instructions
+├── workflows/             GUI combination actions and latest run results
 ├── images/                page, control, and interaction images
 ├── quarantine/            stale or ambiguous controls
 └── operations/UI-CLI.md   generated command catalog
@@ -912,12 +920,11 @@ PNGs in that application's control/interaction image directories. Page images
 and other apps are excluded. Unreadable knowledge defers cleanup; a per-vault
 file lock prevents cooperating MCP writers from losing pending images.
 
-Control and region geometry is stored only as a window-relative `normalized_rect`
-with `geometry_role: visual-hint-only`. It is useful for annotations and visual
-comparison, but never identifies or clicks a control. Live overlays and operations
-resolve the current `LOCATION` first, then use a unique image template or local OCR
-fallback. Version 0.6 automatically removes legacy absolute rectangles, PIDs, and
-window handles when an older vault index is rebuilt.
+Control and region geometry uses a window-relative `normalized_rect`. Visual hints
+support annotation and comparison. GUI regions picked through UIA also retain their
+native `LOCATION`; image targets use a saved template. Operations resolve the target
+in the current window before clicking. Rebuilding older vault indexes removes legacy
+absolute desktop rectangles, PIDs and window handles.
 
 ### Privacy and Safety
 
@@ -1015,7 +1022,7 @@ activate a window.
 
 ### Import MCP tools in Python
 
-Starting with 0.9.2, all 54 MCP tools are importable from `easy_uiauto.mcp` after
+Starting with 0.9.2, all MCP tools are importable from `easy_uiauto.mcp` after
 installing or upgrading `easy-uiauto[mcp]>=0.9.2`. Source checkout users should install `-e ".[mcp]"` in the
 same interpreter selected by their editor.
 
@@ -1127,7 +1134,8 @@ The repository uses GitHub Actions for validation and publishing:
 
 - **CI** tests Python 3.11, 3.12, and 3.13, then builds the package.
 - **Tagged releases** build and publish through PyPI Trusted Publishing.
-- **Build artifacts** include both an sdist and a wheel.
+- **Build artifacts** include a wheel, an sdist, the complete GUI ZIP and the offline
+  installation ZIP. Publication waits for tests and package checks to pass.
 
 ## Development
 
@@ -1139,7 +1147,7 @@ ruff check .
 
 ## More Examples
 
-For more examples, please refer to the test files in the `demo/` directory or check the docstrings in the source code.
+See `demo/` for runnable examples and the source docstrings for API details.
 
 ## License
 

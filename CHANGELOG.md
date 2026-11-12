@@ -1,10 +1,38 @@
 # Changelog
 
-All notable changes to this project will be documented in this file.
-
-The format is based on Keep a Changelog and is maintained automatically by Semantic Release.
+Release notes and upgrade instructions.
 
 ## [Unreleased]
+
+## [1.0.1] - 2026-11-12
+
+### 更新内容
+
+- 改善选择区域、保存属性和切换节点时的 GUI 响应：知识树增量更新，文件保存、
+  数据整理和图片读取移到后台，保留当前选择与展开状态。
+- 取消本地参考资料的 40 MB 文件大小限制。使用分块复制和校验，PDF 按页提取，
+  Word/XMind 只解析正文；网页下载仍限制为 256 MB，页数和文本长度限制保留。
+- 新增六个 MCP 接口，支持读取 GUI 知识库、检查本地模型、启动/查询/停止学习任务，
+  以及保存组合动作。Agent 可参考人工说明、已划分区域和导入资料，将控件写入对应区域。
+- 组合动作引用已有控件，支持参数和检查条件。缺少绑定时保存为草稿；定义可运行与
+  实际执行验证分别记录，修改定义后旧运行证据会标记为过期。
+- 更新学习 Skill 和中英文 README，补充 Agent 学习与归档示例，删去重复介绍、
+  空泛措辞和残留的对话指令。
+
+### 安装与更新
+
+- 只使用 GUI：下载 `easy-uiauto-gui-win-x64.zip`，完整解压后双击 `setup.bat`。
+- 从源码使用：拉取 `uiauto-gui` 分支最新代码，再运行根目录的 `setup.bat`。
+- 使用 MCP 和 Agent：更新完整安装，或运行 `python -m pip install -U "easy-uiauto[full]==1.0.1"`；
+  再运行 `easy_uiauto --install-codex-skills` 更新配套技能，并重启 MCP 服务。
+  基础区域学习使用本地 YOLO＋RapidOCR；参考资料整理和说明补充需要配置 API。
+- Agent 与 GUI 应使用同一个知识库目录。Agent 写入完成后，在 GUI 保存当前编辑并刷新。
+
+### Validation
+
+- 1,204 tests passed on Windows with Python 3.13; one symlink test was skipped
+  because this account cannot create symlinks.
+- The new MCP tools passed a STDIO connection check; the bundled learning skill passed validation.
 
 ## [1.0.0] - 2026-11-12
 

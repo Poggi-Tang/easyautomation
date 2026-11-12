@@ -113,7 +113,7 @@ def suggest_bindings(flow, controls):
     """Bind only one exact knowledge label; never infer a role from a screenshot."""
     flow = deepcopy(flow)
     for _identifier, target in targets(flow):
-        if target.get("control_id"): continue
+        if target.get("control_id") or not target.get("label", "").strip(): continue
         matches = [r for r in controls if target["label"] in {r.get("name"), r.get("semantic_name"), *r.get("aliases", [])}
                    and (not target.get("control_type") or target["control_type"] == r.get("control_type"))
                    and not knowledge.runtime_quarantined(r)]

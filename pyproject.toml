@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "easy-uiauto"
-version = "1.0.0"
+version = "1.0.1"
 description = "UI automation toolkit based on pyautogui and uiautomation"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -79,8 +79,8 @@ full = [
 Homepage = "https://github.com/Poggi-Tang/easyautomation"
 Repository = "https://github.com/Poggi-Tang/easyautomation.git"
 Issues = "https://github.com/Poggi-Tang/easyautomation/issues"
-Changelog = "https://github.com/Poggi-Tang/easyautomation/blob/master/CHANGELOG.md"
-Documentation = "https://github.com/Poggi-Tang/easyautomation/blob/master/README.md"
+Changelog = "https://github.com/Poggi-Tang/easyautomation/blob/uiauto-gui/CHANGELOG.md"
+Documentation = "https://github.com/Poggi-Tang/easyautomation/blob/uiauto-gui/README.md"
 
 [project.scripts]
 easy_uiauto = "easy_uiauto.mcp.server:main"
@@ -98,7 +98,7 @@ package-dir = {"" = "src"}
 include-package-data = true
 
 [tool.setuptools.package-data]
-easy_uiauto = ["py.typed", "skills/*/SKILL.md", "skills/*/agents/openai.yaml", "bin/*.exe", "resources/*.png", "resources/*.ico", "resources/icons/*.svg", "resources/icons/*.json", "resources/icons/*.md"]
+easy_uiauto = ["py.typed", "skills/*/SKILL.md", "skills/*/agents/openai.yaml", "skills/*/references/*.md", "bin/*.exe", "resources/*.png", "resources/*.ico", "resources/icons/*.svg", "resources/icons/*.json", "resources/icons/*.md"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

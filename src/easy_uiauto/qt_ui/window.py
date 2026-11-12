@@ -33,7 +33,10 @@ class KnowledgeWindow(QMainWindow):
         self.task=None;self.task_done=None;self.jobs=[];self.load_serial=0;self.active_dialog=None
         self.entry_condition=None;self.result={};self.last_key="vault";self.context_buttons=[]
         self.syncing_identity=False;self.identity_error="";self.locator_snapshot={}
-        self.deleting=False;self.selection_caption="知识库"
+        self.deleting=False;self.saving=False;self.result_task=None;self.selection_caption="知识库"
+        self.pending_apps=set();self.full_reload_pending=False;self.model_root=None
+        self.toolbar_signature=None
+        self.hierarchy_records=None;self.hierarchy_disabled=None;self.hierarchy_positions={}
         self.model_report=None;self.model_check_job=None;self.model_check_again=False;self.model_dialog=None
         self.setWindowTitle("easy-uiauto 知识库管理")
         self.setWindowIcon(QIcon(str(Path(__file__).resolve().parents[1]/"resources/easy-uiauto.ico")))
@@ -73,8 +76,9 @@ class KnowledgeWindow(QMainWindow):
         self.tree.header().setSectionResizeMode(0,QHeaderView.ResizeMode.Stretch)
         self.tree.header().setSectionResizeMode(1,QHeaderView.ResizeMode.ResizeToContents)
         nav_layout.addWidget(self.tree,1);self.main_split.addWidget(nav)
-        self.search.textChanged.connect(self.proxy.setFilterFixedString)
-        self.search.textChanged.connect(lambda text:self.tree.expandAll() if text else None)
+        self.search_timer=QTimer(self);self.search_timer.setSingleShot(True);self.search_timer.setInterval(180)
+        self.search.textChanged.connect(lambda text:self.search_timer.start() if text else self.filter_tree())
+        self.search_timer.timeout.connect(self.filter_tree)
         self.tree.selectionModel().currentChanged.connect(self.select)
         self.tree.selectionModel().selectionChanged.connect(lambda *_:self.build_toolbar() if not self.loading else None)
         work=QWidget();work.setAccessibleName("知识工作区");layout=QVBoxLayout(work);layout.setContentsMargins(8,0,0,0)
@@ -87,7 +91,7 @@ class KnowledgeWindow(QMainWindow):
         self.work_split=QSplitter();self.work_split.setAccessibleName("内容与属性");layout.addWidget(self.work_split,1);self.main_split.addWidget(work)
         self.center=QStackedWidget();self.center.setAccessibleName("知识内容");self.work_split.addWidget(self.center)
         self.overview=QTextBrowser();self.center.addWidget(self.overview)
-        self.image=ImageView();self.center.addWidget(self.image)
+        self.image=ImageView(async_load=True);self.center.addWidget(self.image)
         self.usage=QPlainTextEdit();self.usage.setAccessibleName("使用知识正文");self.usage.textChanged.connect(self.changed);self.center.addWidget(self.usage)
         self.flow_page=QWidget();flow_layout=QVBoxLayout(self.flow_page);flow_layout.setContentsMargins(0,0,0,0)
         self.flow_title=QLineEdit();self.flow_title.setAccessibleName("组合动作标题");self.flow_title.textEdited.connect(self.changed);flow_layout.addWidget(self.flow_title)
@@ -97,7 +101,7 @@ class KnowledgeWindow(QMainWindow):
         self.result_summary=IconLabel();results_layout.addWidget(self.result_summary)
         self.result_tree=QTreeWidget();self.result_tree.setHeaderLabels(["动作 / 预期","结果"]);self.result_tree.setColumnWidth(0,370)
         results_layout.addWidget(self.result_tree,1);self.result_text=QTextBrowser();self.result_text.setMaximumHeight(150);results_layout.addWidget(self.result_text)
-        self.result_image=ImageView();results_layout.addWidget(self.result_image,2)
+        self.result_image=ImageView(async_load=True);results_layout.addWidget(self.result_image,2)
         row=QHBoxLayout();row.addWidget(button("执行前",lambda:self.result_picture("before")));row.addWidget(button("执行后",lambda:self.result_picture("after")));row.addStretch();row.addWidget(button("返回步骤",self.show_steps));results_layout.addLayout(row)
         self.result_tree.currentItemChanged.connect(self.select_result);self.center.addWidget(self.results_page)
         self.details=QTabWidget();self.details.setMinimumWidth(270);self.work_split.addWidget(self.details)
@@ -177,10 +181,93 @@ class KnowledgeWindow(QMainWindow):
     def async_io(self,function,done):
         job=IoJob(function);self.jobs.append(job)
         def finished(value,error):
+            from shiboken6 import isValid
             if job in self.jobs:self.jobs.remove(job)
+            if not isValid(self):return
             if error:self.error("读取失败",error)
             else:done(value)
         job.signals.done.connect(finished);QThreadPool.globalInstance().start(job)
+
+    def filter_tree(self):
+        self.search_timer.stop()
+        self.proxy.setFilterFixedString(self.search.text())
+        if self.search.text():self.tree.expandAll()
+
+    @staticmethod
+    def read_updates(library,app_ids,windows):
+        ids=[app["id"] for app in library.apps()] if app_ids is None else app_ids
+        snapshots={app_id:library.read(app_id) for app_id in ids}
+        return snapshots,KnowledgeModel.describe(library.root.name,snapshots,windows)
+
+    def apply_updates(self,updates,app_ids,key=None):
+        snapshots,rows=updates
+        expanded=[k for k,item in self.model.nodes.items()
+                  if (app_ids is None or self.model.rows[k][3] in app_ids)
+                  and self.tree.isExpanded(self.proxy.mapFromSource(item.index()))]
+        selected=[n["key"] for n in self.selected_nodes()]
+        scroll=self.tree.verticalScrollBar().value()
+        self.loading=True
+        try:
+            self.snapshots=snapshots if app_ids is None else {**self.snapshots,**snapshots}
+            self.model.sync(rows,app_ids)
+            for identifier in ["vault",*expanded]:
+                if identifier in self.model.nodes:self.tree.setExpanded(self.proxy.mapFromSource(self.model.nodes[identifier].index()),True)
+        finally:self.loading=False
+        target=key or self.current.get("key","vault")
+        if not self.dirty:
+            self.goto(target if target in self.model.nodes else "vault")
+        if target==self.current.get("key") and target in selected:
+            blocker=QSignalBlocker(self.tree.selectionModel())
+            for identifier in selected:
+                if identifier in self.model.nodes:
+                    self.tree.selectionModel().select(self.proxy.mapFromSource(self.model.nodes[identifier].index()),
+                        QItemSelectionModel.SelectionFlag.Select|QItemSelectionModel.SelectionFlag.Rows)
+            del blocker
+            self.build_toolbar()
+            self.tree.verticalScrollBar().setValue(scroll)
+
+    def cleanup_result(self):
+        task,self.result_task=self.result_task,None
+        if task:self.async_io(task.close,lambda _:None)
+
+    def mutate(self,app_id,function,done=None,*,key=None,failed=None,message="正在保存…"):
+        """Serialize writes, then prepare only the affected app's tree off-thread.
+
+        A picker owns temporary screenshots. Transfer its cleanup until all saves
+        (including an overlap retry) finish, otherwise the source disappears.
+        """
+        if self.saving or self.deleting or self.task:return False
+        library=self.library;windows=dict(self.windows)
+        self.load_serial+=1;serial=self.load_serial
+        app_ids=None if self.full_reload_pending else self.pending_apps|{app_id}
+        self.pending_apps=set(app_ids or ())
+        task,self.result_task=self.result_task,None
+        self.saving=True;self.centralWidget().setEnabled(False)
+        self.progress.setRange(0,0);self.progress.show();self.status_label.setText(message)
+        def work():
+            try:
+                value=function()
+                return value,self.read_updates(library,app_ids,windows),None
+            except Exception as error:return None,None,error
+        def finished(result):
+            self.saving=False;self.centralWidget().setEnabled(True);self.progress.hide()
+            self.result_task=task
+            value,updates,error=result
+            try:
+                if error:
+                    if failed:failed(error)
+                    else:self.error("无法保存",error)
+                    return
+                if serial!=self.load_serial or library is not self.library:return
+                self.pending_apps.clear();self.full_reload_pending=False
+                target=key(value) if callable(key) else key
+                self.apply_updates(updates,app_ids,target)
+                self.status_label.setText("已保存")
+                if done:done(value)
+            finally:
+                self.cleanup_result();self.build_toolbar()
+        self.async_io(work,finished)
+        return True
 
     def open_image_models(self):
         if self.model_dialog is None:
@@ -245,23 +332,27 @@ class KnowledgeWindow(QMainWindow):
         self.refresh_image_models()
         return True
 
-    def reload(self,key=None,*,message=None):
+    def reload(self,key=None,*,message=None,app_ids=None):
+        if self.saving:return
         self.load_serial+=1;serial=self.load_serial;self.vault_label.setText("知识库："+self.library.root.name)
         self.vault_label.setToolTip(str(self.library.root));library=self.library
-        expanded=[k for k,item in self.model.nodes.items() if self.tree.isExpanded(self.proxy.mapFromSource(item.index()))]
+        if self.model_root!=library.root:
+            self.model_root=library.root;self.snapshots={};self.pending_apps.clear()
+            self.model.clear();self.model.setHorizontalHeaderLabels(["知识节点","状态"])
+            self.model.nodes.clear();self.model.rows.clear()
+        self.full_reload_pending=self.full_reload_pending or not key or key=="vault"
+        if app_ids:self.pending_apps.update(app_ids)
+        elif key and key!="vault":self.pending_apps.add(key.split(":",2)[1])
+        requested=None if self.full_reload_pending else set(self.pending_apps)
+        windows=dict(self.windows)
         target=key or self.current.get("key","vault")
         self.reload_key=target
-        def loaded(snapshots):
+        def loaded(updates):
             if serial!=self.load_serial:return
-            self.loading=True;self.snapshots=snapshots;self.model.load(library.root.name,snapshots,self.windows)
-            self.tree.header().setSectionResizeMode(0,QHeaderView.ResizeMode.Stretch)
-            self.tree.header().setSectionResizeMode(1,QHeaderView.ResizeMode.ResizeToContents)
-            for identifier in ["vault",*expanded]:
-                if identifier in self.model.nodes:self.tree.setExpanded(self.proxy.mapFromSource(self.model.nodes[identifier].index()),True)
-            desired=self.reload_key
-            self.loading=False;self.goto(desired if desired in self.model.nodes else "vault")
+            self.pending_apps.clear();self.full_reload_pending=False
+            self.apply_updates(updates,requested,self.reload_key)
             if not self.task:self.status_label.set_icon("");self.status_label.setText(message or "已加载知识库；选择软件、区域或组合动作。")
-        self.async_io(lambda:{app["id"]:library.read(app["id"]) for app in library.apps()},loaded)
+        self.async_io(lambda:self.read_updates(library,requested,windows),loaded)
 
     def goto(self,key):
         item=self.model.nodes.get(key)
@@ -272,26 +363,26 @@ class KnowledgeWindow(QMainWindow):
             del blocker
             self.tree.scrollTo(index);self.select(index)
 
-    def maybe_save(self):
-        if self.deleting:return False
+    def maybe_save(self,then=None):
+        if self.deleting or self.saving:return False
         if not self.dirty:return True
         answer=QMessageBox.question(self,"未保存修改","保存当前修改？",QMessageBox.StandardButton.Save|QMessageBox.StandardButton.Discard|QMessageBox.StandardButton.Cancel)
         if answer==QMessageBox.StandardButton.Cancel:return False
-        if answer==QMessageBox.StandardButton.Save:return self.save()
+        if answer==QMessageBox.StandardButton.Save:
+            self.save(done=then);return False
         self.dirty=False;return True
 
     def select(self,index,*_):
-        if self.loading or not index.isValid():return
+        if self.loading or self.saving or not index.isValid():return
         index=index.siblingAtColumn(0)
         node=index.data(ROLE)
         if not node:return
-        serial_before=self.load_serial
-        if self.current.get("key")!=node["key"] and not self.maybe_save():
+        if self.current.get("key")!=node["key"] and not self.maybe_save(lambda:self.goto(node["key"])):
             self.loading=True
             old=self.model.nodes.get(self.current.get("key"))
             if old:self.tree.setCurrentIndex(self.proxy.mapFromSource(old.index()))
             self.loading=False;return
-        if self.load_serial!=serial_before:self.reload_key=node["key"]
+        self.reload_key=node["key"]
         self.current=deepcopy(node);self.loading=True;self.dirty=False;self.flow=None
         kind,r=node["kind"],node["record"]
         label={"vault":"知识库","controls-root":"控件库","usage-root":"使用知识","actions-root":"组合动作"}.get(kind,kind)
@@ -336,10 +427,17 @@ class KnowledgeWindow(QMainWindow):
         self.entry_editor.load(self.library.entry_steps(self.app_id,r,snapshot=self.snapshots[self.app_id]) if kind in {"control","region"} else state.get("steps",[]))
         self.entry_dirty=False;self.entry_condition=deepcopy(state.get("condition"))
         self.state_name.setText(state.get("name", ""));self.state_name.setVisible(kind=="region")
-        self.hierarchy.clear();self.hierarchy.addItem("自动","auto");self.hierarchy.addItem("区域直属","")
         if kind=="control":
-            for other in self.snapshots[self.app_id]["controls"]:
-                if other["id"]!=r["id"]:self.hierarchy.addItem(other.get("semantic_name") or other.get("name") or other["id"],other["id"])
+            controls=self.snapshots[self.app_id]["controls"]
+            if controls is not self.hierarchy_records:
+                self.hierarchy_records=controls;self.hierarchy_disabled=None;self.hierarchy_positions={}
+                self.hierarchy.clear();self.hierarchy.addItem("自动","auto");self.hierarchy.addItem("区域直属","")
+                for other in controls:
+                    self.hierarchy_positions[other["id"]]=self.hierarchy.count()
+                    self.hierarchy.addItem(other.get("semantic_name") or other.get("name") or other["id"],other["id"])
+            if self.hierarchy_disabled is not None:self.hierarchy.model().item(self.hierarchy_disabled).setEnabled(True)
+            self.hierarchy_disabled=self.hierarchy_positions.get(r["id"])
+            if self.hierarchy_disabled is not None:self.hierarchy.model().item(self.hierarchy_disabled).setEnabled(False)
             self.hierarchy.setCurrentIndex(max(0,self.hierarchy.findData(r.get("hierarchy_parent","auto"))))
         self.hierarchy.setEnabled(kind=="control")
         self.condition_kind.setCurrentIndex(max(0,self.condition_kind.findData((self.entry_condition or {}).get("kind","exists"))))
@@ -440,11 +538,7 @@ class KnowledgeWindow(QMainWindow):
         self.entry_preview.setPlainText("\n".join(f"{i}. {ACTION_NAMES.get(s['action'],s['action'])} · {s.get('description','')}" for i,s in enumerate(self.entry_editor.steps,1)) or "无前置步骤")
 
     def build_toolbar(self):
-        while self.toolbar.count():
-            item=self.toolbar.takeAt(0)
-            if item.widget():
-                item.widget().hide();item.widget().deleteLater()
-        self.context_buttons=[];kind=self.current.get("kind","vault")
+        kind=self.current.get("kind","vault")
         selected=self.selected_nodes();multiple=len(selected)>1;deletable=self.deletable_nodes(selected)
         self.caption.setText(f"已选择 {len(selected)} 项 · 当前预览：{self.selection_caption}" if multiple else self.selection_caption)
         self.details.setEnabled(not multiple);self.center.setEnabled(not multiple)
@@ -465,13 +559,6 @@ class KnowledgeWindow(QMainWindow):
             actions=[(f"删除所选（{len(deletable)}）",self.remove),("取消多选",self.clear_multiselection)]
         elif deletable:
             actions.append(("删除所选",self.remove))
-        for text,slot in actions:
-            value=button(text,slot);value.setEnabled(not self.task and not self.deleting and (not text.startswith("删除所选") or bool(deletable)))
-            self.toolbar.addWidget(value);self.context_buttons.append(value)
-        # Keep the button a child before changing visibility; an unparented
-        # visible widget briefly becomes a native window and can steal focus.
-        more=QToolButton(self.toolbar.parentWidget());more.setText("更多");more.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup);menu=QMenu(more)
-        set_button_icon(more);more.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         extras=[("导出软件知识",self.export)] if self.app_id else []
         if self.app_id:extras.append(('处理弹窗',self.inspect_popups))
         if kind in {"application","usage-root","usage","control","region"}:
@@ -487,8 +574,27 @@ class KnowledgeWindow(QMainWindow):
                 extras.append(("设为展开子区域",self.promote_region))
         if kind in {"workflow","actions-root"}:extras.append(("导入步骤表",self.import_steps))
         if multiple:extras=[]
+        signature=(tuple(text for text,_ in actions),tuple(text for text,_ in extras))
+        busy=bool(self.task or self.deleting or self.saving)
+        if signature==self.toolbar_signature:
+            for value in self.context_buttons:value.setEnabled(not busy and (not value.text().startswith("删除所选") or bool(deletable)))
+            for action in self.more_menu.actions():action.setEnabled(not busy)
+            return
+        self.toolbar_signature=signature
+        while self.toolbar.count():
+            item=self.toolbar.takeAt(0)
+            if item.widget():item.widget().hide();item.widget().deleteLater()
+        self.context_buttons=[]
+        for text,slot in actions:
+            value=button(text,slot);value.setEnabled(not busy and (not text.startswith("删除所选") or bool(deletable)))
+            self.toolbar.addWidget(value);self.context_buttons.append(value)
+        # Keep the button a child before changing visibility; an unparented
+        # visible widget briefly becomes a native window and can steal focus.
+        more=QToolButton(self.toolbar.parentWidget());more.setText("更多");more.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup);menu=QMenu(more)
+        set_button_icon(more);more.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self.more_menu=menu
         for text,slot in extras:
-            action=menu.addAction(text);action.triggered.connect(slot);action.setEnabled(bool(self.app_id) and not self.task)
+            action=menu.addAction(text);action.triggered.connect(slot);action.setEnabled(bool(self.app_id) and not busy)
             action.setIcon(icon(action_icon_name(text)))
         more.setMenu(menu);self.toolbar.addWidget(more);more.setVisible(bool(extras));self.toolbar.addStretch()
         self.toggle_details=button("属性",lambda:self.details.setVisible(not self.details.isVisible()));self.toolbar.addWidget(self.toggle_details)
@@ -560,13 +666,19 @@ class KnowledgeWindow(QMainWindow):
         dialog.finished.connect(finished);dialog.show()
 
     def choose_window(self,new=False):
-        if self.task or not self.maybe_save():return
+        if self.task or not self.maybe_save(lambda:self.choose_window(new=new)):return
         application=None if new else self.snapshots.get(self.app_id,{}).get("application")
         dialog=WindowDialog(self,application=application)
         if dialog.exec()!=QDialog.DialogCode.Accepted:return
-        app_id=dialog.app_id;self.library.bind(app_id,dialog.name.text().strip(),dialog.window);self.windows[app_id]=dialog.window
-        self.reload("app:"+app_id)
-        self.start_task("capture",{"window":dialog.window},lambda result:self.captured(app_id,result),hide=True)
+        app_id=dialog.app_id;library=self.library;name=dialog.name.text().strip();window=dict(dialog.window)
+        previous=self.windows.get(app_id);self.windows[app_id]=window
+        def failed(error):
+            if previous is None:self.windows.pop(app_id,None)
+            else:self.windows[app_id]=previous
+            self.error("无法保存软件",error)
+        def bound(_):
+            self.start_task("capture",{"window":window},lambda result:self.captured(app_id,result),hide=True)
+        self.mutate(app_id,lambda:library.bind(app_id,name,window),bound,key="app:"+app_id,failed=failed)
 
     def bound_window(self):
         if self.app_id in self.windows:return self.windows[self.app_id]
@@ -583,49 +695,53 @@ class KnowledgeWindow(QMainWindow):
             app_id=self.app_id;self.start_task("capture",{"window":window},lambda r:self.captured(app_id,r),hide=True)
 
     def captured(self,app_id,result):
-        self.library.save_capture(app_id,result);self.reload("app:"+app_id)
+        library=self.library
+        self.mutate(app_id,lambda:library.save_capture(app_id,result),key="app:"+app_id)
 
     def add_region(self):self.pick_region()
 
     def pick_region(self,modify=False,variant=None):
-        if not self.app_id or self.task or not self.maybe_save():return
+        if not self.app_id or self.task or not self.maybe_save(lambda:self.pick_region(modify,variant)):return
         window=self.bound_window()
         if not window:return
         app_id=self.app_id;record=deepcopy(self.record);scope=self.scoped if modify else self.library
+        library=self.library
         def done(result):
             target_scope=scope
             title=record.get("name","") if modify else ""
             if not title and not variant:
                 title,ok=QInputDialog.getText(self,"区域名称","名称",text=result["selection"]["native_name"] or "区域")
                 if not ok:return
-            if variant:
-                identifier=self.library.save_variant(app_id,record,result,**variant)
-            else:
-                if result["capture"].get("window_scope",{}).get("kind")=="owned" and not modify:
-                    target_scope=self.library.scoped("window-"+uuid4().hex[:10])
-                try:
-                    identifier=target_scope.save_picked_region(app_id,result,region_id=record["id"] if modify else "",name=title,
-                                                        description=record.get("description","") if modify else "")
-                except ValueError as error:
-                    if modify or "重叠" not in str(error):raise
-                    conflicts=[r for r in target_scope.regions(app_id) if self.overlapping(r["normalized_rect"],result["selection"]["normalized_rect"])]
-                    if len(conflicts)!=1:raise
-                    existing=conflicts[0];box=QMessageBox(self);box.setWindowTitle("区域重叠")
+            if result["capture"].get("window_scope",{}).get("kind")=="owned" and not modify:
+                target_scope=library.scoped("window-"+uuid4().hex[:10])
+            def save(region=None,state=None):
+                def write():
+                    if state:return library.save_variant(app_id,region,result,**state)
+                    try:
+                        return target_scope.save_picked_region(app_id,result,region_id=region["id"] if region else "",name=region.get("name",title) if region else title,
+                                                              description=region.get("description","") if region else "")
+                    except ValueError as error:
+                        if region or "重叠" not in str(error):raise
+                        conflicts=[r for r in target_scope.regions(app_id) if self.overlapping(r["normalized_rect"],result["selection"]["normalized_rect"])]
+                        if len(conflicts)!=1:raise
+                        return {"conflict":conflicts[0]}
+                def saved(value):
+                    if not isinstance(value,dict):return
+                    existing=value["conflict"];box=QMessageBox(self);box.setWindowTitle("区域重叠")
                     box.setText("与“"+existing["name"]+"”重叠。若是另一 Tab 的内容，请添加状态。")
                     update=box.addButton("更新已有区域",QMessageBox.ButtonRole.AcceptRole)
-                    state=box.addButton("添加状态",QMessageBox.ButtonRole.ActionRole)
+                    state_button=box.addButton("添加状态",QMessageBox.ButtonRole.ActionRole)
                     box.addButton("取消",QMessageBox.ButtonRole.RejectRole);box.exec()
-                    if box.clickedButton()==update:
-                        identifier=target_scope.save_picked_region(app_id,result,region_id=existing["id"],name=existing["name"],description=existing.get("description",""))
-                    elif box.clickedButton()==state:
+                    if box.clickedButton()==update:save(existing)
+                    elif box.clickedButton()==state_button:
                         from .state_dialog import StateDialog
                         dialog=StateDialog(self);self.active_dialog=dialog
                         try:
-                            if dialog.exec()!=QDialog.DialogCode.Accepted:return
-                            identifier=self.library.save_variant(app_id,existing,result,**dialog.values())
+                            if dialog.exec()==QDialog.DialogCode.Accepted:save(existing,dialog.values())
                         finally:self.active_dialog=None
-                    else:return
-            self.reload(f"region:{app_id}:{identifier}")
+                self.mutate(app_id,write,saved,key=lambda value:f"region:{app_id}:{value}" if isinstance(value,str) else None,
+                            message="正在保存区域和截图…")
+            save(record if modify or variant else None,variant)
         self.start_task("pick-region",{"window":window},done,hide=True)
 
     @staticmethod
@@ -634,7 +750,7 @@ class KnowledgeWindow(QMainWindow):
 
     def add_variant(self):
         if self.current.get("kind") not in {"region","area"}:return
-        if not self.maybe_save():return
+        if not self.maybe_save(self.add_variant):return
         from .state_dialog import StateDialog
         dialog=StateDialog(self);self.active_dialog=dialog
         if dialog.exec()==QDialog.DialogCode.Accepted:
@@ -642,24 +758,21 @@ class KnowledgeWindow(QMainWindow):
         else:self.active_dialog=None
 
     def subdivide(self):
-        if not self.maybe_save():return
+        if not self.maybe_save(self.subdivide):return
         record=self.record;observation=record.get("visual_observation",{})
         path=self.library.asset(self.app_id,observation.get("context_image",""))
         if path is None:self.error("无法细分","学习参考图缺失，请重新学习展开内容");return
         from .boundary_dialog import BoundaryDialog
         dialog=BoundaryDialog(path,record,self)
         if dialog.exec()==QDialog.DialogCode.Accepted:
-            try:
-                identifier=self.library.save_dynamic_region(self.app_id,dialog.name.text(),dialog.view.rectangle,parent_region_id=record["id"])
-                self.reload(f"region:{self.app_id}:{identifier}")
-            except Exception as error:self.error("无法保存子区域",error)
+            library=self.library;app_id=self.app_id;name=dialog.name.text();rectangle=deepcopy(dialog.view.rectangle)
+            self.mutate(app_id,lambda:library.save_dynamic_region(app_id,name,rectangle,parent_region_id=record["id"]),
+                        key=lambda identifier:f"region:{app_id}:{identifier}")
 
     def promote_region(self):
-        if not self.maybe_save():return
-        try:
-            identifier=self.library.make_dynamic_region(self.app_id,self.record["id"])
-            self.reload(f"region:{self.app_id}:{identifier}")
-        except Exception as error:self.error("无法建立子区域",error)
+        if not self.maybe_save(self.promote_region):return
+        library=self.library;app_id=self.app_id;identifier=self.record["id"]
+        self.mutate(app_id,lambda:library.make_dynamic_region(app_id,identifier),key=lambda value:f"region:{app_id}:{value}")
 
     def relearn_dynamic(self):
         route=self.record.get("navigation_path",[])
@@ -672,9 +785,8 @@ class KnowledgeWindow(QMainWindow):
         if not window:return
         app_id=self.app_id;scope=self.scoped
         def done(result):
-            record=scope.save_captured_control(app_id,result)
             # Keep unsaved entry edits while refreshing the captured record catalogue.
-            self.snapshots[app_id]=self.library.read(app_id);callback(record)
+            self.mutate(app_id,lambda:scope.save_captured_control(app_id,result),callback)
         self.start_task("pick-region",{"window":window,"match_mode":"identity"},done,hide=True)
 
     def pick_entry(self):
@@ -695,20 +807,21 @@ class KnowledgeWindow(QMainWindow):
         window=self.bound_window()
         if not window:return
         app_id=self.app_id;scope=self.scoped
+        def saved(steps):
+            self.entry_editor.steps.extend(steps);self.entry_editor.render();self.entry_changed()
+            self.details.setVisible(True);self.details.setCurrentIndex(1)
         def done(result):
             from ..entry_recording import archive_actions
-            steps=archive_actions(scope,app_id,result["actions"])
-            self.snapshots[app_id]=self.library.read(app_id);self.entry_editor.steps.extend(steps);self.entry_editor.render();self.entry_changed()
-            self.details.setVisible(True);self.details.setCurrentIndex(1)
+            self.mutate(app_id,lambda:archive_actions(scope,app_id,result["actions"]),saved)
         self.start_task("record-steps",{"window":window},done,hide=True)
 
     def open_region(self):
-        if not self.maybe_save():return
+        if not self.maybe_save(self.open_region):return
         window=self.bound_window()
         if window:self.start_task("open-region",dict(vault=str(self.library.root),app_id=self.app_id,page_id=self.record.get("page_id",PAGE_ID),region_id=self.record["id"],window=window),lambda r:self.status_label.setText(r["message"]),hide=True)
 
     def review_layout(self,*,for_learning=False):
-        if not self.app_id or self.task or not self.maybe_save():return False
+        if not self.app_id or self.task or not self.maybe_save(lambda:self.review_layout(for_learning=for_learning)):return False
         from .layout_dialog import LayoutDialog
         app_id=self.app_id;key=self.current["key"]
         dialog=LayoutDialog(self.library,app_id,self.snapshots[app_id],self,
@@ -718,31 +831,31 @@ class KnowledgeWindow(QMainWindow):
         accepted=dialog.exec()==QDialog.DialogCode.Accepted
         if dialog.edit_region_id:
             self.goto(f"region:{app_id}:{dialog.edit_region_id}");self.pick_region(modify=True)
-        elif accepted:
-            self.snapshots[app_id]=self.library.read(app_id)
-            if not for_learning:self.reload(key)
+        elif accepted and dialog.updates:
+            self.apply_updates(dialog.updates,{app_id},key)
         return accepted
 
     def learn(self):
-        if self.current.get("kind")!="region" or not self.maybe_save():return
+        if self.current.get("kind")!="region" or not self.maybe_save(self.learn):return
         window=self.bound_window()
         if not window:return
         scope=self.scoped;app_id=self.app_id;record=deepcopy(self.record)
-        if not scope.page(app_id).get("layout_confirmed") and not self.review_layout(for_learning=True):return
-        try:layout=scope.learning_layout(app_id,window,region_id=record["id"])
-        except Exception as error:self.error("无法学习",error);return
-        self.start_task("learn",dict(layout=layout,window=window,window_name=window["title"],vault=str(self.library.root),
-                                    region_id=record["id"],semantic_mode="native"),lambda _r:self.reload(f"region:{app_id}:{record['id']}"),hide=True)
+        page=next((p for p in self.snapshots[app_id]["pages"] if p["id"]==scope.page_id),{})
+        if not page.get("layout_confirmed") and not self.review_layout(for_learning=True):return
+        def prepared(layout):
+            self.start_task("learn",dict(layout=layout,window=window,window_name=window["title"],vault=str(self.library.root),
+                                        region_id=record["id"],semantic_mode="native"),lambda _r:self.reload(f"region:{app_id}:{record['id']}"),hide=True)
+        self.mutate(app_id,lambda:scope.learning_layout(app_id,window,region_id=record["id"]),prepared,message="正在准备区域学习…")
 
     def verify(self):
-        if not self.maybe_save():return
+        if not self.maybe_save(self.verify):return
         window=self.bound_window()
         if window:self.start_task("verify",dict(vault=str(self.library.root),app_id=self.app_id,
             **{key:deepcopy(self.record.get(key)) for key in ("name","location","image","image_variants")},
             window_scope=self.record.get("window_scope",{"kind":"main"}),window=window),lambda r:self.status_label.setText(r["message"]),hide=True)
 
     def execute_control(self):
-        if not self.maybe_save():return
+        if not self.maybe_save(self.execute_control):return
         window=self.bound_window()
         if not window:return
         app_id,record=self.app_id,deepcopy(self.record)
@@ -755,16 +868,18 @@ class KnowledgeWindow(QMainWindow):
         self.expand_record(deepcopy(self.record))
 
     def expand_record(self,record):
-        if not self.maybe_save():return
+        if not self.maybe_save(lambda:self.expand_record(record)):return
         window=self.bound_window()
         if not window:return
         app_id=self.app_id
-        layout=self.scoped.learning_layout(app_id,window)
-        self.start_task("expand",dict(vault=str(self.library.root),app_id=app_id,control_id=record["id"],window=window,
-            layout=layout,window_name=window["title"],semantic_mode="native"),lambda _r:self.reload(f"control:{app_id}:{record['id']}"),hide=True)
+        scope=self.scoped
+        def prepared(layout):
+            self.start_task("expand",dict(vault=str(self.library.root),app_id=app_id,control_id=record["id"],window=window,
+                layout=layout,window_name=window["title"],semantic_mode="native"),lambda _r:self.reload(f"control:{app_id}:{record['id']}"),hide=True)
+        self.mutate(app_id,lambda:scope.learning_layout(app_id,window),prepared,message="正在准备展开学习…")
 
     def new_flow(self):
-        if not self.app_id or not self.maybe_save():return
+        if not self.app_id or not self.maybe_save(self.new_flow):return
         name,ok=QInputDialog.getText(self,"新建组合动作","动作标题",text="新建工程")
         if not ok or not name.strip():return
         self.flow=dict(id="workflow-"+uuid4().hex[:12],kind="workflow",app_id=self.app_id,keyword=name.strip(),parameters={},precondition="软件已启动",steps=[])
@@ -801,7 +916,9 @@ class KnowledgeWindow(QMainWindow):
             self.flow_steps.load([*steps,workflows.click_step(record)]);self.changed()
 
     def run_flow(self):
-        if not self.flow or not self.save():return
+        if self.flow:self.save(done=self.run_saved_flow)
+
+    def run_saved_flow(self):
         window=self.bound_window()
         if not window:return
         parameters=self.flow.get("parameters",{})
@@ -867,65 +984,80 @@ class KnowledgeWindow(QMainWindow):
         markers=[(n,r.get("semantic_name") or r.get("name",""),True)] if n and ref!=r.get("image") else []
         self.image.show_image(path,markers);self.center.setCurrentWidget(self.image)
 
-    def save(self):
+    def save(self,*,done=None):
         if self.loading:return True
-        if self.deleting:return False
+        if self.deleting or self.saving:return False
         if self.task:self.status_label.setText("任务运行中，完成后再保存修改。");return False
-        kind=self.current.get("kind");app_id=self.app_id;r=self.record
+        kind=self.current.get("kind");app_id=self.app_id;r=deepcopy(self.record)
+        library=self.library;scope=self.scoped;key=self.current.get("key")
         try:
             if kind=="workflow" and self.flow:
-                self.flow.update(keyword=self.flow_title.text().strip(),steps=deepcopy(self.flow_steps.steps))
-                saved=self.library.save_workflow(app_id,self.flow);key=f"workflow:{app_id}:{saved['id']}"
+                flow={**deepcopy(self.flow),"keyword":self.flow_title.text().strip(),"steps":deepcopy(self.flow_steps.steps)}
+                def write():
+                    saved=library.save_workflow(app_id,flow)
+                    return f"workflow:{app_id}:{saved['id']}"
             elif kind=="control":
                 if self.identity_error:raise ValueError(self.identity_error)
                 location=normalize_location(json.loads(self.locator.toPlainText()))
                 if not is_image_location(location):
                     location=with_control_identity(location,{key:field.text() for key,field in self.native_fields.items()})
-                self.library.update_control(app_id,r["id"],name=self.name.text(),description=self.description.toPlainText(),aliases=r.get("aliases",[]),
+                values=dict(name=self.name.text(),description=self.description.toPlainText(),aliases=r.get("aliases",[]),
                     location=location,match_mode=self.mode.currentData(),
-                    entry_steps=self.entry_editor.steps if self.entry_dirty else None,hierarchy_parent=self.hierarchy.currentData())
-                key=self.current["key"]
+                    entry_steps=deepcopy(self.entry_editor.steps) if self.entry_dirty else None,hierarchy_parent=self.hierarchy.currentData())
+                def write():library.update_control(app_id,r["id"],**values);return key
             elif kind=="region":
+                name=self.name.text();description=self.description.toPlainText()
                 if dynamic_regions.is_dynamic(r):
-                    self.library.save_dynamic_region(app_id,self.name.text(),r["normalized_rect"],region_id=r["id"],description=self.description.toPlainText())
-                    key=self.current["key"];self.dirty=False;self.reload(key);return True
-                if r.get("source")!="manual":raise ValueError("历史自动区域请重新添加后维护")
-                condition=deepcopy(self.entry_condition)
-                if condition:condition["kind"]=self.condition_kind.currentData()
-                self.scoped.configure_region(app_id,r["id"],steps=self.entry_editor.steps,condition=condition,state_name=self.state_name.text())
-                self.scoped.save_region(app_id,self.name.text(),r["normalized_rect"],r["id"],description=self.description.toPlainText())
-                key=self.current["key"]
+                    def write():
+                        library.save_dynamic_region(app_id,name,r["normalized_rect"],region_id=r["id"],description=description)
+                        return key
+                else:
+                    if r.get("source")!="manual":raise ValueError("历史自动区域请重新添加后维护")
+                    condition=deepcopy(self.entry_condition)
+                    if condition:condition["kind"]=self.condition_kind.currentData()
+                    steps=deepcopy(self.entry_editor.steps);state_name=self.state_name.text()
+                    def write():
+                        scope.configure_region(app_id,r["id"],name=name,description=description,
+                            steps=steps,condition=condition,state_name=state_name)
+                        return key
             elif kind=="usage":
-                saved=self.library.save_usage(app_id,self.name.text(),self.usage.toPlainText(),document_id=r.get("id","") if r.get("editable") else "")
-                key=f"usage:{app_id}:{saved['document_path']}"
+                name=self.name.text();body=self.usage.toPlainText()
+                def write():
+                    saved=library.save_usage(app_id,name,body,document_id=r.get("id","") if r.get("editable") else "")
+                    return f"usage:{app_id}:{saved['document_path']}"
             elif kind=="reference":
-                self.library.save_reference(app_id,r["id"],self.usage.toPlainText(),enabled=r.get("enabled",True))
-                key=self.current["key"]
-            else:return True
+                body=self.usage.toPlainText()
+                def write():library.save_reference(app_id,r["id"],body,enabled=r.get("enabled",True));return key
+            else:
+                if done:done()
+                return True
         except Exception as error:self.error("无法保存",error);return False
-        self.dirty=False;self.status_label.setText("已保存");self.reload(key);return True
+        def saved(target):
+            self.dirty=False;self.goto(target)
+            if done:done()
+        return self.mutate(app_id,write,saved)
 
     def new_usage(self):
-        if not self.app_id or not self.maybe_save():return
+        if not self.app_id or not self.maybe_save(self.new_usage):return
         self.current={**self.current,"kind":"usage","record":{"name":"新说明","editable":True,"body":""}}
         self.loading=True;self.name.setText("新说明");self.usage.clear();self.usage.setReadOnly(False);self.loading=False
         self.center.setCurrentWidget(self.usage);self.details.setVisible(True);self.dirty=True;self.build_toolbar()
 
     def import_steps(self):
-        if not self.app_id or not self.maybe_save():return
+        if not self.app_id or not self.maybe_save(self.import_steps):return
         text,ok=QInputDialog.getMultiLineText(self,"导入步骤表","粘贴动作标题、步骤和预期的 Markdown 表格")
         if not ok:return
-        try:flow=self.library.import_workflow_case(self.app_id,text);self.reload(f"workflow:{self.app_id}:{flow['id']}")
-        except Exception as error:self.error("无法导入",error)
+        library=self.library;app_id=self.app_id
+        self.mutate(app_id,lambda:library.import_workflow_case(app_id,text),key=lambda flow:f"workflow:{app_id}:{flow['id']}")
 
     def import_reference_files(self):
-        if not self.app_id or not self.maybe_save():return
+        if not self.app_id or not self.maybe_save(self.import_reference_files):return
         paths,_=QFileDialog.getOpenFileNames(self,"添加参考文件","",
             "参考资料 (*.pdf *.docx *.md *.markdown *.txt *.html *.htm *.xmind *.mm *.opml)")
         if paths:self.import_references(paths)
 
     def supplement_descriptions(self):
-        if not self.app_id or not self.maybe_save():return
+        if not self.app_id or not self.maybe_save(self.supplement_descriptions):return
         kind=self.current.get("kind");app_id=self.app_id;key=self.current["key"]
         identifiers=None
         if kind=="control":identifiers=[self.record["id"]]
@@ -937,7 +1069,7 @@ class KnowledgeWindow(QMainWindow):
         self.start_task("supplement-descriptions",dict(vault=str(self.library.root),app_id=app_id,control_ids=identifiers),completed)
 
     def import_reference_url(self):
-        if not self.app_id or not self.maybe_save():return
+        if not self.app_id or not self.maybe_save(self.import_reference_url):return
         url,ok=QInputDialog.getText(self,"添加参考网页","网页地址（http / https）")
         if ok and url.strip():
             if not url.strip().lower().startswith(("http://","https://")):
@@ -952,7 +1084,7 @@ class KnowledgeWindow(QMainWindow):
         self.start_task("import-reference",dict(vault=str(self.library.root),app_id=app_id,sources=sources,force=force),imported)
 
     def reimport_reference(self):
-        if not self.maybe_save():return
+        if not self.maybe_save(self.reimport_reference):return
         record=self.record
         if QMessageBox.question(self,"重新整理参考资料","使用保存的原始资料重新理解，覆盖当前标准 Markdown？")!=QMessageBox.StandardButton.Yes:return
         asset=self.library.asset(self.app_id,record["source_asset"])
@@ -960,21 +1092,21 @@ class KnowledgeWindow(QMainWindow):
         self.import_references([str(asset)],force=True)
 
     def toggle_reference(self):
-        if not self.maybe_save():return
-        self.library.save_reference(self.app_id,self.record["id"],self.usage.toPlainText(),enabled=not self.record.get("enabled",True))
-        self.reload(self.current["key"])
+        if not self.maybe_save(self.toggle_reference):return
+        library=self.library;app_id=self.app_id;identifier=self.record["id"];body=self.usage.toPlainText();enabled=not self.record.get("enabled",True)
+        self.mutate(app_id,lambda:library.save_reference(app_id,identifier,body,enabled=enabled),key=self.current["key"])
 
     def export(self):
         if not self.app_id:return
         path,_=QFileDialog.getSaveFileName(self,"导出软件知识",self.app_id+".json","JSON (*.json)")
         if path:
-            try:self.library.export(self.app_id,path);self.status_label.setText("已导出软件知识")
-            except Exception as error:self.error("无法导出",error)
+            library=self.library;app_id=self.app_id
+            self.async_io(lambda:library.export(app_id,path),lambda _:self.status_label.setText("已导出软件知识"))
 
     def remove(self):
-        if self.task or self.deleting:return
+        if self.task or self.deleting or self.saving:return
         selected=deepcopy(self.selected_nodes());nodes=self.deletable_nodes(selected)
-        if not nodes or not self.maybe_save():return
+        if not nodes or not self.maybe_save(self.remove):return
         lines=[f"{self.snapshots.get(n['app_id'],{}).get('application',{}).get('name',n['app_id'])} / "
                +(n['record'].get('semantic_name') or n['record'].get('name') or n['record']['id']) for n in nodes]
         prompt=f"删除选中的 {len(nodes)} 项记录？\n\n"+"\n".join(lines[:12])
@@ -995,7 +1127,7 @@ class KnowledgeWindow(QMainWindow):
             paths,error=value
             if error:self.error("无法删除",error);self.build_toolbar();return
             self.dirty=False;self.search.clear()
-            self.reload("controls-root:"+app_id,message=f"已删除 {len(paths)} 项记录；原记录已归档。")
+            self.reload("controls-root:"+app_id,app_ids={n["app_id"] for n in nodes},message=f"已删除 {len(paths)} 项记录；原记录已归档。")
         self.async_io(archive,finished)
 
     def configure(self):
@@ -1010,12 +1142,12 @@ class KnowledgeWindow(QMainWindow):
         SettingsDialog(self.library.root,self,before_save=before,on_saved=saved).exec()
 
     def change_vault(self):
-        if self.task or not self.maybe_save():return
+        if self.task or not self.maybe_save(self.change_vault):return
         path=QFileDialog.getExistingDirectory(self,"选择知识库",str(self.library.root))
         if path:self.library=KnowledgeLibrary(path);self.windows.clear();self.current={};self.reload("vault")
 
     def start_task(self,operation,payload,done,*,hide=False):
-        if self.task or self.deleting:return
+        if self.task or self.deleting or self.saving:return
         try:
             self.task=LibraryTask({"operation":operation,**payload,"capture_handshake":hide and operation not in {"pick-region","record-steps"}},
                                  timeout=3600 if operation in {"import-reference","supplement-descriptions","download-image-models"} else 600 if operation in {"learn","expand","record-steps"} else 300 if operation=="pick-region" else 90)
@@ -1059,9 +1191,11 @@ class KnowledgeWindow(QMainWindow):
             self.showMaximized() if self.was_maximized else self.showNormal()
         self.result_app_id=self.task_app_id
         if self.active_dialog and not keep_target_foreground:self.active_dialog.show()
+        self.result_task=task
         try:
             if state["state"]=="completed":
-                callback(state["result"]);self.status_label.setText("任务完成" if not state["result"].get("message") else state["result"]["message"])
+                callback(state["result"])
+                if not self.saving:self.status_label.setText("任务完成" if not state["result"].get("message") else state["result"]["message"])
                 self.status_label.set_icon("status-error" if state["result"].get("ok") is False else "status-success")
             elif state["state"]=="cancelled":self.status_label.set_icon("status-pending");self.status_label.setText("已取消本次任务")
             else:
@@ -1073,7 +1207,7 @@ class KnowledgeWindow(QMainWindow):
                 else:self.error("任务未完成",state.get("error","任务失败"))
         except Exception as error:self.error("结果未保存",error)
         finally:
-            task.close();self.build_toolbar()
+            self.cleanup_result();self.build_toolbar()
             if task.operation=="download-image-models":self.refresh_image_models()
             self.update_model_buttons()
 
@@ -1081,11 +1215,19 @@ class KnowledgeWindow(QMainWindow):
         if self.task:self.task.cancel();self.status_label.setText("正在停止当前任务…")
 
     def closeEvent(self,event):
-        if self.deleting:self.status_label.setText("正在完成删除，请稍候再关闭。");event.ignore();return
+        if self.deleting or self.saving:self.status_label.setText("正在保存记录，请稍候再关闭。");event.ignore();return
         if self.task:
             if QMessageBox.question(self,"任务运行中","停止当前任务并关闭？")!=QMessageBox.StandardButton.Yes:event.ignore();return
-            self.task.close();self.task=None
-        if not self.maybe_save():event.ignore();return
+            task,self.task=self.task,None;self.saving=True;self.centralWidget().setEnabled(False)
+            def stop_task():
+                try:task.close()
+                except Exception as error:return error
+            def stopped(error):
+                self.saving=False;self.centralWidget().setEnabled(True)
+                if error:self.task=task;self.error("任务未能关闭",error)
+                else:self.close()
+            self.async_io(stop_task,stopped);event.ignore();return
+        if not self.maybe_save(self.close):event.ignore();return
         if self.settings:
             self.settings.setValue("navigation",self.main_split.saveState());self.settings.setValue("workspace",self.work_split.saveState())
         self.timer.stop();event.accept()

@@ -16,7 +16,7 @@ $OutputEncoding = [Text.UTF8Encoding]::new()
 if (-not [Environment]::Is64BitOperatingSystem -or $env:PROCESSOR_ARCHITECTURE -eq "ARM64") {
     throw "This installer supports Windows x64 only."
 }
-$packageVersion = "1.0.0"
+$packageVersion = "1.0.1"
 $repositoryManifest = Join-Path (Split-Path -Parent $PSScriptRoot) "pyproject.toml"
 $repositorySource = Join-Path (Split-Path -Parent $PSScriptRoot) "src\easy_uiauto\deployment.py"
 if ((Test-Path -LiteralPath $repositoryManifest) -and (Test-Path -LiteralPath $repositorySource)) {

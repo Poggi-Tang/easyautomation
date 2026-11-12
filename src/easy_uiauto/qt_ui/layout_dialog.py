@@ -1,10 +1,11 @@
 """Review saved region boundaries without recapturing or operating the app."""
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt,QSignalBlocker,QThreadPool
 from PySide6.QtWidgets import (QComboBox, QDialog, QDialogButtonBox, QHBoxLayout,
     QLabel, QSplitter, QTreeWidget, QTreeWidgetItem, QVBoxLayout)
 
 from ..mcp import manual_layout
-from .widgets import ImageView, button
+from .widgets import ImageView, IoJob, button
+from .models import KnowledgeModel
 from .icons import icon, decorate_button_box, decorate_search
 
 
@@ -15,6 +16,7 @@ class LayoutDialog(QDialog):
         self.library=library;self.app_id=app_id;self.snapshot=snapshot
         self.for_learning=for_learning;self.edit_region_id="";self.confirmed_page_id=""
         self.initial_region=region_id;self.regions=[];self.page={}
+        self.saving=False;self.save_job=None;self.updates=None
         self.setWindowTitle("确认区域" if for_learning else "查看区域");self.resize(1100,740)
         layout=QVBoxLayout(self)
         hint=QLabel("查看已保存的布局图和区域边界；此处不会刷新截图或操作目标软件。")
@@ -52,7 +54,7 @@ class LayoutDialog(QDialog):
     def show_page(self,*_):
         page_id=self.pages.currentData()
         self.page=next((p for p in self.snapshot.get("pages",[]) if p["id"]==page_id),{})
-        self.regions=self.page_regions(page_id);self.tree.clear();selected=None
+        self.regions=self.page_regions(page_id);blocker=QSignalBlocker(self.tree);self.tree.clear();selected=None
         size=self.page.get("observed_window_size",{})
         for region in self.regions:
             r=region["normalized_rect"];width,height=size.get("width",0),size.get("height",0)
@@ -61,7 +63,7 @@ class LayoutDialog(QDialog):
             item.setData(0,Qt.ItemDataRole.UserRole,region["id"]);self.tree.addTopLevelItem(item)
             item.setIcon(0,icon("region"))
             if region["id"]==self.initial_region:selected=item
-        self.tree.setCurrentItem(selected or self.tree.topLevelItem(0));self.show_selection()
+        self.tree.setCurrentItem(selected or self.tree.topLevelItem(0));del blocker;self.show_selection()
         status="已确认" if self.page.get("layout_confirmed") else "待确认"
         reason="窗口尺寸或类型发生变化，请逐个检查边界；有偏差时先修改。" if self.page.get("requires_layout_review") else "请检查图中边界是否对应要学习的区域。"
         self.message.setText(f"{status} · 布局图 {size.get('width',0)} × {size.get('height',0)} · {len(self.regions)} 个区域\n{reason}")
@@ -84,7 +86,24 @@ class LayoutDialog(QDialog):
             self.edit_region_id=item.data(0,Qt.ItemDataRole.UserRole);self.reject()
 
     def accept(self):
-        if not self.confirm.isEnabled():return
-        try:self.library.scoped(self.page["id"]).confirm_layout(self.app_id)
-        except Exception as error:self.message.setText(str(error));return
-        self.confirmed_page_id=self.page["id"];super().accept()
+        if self.saving or not self.confirm.isEnabled():return
+        library=self.library;app_id=self.app_id;page_id=self.page["id"]
+        windows=dict(getattr(self.parent(),"windows",{}))
+        self.saving=True;self.setEnabled(False);self.message.setText("正在保存区域确认…")
+        def work():
+            library.scoped(page_id).confirm_layout(app_id)
+            snapshots={app_id:library.read(app_id)}
+            return snapshots,KnowledgeModel.describe(library.root.name,snapshots,windows)
+        def finished(value,error):
+            self.save_job=None;self.saving=False;self.setEnabled(True)
+            if error:self.message.setText(str(error));return
+            self.updates=value;self.confirmed_page_id=page_id;super(LayoutDialog,self).accept()
+        self.save_job=IoJob(work);self.save_job.signals.done.connect(finished)
+        QThreadPool.globalInstance().start(self.save_job)
+
+    def reject(self):
+        if not self.saving:super().reject()
+
+    def closeEvent(self,event):
+        if self.saving:event.ignore()
+        else:super().closeEvent(event)

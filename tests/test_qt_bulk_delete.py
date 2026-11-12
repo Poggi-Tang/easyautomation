@@ -91,7 +91,7 @@ def test_delete_shortcut_only_acts_in_navigation(app,window,monkeypatch):
 
 
 def test_filtered_selection_uses_visible_proxy_rows_and_protects_categories(app,window,monkeypatch):
-    window.search.setText("打开");window.tree.expandAll();app.processEvents()
+    window.search.setText("打开");settle(app,lambda:not window.search_timer.isActive())
     window.tree.setFocus();window.tree.selectAll()
     assert ids(window)>={"control-one","control-second"} and "control-third" not in ids(window)
     questions=[]

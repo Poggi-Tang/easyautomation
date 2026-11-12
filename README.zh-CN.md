@@ -9,11 +9,11 @@
 
 ![logo](https://github.com/Poggi-Tang/easyautomation/blob/main/src/image/easy-uiauto.png)
 
-**把 Windows 软件界面转换成可检查、可复用的 UI 命令。**
+Windows 桌面自动化工具，提供 Python API、MCP 服务，以及管理控件和流程的 GUI。
 
 ## 拉取仓库，一键使用 GUI
 
-需要离线开箱即用时，可到 [v1.0.0 发布页](https://github.com/Poggi-Tang/easyautomation/releases/tag/v1.0.0)
+需要离线使用时，可到[最新发布页](https://github.com/Poggi-Tang/easyautomation/releases/latest)
 下载完整的 `easy-uiauto-gui-win-x64.zip`，解压后双击 `setup.bat`。
 
 Windows x64 用户拉取 **`uiauto-gui` 分支**后，双击根目录的 `setup.bat` 即可：
@@ -33,20 +33,20 @@ Windows 可能弹出管理员授权提示。
 `setup.bat -Target "D:\easy-uiauto-gui"`。以后通过桌面快捷方式启动；
 执行 `git pull` 更新源码后，再运行一次 `setup.bat` 即可更新安装。
 GUI 安装默认不注册 MCP 客户端，也不修改用户 PATH。
-默认 `main` 分支和 PyPI 的发布节奏独立，使用本 GUI 请明确选择 `uiauto-gui` 分支。
+GUI 源码维护在 `uiauto-gui` 分支，默认 `main` 分支尚未包含这些改动；PyPI 从 1.0.0 起包含 GUI。
 详见 [GUI 使用与部署说明](docs/knowledge-gui.zh-CN.md)。
 
 ## 项目简介
 
 `easy-uiauto` 同时提供 Python 自动化库、MCP 服务、动作录制和 Obsidian
 兼容的 UI 知识库。它可以通过 Windows UI Automation 定位控件，学习当前可见
-软件中真正有用的区域和操作，并生成类似
+软件中的区域和控件，并生成类似
 `main.keypad.enter-digit-6.click` 的可执行命令。
 
-适用于 Windows 自动化测试、RPA、Agent 工具和桌面软件操作知识沉淀。
-项目仅支持 Windows，`1.0.0` 版本包含知识库 GUI 和一键安装入口。
+可用于录制桌面操作、编写自动化测试，以及让 Agent 调用已保存的控件和流程。
+`1.0.1` 改善了 GUI 响应速度，取消本地参考资料的 40 MB 限制，并新增按 GUI 区域学习和保存组合动作的 MCP 接口。
 
-图片标注默认并推荐使用 **YOLO＋RapidOCR**：输入图片路径和输出目录，即可生成文字标注图、
+图片标注默认使用 **YOLO＋RapidOCR**：输入图片路径和输出目录，可生成文字标注图、
 图形控件标注图、合并标注图、坐标、识别证据和本地 HTML 查看页。
 
 > 视觉扫描和流程探索仍在持续完善。涉及发送消息、支付、删除、上传、
@@ -54,24 +54,20 @@ GUI 安装默认不注册 MCP 客户端，也不修改用户 PATH。
 
 ## 包含的能力
 
-- **知识库管理 GUI**：以知识库为根，按软件组织“使用知识、控件库、组合动作”。
-  QtWidgets 主窗支持同位置的不同 Tab 状态、区域前置步骤、跨区域动作与参数化预期，
-  并分开查看学习参考和运行证据。
-  控件库支持选择软件窗口、悬浮拾取区域、控件学习及多级菜单回放；滚轮切换控件父子层级，Ctrl 确认区域。
-  右上角浮窗显示 AutomationID、Name、ClassName 和 ControlType；使用知识维护软件操作说明，
-  组合动作通过表单引用已有控件，编排操作及预期检查，保存独立的运行结果和前后截图。
-  完整 GUI ZIP 解压后双击 `setup.bat`，自动创建桌面快捷方式并启动；源码目录的同名入口会安装当前代码及依赖。详见[GUI 部署说明](docs/knowledge-gui.zh-CN.md#安装与启动)。
+- **知识库管理 GUI**：选择软件窗口、划分区域并学习控件，分别保存不同 Tab 的状态。
+  可以编辑控件名称和说明、导入手册、组合带参数和检查条件的流程，分别查看学习图片和运行结果。
   详见[使用说明](docs/knowledge-gui.zh-CN.md)。
 
 - **桌面自动化**：点击、双击、右键、拖拽、滚动、键盘输入、组合键、
   窗口激活和文本填写。
 - **动作录制**：录制真实操作、高亮当前控件，并生成包含完整 `LOCATION`
   的可复用 Python 动作。
-- **MCP 服务**：在 Codex、Claude Code、DeepSeek Harness（DSH）等 MCP 客户端中调用同一套能力。
+- **MCP 服务**：在 Codex、Claude Code、DeepSeek Harness（DSH）等客户端中调用自动化工具。
+  Agent 可按已有 GUI 区域学习控件，并将流程保存到同一知识库的组合动作中。
 - **视觉优先学习**：先从截图中找出关键区域和控件，再映射到本地稳定的
   UIA 控件；默认不遍历完整控件树。
-- **状态语义理解**：区分稳定功能和动态值，保留联系人名称、头像等实体，
-  建立控件关系，并解释“消息为空，因此发送按钮禁用”这类可见状态。
+- **控件信息**：记录名称、别名、当前值和控件关系，可生成“发送按钮禁用”等可见状态的说明。
+  推断的说明与实际观察到的操作结果分别记录。
 - **软件 UI CLI**：把验证通过的控件转换成可搜索的软件命令，执行任务时
   不必重新猜坐标。
 - **控件框选反馈**：使用一个点击穿透覆盖层为整页控件编号，保存页面标注图，
@@ -84,7 +80,7 @@ GUI 安装默认不注册 MCP 客户端，也不修改用户 PATH。
   Markdown/YAML/PNG，可直接用 Obsidian 或 Git 管理。
 - **稳定记录**：持久化结构化 `LOCATION` 和窗口内归一化视觉提示，不保存
   PID、窗口句柄或桌面绝对坐标。
-- **分层定位兜底**：使用带定位模式的上下文 XPath、属性组合、
+- **多种定位方式**：支持带定位模式的上下文 XPath、属性组合、
   多状态控件图、本地 OCR，最后才使用显式开启的远程视觉定位。
 - **定位方式切换**：默认按 `Name` 返回第一个匹配控件，也可切换为按同类型
   `foundIndex` 定位；未提供名称时支持 `AutomationId`。
@@ -96,8 +92,9 @@ GUI 安装默认不注册 MCP 客户端，也不修改用户 PATH。
 | Python 鼠标、键盘、窗口和 UIA API | Stable | 原有库能力 |
 | 动作录制与回放 | Stable | 生成可复用的结构化动作 |
 | MCP 工具与客户端配置 | Beta | 内置 Codex 和 Claude Code 安装命令 |
+| GUI 区域学习与组合动作 | Beta | 区域识别使用本地 YOLO＋RapidOCR；资料辅助说明使用配置的 API |
 | 视觉优先扫描与软件 UI CLI | Beta | 需要 OpenAI 兼容视觉接口 |
-| 本地图片标注 | Experimental | 默认并推荐 YOLO＋RapidOCR，无需 API key；MCP 和 CMD 支持普通界面、控制框图和电气元件图 |
+| 本地图片标注 | Experimental | YOLO＋RapidOCR，无需 API key；支持软件截图和模型图 |
 | 操作前后响应学习 | Beta | 保存本地证据和成功条件 |
 | 递归流程探索 | Experimental | 仅探索可恢复操作，并限制递归深度 |
 
@@ -327,13 +324,6 @@ easy_uiauto --quick-setup-codex \
   --vision-model your-vision-model
 ```
 
-也可以直接对 Codex 说：
-
-> 从 PyPI 安装最新版 `easy-uiauto[mcp,vision]`，然后执行
-> `easy_uiauto --full-setup-codex --vision-url URL --vision-model MODEL`；不要检查无关项目，
-> 不要搜索网页，报告每项验收结果和耗时，最后提示我只重启 Codex 一次。不要仅因视觉
-> 环境变量发生变化要求再次重启。
-
 ```bash
 easy_uiauto --install-codex
 easy_uiauto --show-codex-config
@@ -391,14 +381,35 @@ Python 客户端可通过关键字参数 `max_nodes`、`timeout_seconds` 调整�
 
 安装包中包含两个 Codex Skill：
 
-- `$easy-uiauto-learning`：扫描和探索当前可见的 Windows 软件。
+- `$easy-uiauto-learning`：学习控件，参考已有 GUI 区域和资料，并保存指定的流程。
 - `$easy-uiauto-operate`：使用已有知识库中的命令操作软件。
 
-完成配置并重启 Codex 一次后，可以直接这样说：
+完成配置并重启 MCP 客户端后，可以这样发起扫描：
 
 ```text
 使用 $easy-uiauto-learning，学习当前打开的微信界面，生成微信的控件知识库和 UI 命令。
 ```
+
+### 按 GUI 已划分的区域学习
+
+先在 GUI 保存区域、说明和前置步骤，再向 Agent 提供相同的知识库绝对路径及软件名称。例如：
+
+```text
+使用 $easy-uiauto-learning。知识库为 D:/UI-Knowledge，软件为“我的软件”。
+按我保存的区域、说明和启用的参考资料学习控件，保留区域 ID 和边界，
+将控件归档到原区域及对应 Tab 状态。
+把“新建工程”保存为组合动作，引用真实控件，将工程名设为参数并添加结果检查。
+缺少控件或步骤时保留草稿并列出缺项；先保存定义，实际执行测试由我另行指定。
+```
+
+`get_ui_library` 读取已保存的输入，`get_ui_library_readiness` 检查本地模型。
+`start_ui_library_task` 可启动区域学习、展开内容学习、说明补充或已保存流程的运行；
+通过 `get_ui_library_task` 和 `stop_ui_library_task` 查询、停止任务。
+`save_ui_workflow` 将流程写入 GUI 的组合动作。“可运行”表示定义和绑定通过检查，
+实际执行结果单独保存。
+
+学习会沿已有前置步骤打开区域或菜单。Agent 保存记录后，先保存 GUI 中尚未提交的编辑，
+再刷新知识树即可查看。完整指令见[按人工划分学习并归档](docs/knowledge-gui.zh-CN.md#让-agent-按人工划分学习并归档)。
 
 ### 轻度扫描
 
@@ -472,9 +483,8 @@ Escape 撤销的新建文档/窗口；子探索停止后，父层也不继续发
 不参与动作身份推断。主窗口被禁用时，恢复仅激活经所有权确认的模态窗口，不对主窗口
 盲发按键；学习所属弹窗时保留应用主窗口名称。递归返回时会重新检查动作是否已尝试。
 
-客户端调用超时不代表后台任务停止，应先查 `get_ui_learning_status`；杀死 MCP 进程会
-终止工作线程并丢失内存任务状态。知识库文件使用 UTF-8，在 PowerShell 查看时可使用
-`Get-Content -Encoding UTF8`，避免把终端解码乱码误认为文件损坏。
+任务状态保存在内存中，MCP 进程退出后会丢失；已写入的知识库文件仍保留。
+文件使用 UTF-8，在 PowerShell 中可用 `Get-Content -Encoding UTF8` 查看。
 
 视觉定位不适用或需要诊断完整 UIA 覆盖时，可使用 `--strategy full-uia`。该模式会遍历
 可见 UIA 树并额外执行语义分析，因此更慢，产生的记录也更多。
@@ -482,10 +492,8 @@ Escape 撤销的新建文档/窗口；子探索停止后，父层也不继续发
 ### 图片文件识别与标注
 
 调用 MCP 工具 `analyze_ui_image(image_path="C:/images/screenshot.png")` 可直接分析
-PNG、JPEG、WebP 等图片，无需打开软件或操作桌面。**默认 `engine="local"` 使用本地
-YOLO＋RapidOCR，也是当前推荐组合。** 在本项目 `test1/test2/test3` 软件截图与视觉 API、
-Tesseract＋tessdata_best 的实测对比中，这个组合的文字覆盖和整体标注表现更好；这是本次
-样例的结论，其他界面仍需检查漏检、误框和错字。
+PNG、JPEG、WebP 等图片，无需打开软件或操作桌面。默认 `engine="local"` 使用本地
+YOLO＋RapidOCR。使用坐标前，应检查标注结果中的漏检、误框和 OCR 错字。
 
 图形检测采用微软官方 [OmniParser v2.0 的 icon_detect_v3 权重](https://huggingface.co/microsoft/OmniParser-v2.0/tree/main/icon_detect_v3)
 `model.pt`，架构为 **YOLOv9-E**；文字识别采用 RapidOCR 的 **PP-OCRv6 small ONNX**。
@@ -568,7 +576,7 @@ API 模式的小图默认自动放大识别（最高 4 倍），区域和控件�
 
 ### CMD 本地图片标注
 
-CMD 同样默认并推荐使用 YOLO＋RapidOCR，不读取已配置的视觉 API。
+CMD 默认使用本地 YOLO＋RapidOCR。
 从仓库运行，不需要启动 Codex 或 MCP 服务：
 
 ```cmd
@@ -644,7 +652,7 @@ UI 图片长边超过 1280 像素时，会从原图提取有内容的区域，�
 查看 `detail-input.png`、`detail-recovery.json` 中的区域映射、未容纳区域及裁剪边缘拒绝记录；
 该步骤有一轮预算，不保证覆盖全部原始分辨率内容。MCP/Python 的 `detail_recovery=False`
 或 CMD 的 `--no-detail-recovery` 可关闭；小图和模型图保持原来的单轮整图推理。
-质量优先：默认保留原来的 `1280×1280` 方形 YOLO 输入。UI 模式的 YOLO 与 OCR 默认并行，共用 `--threads` 的线程预算：
+默认使用 `1280×1280` 方形 YOLO 输入。UI 模式的 YOLO 与 OCR 默认并行，共用 `--threads` 的线程预算：
 默认 4 线程分配为 YOLO 3 线程、OCR 1 线程；单线程时串行运行。模型图沿用原来的方形、串行推理。
 `raw-yolo.json` 保存实际输入形状，`inference_execution` 保存调度、线程分配和推理墙钟耗时；
 并行时 `yolo_seconds` 与 `ocr_seconds` 存在重叠，不能直接相加作为总耗时。
@@ -661,7 +669,7 @@ UI 图片长边超过 1280 像素时，会从原图提取有内容的区域，�
 默认先自动裁剪可靠的窗口外框；`--no-auto-crop` 保留完整输入。`elements.json` 中
 `crop.offset` 记录相对原图的偏移，标注和后续修正均对应 `analysis-input.png` 的尺寸。
 
-两个图形配置还会检测彩色连通主体，不限定红、蓝、黄等颜色。相接的不同色块、被细黑线
+`block-diagram` 配置还会检测彩色连通主体，不限定红、蓝、黄等颜色。相接的不同色块、被细黑线
 分割的同一主体会合并；邻近文字和外部连线保持独立，邻接的闭合端口可纳入控件边界。
 同时补充实心 Mux 条和文字触边的标签外框，过滤母线细节误认的接地符号。未匹配到已知
 形状的 YOLO 候选，只要有足够的非文字图形像素，仍保留为待复核观察项。几何资源中记录
@@ -753,6 +761,9 @@ applications/<app-id>/
 ├── regions/               功能区域
 ├── controls/              已验证和已观察控件
 ├── interactions/          操作前后响应记录
+├── references/            导入的手册和参考资料
+├── usage/                 人工编写的软件使用说明
+├── workflows/             GUI 组合动作及最近运行结果
 ├── images/                页面、控件和交互截图
 ├── quarantine/            失效或匹配不明确的控件
 └── operations/UI-CLI.md   自动生成的命令目录
@@ -777,11 +788,10 @@ applications/<app-id>/
 只删除该应用控件/交互目录中由程序管理的 PNG，不涉及页面图和其他应用。知识记录
 无法读取时会推迟清理；知识库文件锁可防止多个新版 MCP 进程清掉彼此尚未提交的图片。
 
-控件和区域只保存窗口内的 `normalized_rect`，并明确标记
-`geometry_role: visual-hint-only`。它只用于页面标注和视觉对比，不能作为控件身份，
-也不能直接用于点击。实时框选和操作会先重新解析当前 `LOCATION`，失败后才使用唯一
-图片模板或本地 OCR 兜底。0.6 版重建旧知识库索引时，会自动清除历史绝对坐标、PID
-和窗口句柄。
+控件和区域使用窗口内的 `normalized_rect` 保存几何范围。视觉提示用于标注和对比；
+GUI 通过 UIA 拾取的区域还保存原生 `LOCATION`，图片目标使用保存的模板。
+执行时先在当前窗口重新定位目标，再发送点击。重建旧知识库索引时，会清除历史桌面
+绝对坐标、PID 和窗口句柄。
 
 ### 隐私与安全
 
@@ -869,7 +879,7 @@ XPath 每一层可单独保存 `"match_mode": "identity"` 或 `"position"`，用
 
 ### 在代码中导入 MCP 工具
 
-从 0.9.2 起，安装或升级 `easy-uiauto[mcp]>=0.9.2` 后，全部 54 个工具可从
+从 0.9.2 起，安装或升级 `easy-uiauto[mcp]>=0.9.2` 后，所有 MCP 工具可从
 `easy_uiauto.mcp` 导入。使用源码时，在编辑器选中的解释器中执行
 `python -m pip install -e ".[mcp]"`。
 
@@ -980,7 +990,7 @@ easyautomation
 
 - **CI**：使用 Python 3.11、3.12 和 3.13 运行测试，并检查构建结果。
 - **Tag 发布**：通过 PyPI Trusted Publishing 构建并上传版本，无需维护 PyPI Token。
-- **构建产物**：同时生成 sdist 和 wheel。
+- **构建产物**：wheel、sdist、完整 GUI ZIP 和离线安装 ZIP；测试及打包检查通过后发布。
 
 ## 本地开发
 
@@ -992,7 +1002,7 @@ ruff check .
 
 ## 更多示例
 
-更多示例请参考 `demo/` 目录中的测试文件或查看源代码中的文档字符串。
+`demo/` 目录包含可运行示例，API 参数说明见源代码的文档字符串。
 
 ## 许可证
 

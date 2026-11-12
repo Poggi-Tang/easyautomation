@@ -1,11 +1,24 @@
 ---
 name: easy-uiauto-learning
-description: Scan and explore Windows applications into an easy_uiauto UI knowledge vault, or analyze a supplied UI image into numbered annotations and element coordinates. Use for application learning, interface mapping, UI CLI generation, or UI screenshot annotation.
+description: Learn Windows applications into an easy_uiauto knowledge vault, using GUI-defined regions and user references when present; archive requested workflows as GUI combination actions. Also supports whole-window exploration and supplied UI image annotation.
 ---
 
 # easy_uiauto Learning
 
 Build reusable UI knowledge through the `easy_uiauto` MCP tools.
+
+## Choose the learning mode
+
+When the user has divided regions in the knowledge GUI, provided saved instructions,
+or asks to archive controls and combination actions, read
+[GUI regions and workflows](references/library-workflows.md). Use `get_ui_library`
+with the GUI's vault path, then the shared GUI workers and `save_ui_workflow`.
+Preserve manual regions, names and entry steps. This route uses local YOLO + RapidOCR;
+the remote whole-window readiness check below does not apply.
+
+For a supplied image, use **Supplied UI Images**. For a new whole-window scan without
+saved GUI regions, use **Live Application Workflow**. If an existing app has manual
+regions, select the GUI route before starting a scan that would create another map.
 
 ## Imported reference documents
 
@@ -148,6 +161,8 @@ score, so a high score alone does not establish accurate bounds.
 
 ## Live Application Workflow
 
+This section applies to whole-window scanning outside the saved GUI-region workflow.
+
 Live scanning uses the project's Python `uiautomation` backend (Windows UI Automation).
 `visual-first` and `full-uia` select scanning strategies, not different UIA backends.
 `visual-first` sends the target-window screenshot to the configured vision API, samples
@@ -235,7 +250,7 @@ Read these results without inferring unobserved provider capabilities:
 
 ## Storage Rules
 
-- Treat Markdown/YAML and PNG files under `~/easy_uiauto_vault/applications/<app-id>` as the source of truth.
+- Treat Markdown/YAML and PNG files under the selected vault's `applications/<app-id>` as the source of truth. The default vault is `~/easy_uiauto_vault`; use the GUI's explicit path when it differs.
 - Treat `.easy_uiauto/index.json` as disposable. Use `rebuild_ui_knowledge_index` after manual Markdown edits.
 - Keep page, region, and semantic names generic and application-derived. Do not inject unrelated product knowledge.
 - Keep locator, image, semantic, and function verification separate. An image match does not
