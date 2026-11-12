@@ -21,7 +21,7 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
           python -m pip install -e ".[gui,image]" pyinstaller==6.22.3
-          python -c "from easy_uiauto.image_detection import ensure_weights; ensure_weights()"
+          python -c "from easy_uiauto.image_detection import default_weights, ensure_weights; ensure_weights(default_weights())"
       - name: Build complete offline GUI ZIP
         shell: pwsh
         run: |
