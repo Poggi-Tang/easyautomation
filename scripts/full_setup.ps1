@@ -63,7 +63,7 @@ if (-not $Wheel -and (Test-Path -LiteralPath $repositoryManifest) -and (Test-Pat
     & $buildPython -I -m pip --isolated install build pyinstaller==6.22.3
     if ($LASTEXITCODE -ne 0) { throw "Could not install source build tools." }
     $sourceRoot = Split-Path -Parent $repositoryManifest
-    & $buildPython (Join-Path $sourceRoot "scripts\build_config_exe.py") --bundle-package
+    & $buildPython -I -X utf8 (Join-Path $sourceRoot "scripts\build_config_exe.py") --bundle-package
     if ($LASTEXITCODE -ne 0) { throw "Could not build the configuration app." }
     $wheelOutput = Join-Path $cacheRoot ("source-wheel-" + [Guid]::NewGuid().ToString("N"))
     & $buildPython -I -m build --wheel --outdir $wheelOutput $sourceRoot

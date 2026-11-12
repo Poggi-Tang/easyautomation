@@ -1,5 +1,5 @@
 # easy-uiauto
-[English](https://github.com/Poggi-Tang/easyautomation/blob/main/README.md) | 简体中文
+[English](README.md) | 简体中文
 
 [![PyPI](https://img.shields.io/pypi/v/easy_uiauto?cacheSeconds=300)](https://pypi.org/project/easy-uiauto/)
 [![Python](https://img.shields.io/pypi/pyversions/easy-uiauto?cacheSeconds=300)](https://pypi.org/project/easy-uiauto/)
@@ -10,6 +10,30 @@
 ![logo](https://github.com/Poggi-Tang/easyautomation/blob/main/src/image/easy-uiauto.png)
 
 **把 Windows 软件界面转换成可检查、可复用的 UI 命令。**
+
+## 拉取仓库，一键使用 GUI
+
+Windows x64 用户拉取 **`uiauto-gui` 分支**后，双击根目录的 `setup.bat` 即可：
+
+```cmd
+git clone --branch uiauto-gui --single-branch https://github.com/Poggi-Tang/easyautomation.git
+cd easyautomation
+setup.bat
+```
+
+没有 Git 也可以在 GitHub 切换到 `uiauto-gui` 分支，选择 **Code → Download ZIP**，
+解压后双击 `setup.bat`。无需预装 Python 或开发工具。首次运行需要联网，脚本会安装
+独立 Python、GUI 依赖及本地 OCR/YOLO 模型，创建桌面快捷方式并打开 GUI。
+Windows 可能弹出管理员授权提示。
+
+默认安装到 `%LOCALAPPDATA%\easy-uiauto\gui`；如需指定位置，运行
+`setup.bat -Target "D:\easy-uiauto-gui"`。以后通过桌面快捷方式启动；
+执行 `git pull` 更新源码后，再运行一次 `setup.bat` 即可更新安装。
+GUI 安装默认不注册 MCP 客户端，也不修改用户 PATH。
+默认 `main` 分支和 PyPI 的发布节奏独立，使用本 GUI 请明确选择 `uiauto-gui` 分支。
+详见 [GUI 使用与部署说明](docs/knowledge-gui.zh-CN.md)。
+
+## 项目简介
 
 `easy-uiauto` 同时提供 Python 自动化库、MCP 服务、动作录制和 Obsidian
 兼容的 UI 知识库。它可以通过 Windows UI Automation 定位控件，学习当前可见

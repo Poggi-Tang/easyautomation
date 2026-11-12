@@ -27,7 +27,7 @@ def main():
     # Running the file directly keeps easy_uiauto.__init__ and its UIA, mouse,
     # screenshot and recording dependencies out of this small configuration EXE.
     subprocess.run([
-        sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean",
+        sys.executable, "-I", "-X", "utf8", "-m", "PyInstaller", "--noconfirm", "--clean",
         "--onefile", "--windowed", "--noupx", "--icon", str(resources / "easy-uiauto.ico"),
         "--add-data", f"{resources / 'easy-uiauto.ico'}{os.pathsep}resources",
         "--add-data", f"{resources / 'easy-uiauto.png'}{os.pathsep}resources",

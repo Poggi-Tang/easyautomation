@@ -18,11 +18,21 @@ python -m easy_uiauto.library_launcher
 
 ## 安装与启动
 
-给其他人使用时，分发完整的 `easy-uiauto-gui-win-x64.zip`。对方只需完整解压，双击 **setup.bat**，按 Windows 提示授权，即可创建桌面快捷方式并打开 GUI。以后双击 **easy-uiauto GUI** 桌面快捷方式即可；移动解压目录后重新运行 `setup.bat` 更新快捷方式。
+推荐直接拉取 `uiauto-gui` 分支，双击根目录的 **setup.bat**：
+
+```cmd
+git clone --branch uiauto-gui --single-branch https://github.com/Poggi-Tang/easyautomation.git
+cd easyautomation
+setup.bat
+```
+
+也可以在 GitHub 切换到 `uiauto-gui` 分支后选择 **Code → Download ZIP**，完整解压后双击同一入口。无需预装 Python 或开发工具。首次联网安装当前源码及完整依赖，默认保存到 `%LOCALAPPDATA%\easy-uiauto\gui`，然后创建桌面快捷方式并启动。首次安装会构建配置窗口并下载模型，耗时取决于网络；成功后重复运行会直接启动，源码变化后会重新安装。安装失败会保留错误提示，可重新运行。此 GUI 入口不注册 MCP、不修改用户 PATH、不安装 Codex/Claude Skills。
+
+以后双击 **easy-uiauto GUI** 桌面快捷方式即可。拉取源码更新后再运行 `setup.bat` 更新安装。默认 `main` 分支不包含本 GUI 的一键入口，拉取时请明确选择 `uiauto-gui`。
+
+需要离线分发时，使用构建得到的完整 `easy-uiauto-gui-win-x64.zip`。对方完整解压后双击 **setup.bat**，按 Windows 提示授权，即可创建桌面快捷方式并打开 GUI；移动解压目录后重新运行 `setup.bat` 更新快捷方式。
 
 完整 ZIP 已包含 Python、Qt、CPU 图像运行环境、YOLO 权重及 OCR 检测/识别模型，本地学习和回放无需联网或预装 Python。缺少 Visual C++ 运行库时使用包内安装程序补齐。不要只发送 EXE。知识库默认保存到用户目录下的 `easy_uiauto_vault`，可在界面更改；导入参考资料、生成说明需要另外配置 API。
-
-从 `uiauto-gui` 源码 ZIP 开始时，同样双击根目录 **setup.bat**：首次联网安装当前源码及完整依赖，默认保存到 `%LOCALAPPDATA%\easy-uiauto\gui`。首次安装会构建配置窗口并下载模型，耗时取决于网络；成功后重复运行会直接启动，源码变化后会重新安装。安装失败会保留错误提示，可重新运行。此 GUI 入口不注册 MCP、不修改用户 PATH、不安装 Codex/Claude Skills。
 
 可选参数：`setup.bat -Target "D:\easy-uiauto-gui"` 指定源码安装位置，`-NoLaunch` 仅准备环境，`-NoShortcut` 不创建桌面快捷方式。完整 ZIP 直接在解压位置运行，不使用 `-Target`。`knowledge-library.cmd` 也调用此一键入口。
 
