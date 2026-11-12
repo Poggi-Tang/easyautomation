@@ -13,6 +13,9 @@
 
 ## 拉取仓库，一键使用 GUI
 
+需要离线开箱即用时，可到 [v1.0.0 发布页](https://github.com/Poggi-Tang/easyautomation/releases/tag/v1.0.0)
+下载完整的 `easy-uiauto-gui-win-x64.zip`，解压后双击 `setup.bat`。
+
 Windows x64 用户拉取 **`uiauto-gui` 分支**后，双击根目录的 `setup.bat` 即可：
 
 ```cmd
@@ -41,7 +44,7 @@ GUI 安装默认不注册 MCP 客户端，也不修改用户 PATH。
 `main.keypad.enter-digit-6.click` 的可执行命令。
 
 适用于 Windows 自动化测试、RPA、Agent 工具和桌面软件操作知识沉淀。
-项目仅支持 Windows，目前仍处于 `0.x` 阶段。
+项目仅支持 Windows，`1.0.0` 版本包含知识库 GUI 和一键安装入口。
 
 图片标注默认并推荐使用 **YOLO＋RapidOCR**：输入图片路径和输出目录，即可生成文字标注图、
 图形控件标注图、合并标注图、坐标、识别证据和本地 HTML 查看页。

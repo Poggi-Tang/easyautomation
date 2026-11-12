@@ -2,6 +2,7 @@ name: Build ready-to-use GUI
 
 on:
   workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read

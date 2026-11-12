@@ -6,6 +6,45 @@ The format is based on Keep a Changelog and is maintained automatically by Seman
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-11-12
+
+### 使用方式 / Getting started
+
+- Windows x64 用户下载 `easy-uiauto-gui-win-x64.zip`，完整解压后双击
+  `setup.bat`。包内包含 Python、Qt、CPU 推理环境、YOLO 和 OCR 模型，
+  自动创建桌面快捷方式，本地功能无需联网或预装 Python。
+- 使用源码时，拉取 `uiauto-gui` 分支后双击根目录 `setup.bat`，首次联网
+  自动安装当前源码及完整依赖。更新源码后再次运行即可更新安装。
+- Python users can install `easy-uiauto[gui]` and run `easy_uiauto_library`;
+  `easy-uiauto[full]` includes the GUI, MCP and image-processing dependencies.
+  `install-full.cmd` and the complete offline deployment ZIP remain available.
+
+### Added
+
+- Introduce the PySide6 knowledge manager with application knowledge, control
+  libraries, Tab states, reusable action sequences, assertions and runtime evidence.
+- Add window/region picking, control learning, menu replay, editable control
+  properties, reference imports and configurable knowledge directories.
+- Add a consistent set of 50 SVG icons and a unified local-model dialog with
+  editable paths, file selection, checksum verification and background downloads.
+- Add one-click source setup, desktop shortcuts and a complete offline GUI ZIP
+  with the Python runtime, Qt, CPU inference dependencies and all three models.
+
+### Fixed
+
+- Prevent the toolbar's overflow button from briefly appearing as a separate
+  window and taking focus while switching or editing records.
+- Build source installations with an isolated Python interpreter, avoiding
+  interference from existing Python environments and installing the current checkout.
+- Reinstall changed source even when its package version is unchanged, and include
+  OCR models explicitly so first use does not depend on a background model download.
+
+### Notes
+
+- GUI source development remains on `uiauto-gui`; the default `main` branch is unchanged.
+- Reference understanding and generated descriptions require a configured API;
+  local control learning, OCR and replay use the bundled runtime.
+
 ## [0.9.13] - 2026-10-30
 
 ### Fixed

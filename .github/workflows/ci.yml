@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - master
+      - uiauto-gui
   pull_request:
 
 jobs:
@@ -29,9 +30,11 @@ jobs:
       - name: Install project
         run: |
           python -m pip install --upgrade pip
-          pip install -e .[dev,mcp,vision]
+          pip install -e ".[dev,mcp,vision,gui]"
 
       - name: Run tests
+        env:
+          QT_QPA_PLATFORM: offscreen
         run: pytest -q
 
   build:

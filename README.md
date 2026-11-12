@@ -14,6 +14,10 @@ English | [简体中文](README.zh-CN.md)
 
 ## Start the GUI from this repository
 
+For a ready-to-use offline copy, download the complete GUI ZIP from the
+[v1.0.0 release](https://github.com/Poggi-Tang/easyautomation/releases/tag/v1.0.0),
+extract it and double-click `setup.bat`.
+
 On Windows x64, clone the **`uiauto-gui` branch** and double-click `setup.bat`:
 
 ```cmd
@@ -44,8 +48,8 @@ and expose verified operations as commands such as
 `main.keypad.enter-digit-6.click`.
 
 The project is useful for Windows test automation, RPA, agent tooling, and
-building reusable operation knowledge for desktop software. It is Windows-only
-and currently released as a `0.x` project.
+building reusable operation knowledge for desktop software. Version `1.0.0`
+includes the Windows knowledge GUI and one-click installation.
 
 Saved-image annotation defaults to the recommended **YOLO + RapidOCR**: provide an image path and
 an output directory to receive separate text, graphic and combined annotation

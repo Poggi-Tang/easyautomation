@@ -12,6 +12,9 @@ jobs:
   config-exe:
     uses: ./.github/workflows/build-config-exe.yml
 
+  gui-bundle:
+    uses: ./.github/workflows/build-gui.yml
+
   test:
     runs-on: windows-latest
     strategy:
@@ -26,8 +29,10 @@ jobs:
       - name: Install project
         run: |
           python -m pip install --upgrade pip
-          pip install -e .[dev,mcp,vision]
+          pip install -e ".[dev,mcp,vision,gui]"
       - name: Run tests
+        env:
+          QT_QPA_PLATFORM: offscreen
         run: pytest -q
 
   build:
@@ -119,7 +124,7 @@ jobs:
           if-no-files-found: error
 
   publish:
-    needs: [build, offline-bundle]
+    needs: [build, offline-bundle, gui-bundle]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -140,6 +145,10 @@ jobs:
         with:
           name: complete-offline-assets
           path: release-assets
+      - uses: actions/download-artifact@v4
+        with:
+          name: easy-uiauto-gui-win-x64
+          path: release-assets/gui
       - name: Stage GitHub release assets
         env:
           GH_TOKEN: ${{ github.token }}
