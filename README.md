@@ -48,8 +48,10 @@ and generate commands such as
 `main.keypad.enter-digit-6.click`.
 
 Use it to record desktop operations, write automated tests, or give an agent access
-to saved controls and workflows. Version `1.0.1` improves GUI responsiveness, removes
-the 40 MB local reference-file limit, and adds MCP access to GUI regions and workflows.
+to saved controls and workflows. Version `1.0.2` fixes page identity and learning
+evidence handling, improves upgrade safety, and preserves the 1.0.1 improvements that
+removed the 40 MB local reference-file limit and added MCP access to GUI regions and
+workflows.
 
 Saved-image annotation uses **YOLO + RapidOCR** by default: provide an image path and
 an output directory to receive separate text, graphic and combined annotation
@@ -65,6 +67,14 @@ images, coordinates, recognition evidence and a local HTML viewer.
   Keep separate Tab states, edit names and descriptions, import manuals, and compose
   workflows with parameters and checks. Saved learning images and execution results
   are shown separately. See the [GUI guide](docs/knowledge-gui.zh-CN.md).
+- **Two region learning modes**: basic learning scans the visible region and analyzes
+  semantics without interacting. Deep learning follows interaction branches and
+  archives new regions, controls and workflows. Entrances that converge on the same
+  state reference shared workflow steps. Unfinished branches retain their reasons.
+  Relearning can continue unfinished branches, improve selected controls/workflows,
+  or adapt to software updates while retaining manual edits and reporting validation results.
+  Deep learning requires the configured API and test inputs; creating or saving test
+  data is an explicit option in its dialog.
 
 - **Desktop automation**: click, double-click, right-click, drag, scroll,
   keyboard input, hotkeys, window activation, and text entry.
@@ -106,6 +116,7 @@ images, coordinates, recognition evidence and a local HTML viewer.
 | Recording and replay | Stable | Produces reusable structured actions |
 | MCP tools and client setup | Beta | Codex and Claude Code installers included |
 | GUI region learning and workflows | Beta | Local YOLO + RapidOCR; reference-assisted descriptions use the configured API |
+| GUI deep learning | Experimental | API-planned branches, automatic archiving, shared workflows and resumable progress |
 | Visual-first scan and generated UI CLI | Beta | Requires an OpenAI-compatible vision endpoint |
 | Local image annotation | Experimental | YOLO + RapidOCR; no API key; supports software screenshots and model diagrams |
 | Before/after effect learning | Beta | Stores local evidence and learned success conditions |
@@ -813,7 +824,11 @@ another interpreter. Use `annotate-image.cmd --help` for options. Exit status is
 on success and 2 on failure; failures after processing begins are recorded in that
 run's `summary.json` and `run.log`.
 
-### Deep Exploration
+### Whole-window CLI Exploration
+
+This section describes `explore_ui_workflows` and the CLI explorer. For GUI region
+learning, use **基本学习** (observe only) or **深度学习** (interactive branches), also
+available through `start_ui_library_task` with `learn-region` or `deep-learn-region`.
 
 Deep exploration starts with a light scan, executes known reversible commands,
 and records what changed. New pages and dialogs can be scanned recursively.
@@ -889,6 +904,7 @@ applications/<app-id>/
 ├── references/            imported manuals and reference documents
 ├── usage/                 user-written application instructions
 ├── workflows/             GUI combination actions and latest run results
+├── learning/              Region exploration states, branches and progress
 ├── images/                page, control, and interaction images
 ├── quarantine/            stale or ambiguous controls
 └── operations/UI-CLI.md   generated command catalog

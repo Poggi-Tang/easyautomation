@@ -77,8 +77,27 @@ def resolve(window, bounds, targets, limit, progress):
         rect = target["relative_rect"]
         x = bounds["left"] + (rect["left"]+rect["right"])//2
         y = bounds["top"] + (rect["top"]+rect["bottom"])//2
-        xpath, control = utils.get_control_info(x, y, raise_errors=True)
         reason, details = "", {"sample_point": {"x": x, "y": y}}
+        try:
+            xpath, control = utils.get_control_info(x, y, raise_errors=True)
+        except Exception as error:
+            from .results import ActionError
+            # Only target-local lookup failures may become visual observations.
+            # Permission, window and interference failures must stop the job.
+            local_failure = (isinstance(error, ValueError)
+                             and str(error) == "Recorded control is no longer a child of its parent")
+            local_failure |= isinstance(error, ActionError) and error.code == "control_not_found"
+            local_failure |= getattr(error, "hresult", None) in {-2147220991, 0x80040201}  # UIA element unavailable
+            if not local_failure:
+                from ..library_actions import diagnose_uia_error
+                diagnostic = diagnose_uia_error(error, uia_operation=True)
+                if diagnostic is not error:
+                    raise diagnostic from error
+                raise
+            details.update(error_type=type(error).__name__, detail=str(error))
+            failures.append(dict(error=str(error), reason="point_binding_failed",
+                                 diagnostics=details, observation=target))
+            continue
         if control is None or not xpath:
             reason = "point_lookup_failed"
         else:

@@ -162,7 +162,7 @@ class WorkflowWindow:
         if select_id and self.tree.exists(select_id): self.tree.selection_set(select_id); self.tree.see(select_id); self.select()
 
     def insert_flow(self, flow):
-        key = flow["id"]; report = workflows.readiness(flow, list(self.controls.values())); pending = {i["id"] for i in report["issues"]}
+        key = flow["id"]; report = workflows.readiness(flow, list(self.controls.values()), workflows.load_catalog(self.library.directory(self.app_id))); pending = {i["id"] for i in report["issues"]}
         self.tree.insert("", "end", iid=key, text=flow["keyword"], values=("配置完整" if report["ready"] else "待完善",), open=True); self.nodes[key] = (flow, None)
         for n, step in enumerate(flow["steps"], 1):
             node = key + ":" + step["id"]; self.nodes[node] = (flow, step["id"])
@@ -330,7 +330,7 @@ class WorkflowWindow:
 
     def check(self):
         if not self.flow or self.task or self.dirty and not self.save(): return
-        report = workflows.readiness(self.flow, self.library.read(self.app_id)["controls"])
+        report = workflows.readiness(self.flow, self.library.read(self.app_id)["controls"], workflows.load_catalog(self.library.directory(self.app_id)))
         self._text(self.result, "配置完整，可绑定窗口运行。" if report["ready"] else "\n".join(i["id"] + "：" + i["message"] for i in report["issues"]))
         self.notebook.select(3); self.status.set("配置完整。" if report["ready"] else f"还有 {len(report['issues'])} 项待完善；未执行操作。")
 
@@ -346,7 +346,7 @@ class WorkflowWindow:
         if self.task or not self.flow: return
         if self.busy(): self.status.set("学习任务尚未结束，请等待完成或停止。"); return
         if self.dirty and not self.save(): return
-        if not workflows.readiness(self.flow, self.library.read(self.app_id)["controls"])["ready"]: self.check(); return
+        if not workflows.readiness(self.flow, self.library.read(self.app_id)["controls"], workflows.load_catalog(self.library.directory(self.app_id)))["ready"]: self.check(); return
         if self.app_id not in self.windows: self.status.set("请先绑定运行窗口。"); self.bind_window(); return
         self.running_id = self.flow["id"]; self.owner = self.root.winfo_toplevel()
         try:

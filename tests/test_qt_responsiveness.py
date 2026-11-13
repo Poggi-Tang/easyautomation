@@ -32,6 +32,24 @@ def window(app, library, monkeypatch):
     app.processEvents()
 
 
+def test_tree_status_stays_at_right_after_initial_load_and_vault_switch(app,window,tmp_path):
+    from PySide6.QtWidgets import QHeaderView
+    window.resize(1400,850);window.show();window.main_split.setSizes([500,900])
+    for switched in (False,True):
+        if switched:
+            window.library=KnowledgeLibrary(tmp_path/"other-vault")
+            window.reload("vault")
+            settle(app,lambda:not window.jobs)
+        for width in (500,650):
+            window.main_split.setSizes([width,1400-width]);app.processEvents()
+            header=window.tree.header()
+            assert window.model.columnCount()==header.count()==2
+            assert header.sectionResizeMode(0)==QHeaderView.ResizeMode.Stretch
+            assert header.sectionResizeMode(1)==QHeaderView.ResizeMode.ResizeToContents
+            assert header.sectionViewportPosition(1)+header.sectionSize(1)==window.tree.viewport().width()
+            assert window.tree.columnWidth(0)>window.tree.columnWidth(1)
+
+
 def test_refresh_changes_only_one_app_and_keeps_unaffected_indexes(app, library, window, monkeypatch):
     library.bind("other", "Other", dict(title="Other", class_name="Window", handle=2, process_id=3))
     window.reload("vault")

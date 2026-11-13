@@ -30,6 +30,8 @@ def validate_plan(controls: list[dict], control_id: str, path=None) -> list[dict
         record = records.get(identifier)
         if record is None:
             raise ValueError(f"前置控件已删除或尚未学习：{identifier}")
+        if record.get("availability", {}).get("state") == "unobserved":
+            raise ValueError(f"软件更新后尚未重新定位控件：{identifier}；请打开对应区域后继续适配")
         if knowledge.runtime_quarantined(record):
             raise ActionError("operation_blocked", f"控件已因运行失败隔离：{identifier}")
         location = record_location(record)

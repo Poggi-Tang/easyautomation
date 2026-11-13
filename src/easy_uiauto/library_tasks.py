@@ -230,6 +230,15 @@ def _run_worker(folder: Path):
             library=KnowledgeLibrary(request["vault"])
             result=reference_library.supplement(library.directory(request["app_id"]),
                 control_ids=request.get("control_ids"),progress=progress)
+        elif operation == "deep-learn":
+            import uiautomation
+            from .knowledge_library import KnowledgeLibrary
+            from .region_learning import learn_region
+            library=KnowledgeLibrary(request["vault"])
+            with uiautomation.UIAutomationInitializerInThread():
+                result=learn_region(library,request["app_id"],request["region_id"],request["window"],folder,
+                    progress=progress,checkpoint=lambda value:_write(folder/"execution.json",value),
+                    **request.get("learning_options",{}))
         elif operation == "open-region":
             import uiautomation
             from .knowledge_library import KnowledgeLibrary
@@ -247,7 +256,7 @@ def _run_worker(folder: Path):
 
             result = pick_region(request["window"], folder, progress,
                 preview=(lambda value: _write(folder / "preview.json", value)) if request.get("picker_preview") else None,
-                match_mode=request.get("match_mode","position"))
+                match_mode=request.get("match_mode","position"), title=request.get("picker_title","添加 / 修改区域"))
         elif operation == "capture":
             from .mcp import scanner
             from .ctrl import Controller
@@ -362,12 +371,10 @@ def _run_worker(folder: Path):
                 _write(folder/"state.json",{"state":"completed","result":result});return
 
             if operation == "learn" and request.get("region_id"):
-                from .region_actions import open_region
+                from .region_actions import visible_region
                 region=next(r for r in library.read(request["layout"]["app_id"])["regions"] if r["id"]==request["region_id"])
                 with uiautomation.UIAutomationInitializerInThread():
-                    opened=open_region(library,request["layout"]["app_id"],region,request["window"],progress=progress,
-                                       checkpoint=lambda value:_write(folder/"execution.json",value))
-                target=opened["target_window"]
+                    target=visible_region(library,request["layout"]["app_id"],region,request["window"])
                 request["layout"].update(window_handle=target["handle"],window_process_id=target["process_id"],window_class=target["class_name"])
                 request["window_name"]=target["title"]
 
@@ -407,7 +414,8 @@ def _run_worker(folder: Path):
                     return
 
             mode = request.get("semantic_mode", "native")
-            settings = configuration.load_gui_configuration() if mode == "api" else {}
+            settings = configuration.load_gui_configuration() if mode in {"api","auto"} else {}
+            if mode=="auto":mode="api" if all(settings.get(k) for k in ("api_url","api_key","api_model")) else "native"
             url = ""
             if mode == "api":
                 if not all(settings.get(k) for k in ("api_url", "api_key", "api_model")):
@@ -419,7 +427,8 @@ def _run_worker(folder: Path):
                     settings.get("api_model", ""), __version__,
                     root=Path(request["vault"]), max_controls=int(request.get("max_controls", 3000)),
                     strategy="local-visual", manual_layout=request["layout"], semantic_mode=mode,
-                    progress=progress, show_overlay=False, navigation_context=context)
+                    progress=progress, show_overlay=False, navigation_context=context,
+                    observation_owner=request["window"] if operation=="learn" else None)
             if operation == "expand":
                 learned = [r for r in library.read(request["app_id"])["controls"]
                            if r.get("navigation_path") == context["path"]

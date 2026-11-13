@@ -16,6 +16,7 @@ from ctypes import wintypes
 from pathlib import Path
 from urllib import error as urlerror
 from urllib import request as urlrequest
+from uuid import uuid4
 
 import pyautogui
 import uiautomation
@@ -28,8 +29,10 @@ from . import (
     image_storage,
     knowledge,
     native_windows,
+    page_identity,
     semantic_identity,
     visualization,
+    window_identity,
 )
 from .protocol import location_from_xpath, normalize_location, stable_location, with_match_mode
 
@@ -146,23 +149,8 @@ def _clip_rect(rectangle: dict, window_rect: dict) -> dict:
     }
 
 
-def _find_window(title: str):
-    from .results import ActionError
-
-    title = title.strip()
-    if not title:
-        raise ValueError("Window title must not be empty")
-    candidates = native_windows.matching_windows(title, partial=True)
-    candidates = [entry for entry in candidates if entry["visible"]]
-    if not candidates:
-        raise ActionError("window_invalid", f"Window not found: {title}", retryable=True)
-    if len(candidates) != 1:
-        raise ActionError("ambiguous_match", f"Multiple visible windows match: {title}")
-    target = candidates[0]
-    control = uiautomation.ControlFromHandle(target["handle"])
-    if control is None:
-        raise ActionError("action_failed", f"Could not bind UI Automation to window: {title}")
-    return control
+def _find_window(title: str | dict):
+    return window_identity.resolve(title)
 
 
 def _activate_window(window) -> None:
@@ -340,32 +328,7 @@ def _image_similarity(first, second) -> float:
 
 
 def _reuse_page_identity(directory: Path, screenshot, page: dict) -> dict:
-    """Keep a stable page ID when AI naming changes for the same visual page."""
-    from PIL import Image
-
-    best = None
-    for _path, previous in knowledge.iter_records(directory, "page"):
-        image_name = previous.get("image", "")
-        image_path = directory / image_name if image_name else None
-        if image_path is None or not image_path.is_file():
-            continue
-        try:
-            with Image.open(image_path) as previous_image:
-                similarity = _image_similarity(previous_image, screenshot)
-        except OSError:
-            continue
-        if best is None or similarity > best[0]:
-            best = (similarity, previous)
-    if best is not None and best[0] >= 0.94:
-        previous = best[1]
-        return {
-            **page,
-            "id": previous["id"],
-            "name": previous.get("name") or page.get("name"),
-            "previous_ai_id": page.get("id"),
-            "identity_similarity": best[0],
-        }
-    return page
+    return page_identity.select(directory, screenshot, page)
 
 
 def _rect_iou(first: dict, second: dict) -> float:
@@ -1896,6 +1859,7 @@ def scan_window(
     manual_layout: dict | None = None,
     semantic_mode: str = "api",
     navigation_context: dict | None = None,
+    observation_owner: dict | None = None,
 ) -> dict:
     """Scan one visible application window and persist its UI command knowledge."""
     started = time.perf_counter()
@@ -1942,8 +1906,17 @@ def scan_window(
     else:
         window = _find_window(window_name)
     progress("Reading target window through UI Automation")
-    actual_name = (getattr(window, "Name", "") or window_name).strip()
-    if navigation_context and strategy == "local-visual":
+    identity = window_identity.describe(window, window_name)
+    actual_name = (identity["title"] or identity["uia_name"] or window_name).strip()
+    access = native_windows.check_uia_access(int(getattr(window, "ProcessId", 0) or 0))
+    if observation_owner is not None:
+        from ..library_actions import bind_window, owned_windows
+        from .control_observation import _check_foreground
+        owner = bind_window(observation_owner)
+        allowed = {observation_owner["handle"], *(w["handle"] for w in owned_windows(observation_owner))}
+        if int(window.NativeWindowHandle) not in allowed:raise ValueError("扫描窗口不属于所选软件")
+        _check_foreground(owner)
+    elif navigation_context and strategy == "local-visual":
         from .control_observation import _check_foreground
         _check_foreground(window)
     else:
@@ -1958,14 +1931,8 @@ def scan_window(
     process_name = _process_name(process_id)
     app_id = knowledge.slugify(
         (manual_layout or {}).get("app_id") or process_name or actual_name, "application")
-    try:
-        user32, _callback = native_windows._api()
-        owned_window = bool(user32.GetWindow(
-            int(getattr(window, "NativeWindowHandle", 0) or 0), 4))
-    except Exception:
-        owned_window = False
     directory = knowledge.initialize_app(
-        app_id, actual_name, root, preserve_name=owned_window or manual_layout is not None)
+        app_id, actual_name, root, preserve_name=True)
     knowledge.load_index(directory)
     progress("Capturing window screenshot")
     screenshot = _screenshot_window(window_rect)
@@ -1992,29 +1959,40 @@ def scan_window(
     else:
         progress("Segmenting interface with remote AI")
         segmentation = segment_interface(screenshot, api_url, api_key, model, version, progress)
-    if strategy == "local-visual":
+    if observation_owner is not None:
+        _check_foreground(owner)
+    elif strategy == "local-visual":
         from .control_observation import _check_foreground
         _check_foreground(window)
     else:
         _activate_window(window)
     refreshed_rect = _window_rect(window)
     if refreshed_rect != capture_bounds:
-        raise RuntimeError("Window moved or resized during visual analysis; scan again when stable")
+        raise RuntimeError("Window moved or resized during visual analysis; scan again when stable; "
+                           f"captured={capture_bounds}, current={refreshed_rect}, "
+                           f"window_handle={getattr(window, 'NativeWindowHandle', 0)}")
     screenshot.save(page_image)
-    page = (segmentation["page"] if manual_layout is not None
-            else _reuse_page_identity(directory, screenshot, segmentation["page"]))
+    proposed_page = {**segmentation["page"], "window_identity": identity,
+                     "layout_fingerprint": page_identity.layout_fingerprint(segmentation, screenshot.size)}
+    page = (proposed_page if manual_layout is not None
+            else _reuse_page_identity(directory, screenshot, proposed_page))
     page_id = page["id"]
     if manual_layout is None:
         segmentation["regions"] = _reuse_region_identities(
             directory, page_id, segmentation["regions"], window_rect)
-    scan_id = knowledge.stable_id("scan", app_id, page_id, knowledge.utc_now())
+    scan_id = knowledge.stable_id("scan", app_id, page_id, uuid4().hex)
     previous_page_records = [
         record
         for _path, record in knowledge.iter_records(directory, "control")
         if record.get("page_id") == page_id
     ]
-    page_image_named = directory / "images" / "pages" / f"{page_id}.png"
-    screenshot.save(page_image_named)
+    page_digest = _image_sha256(screenshot)
+    page_image_named = directory / "images" / "pages" / f"{page_id}-{page_digest}.png"
+    if (not page_image_named.is_file()
+            or hashlib.sha256(page_image_named.read_bytes()).hexdigest() != page_digest):
+        temporary_image = page_image_named.with_suffix(".tmp")
+        screenshot.save(temporary_image, format="PNG")
+        temporary_image.replace(page_image_named)
     page_record = {
         **page,
         "app_id": app_id,
@@ -2200,6 +2178,20 @@ def scan_window(
             semantics = analyze_control_semantics(
                 screenshot, semantic_candidates, page, segmentation["regions"],
                 api_url, api_key, model, version)
+    if strategy == "local-visual" and semantic_mode == "api" and controls:
+        candidates=[]
+        for index,(control,_depth) in enumerate(controls,1):
+            candidates.append(dict(id=index,uia_name=str(getattr(control,"Name","") or ""),
+                automation_id=str(getattr(control,"AutomationId","") or ""),control_type=control.ControlTypeName,
+                localized_control_type=str(getattr(control,"LocalizedControlType","") or ""),
+                class_name=str(getattr(control,"ClassName","") or ""),help_text=str(getattr(control,"HelpText","") or ""),
+                is_keyboard_focusable=bool(getattr(control,"IsKeyboardFocusable",False)),
+                is_enabled=bool(getattr(control,"IsEnabled",True)),region_id=semantics[index].get("region_id","unassigned"),
+                supported_actions=_control_actions(control.ControlTypeName,True),relative_rect=semantics[index]["relative_rect"]))
+        progress(f"分析 {len(candidates)} 个控件的语义（不执行交互）")
+        meanings=analyze_control_semantics(screenshot,candidates,page,segmentation["regions"],api_url,api_key,model,version)
+        for identifier,meaning in meanings.items():semantics[identifier].update(meaning)
+        semantic_candidates=candidates
     from .. import reference_library
     reference_description_error = ""
     reference_description_report = {}
@@ -2802,6 +2794,9 @@ def scan_window(
         "observed_control_ids": [record["id"] for record in scanned_records],
         "vault": str(directory),
         "page_image": str(page_image_named),
+        "uia_access": access,
+        "page_identity": {key: page[key] for key in ("identity_decision", "previous_ai_id", "identity_similarity")
+                          if key in page},
         "annotated_page_image": str(annotated_path),
         "annotated_controls": len(annotation_markers),
         "overlay": overlay,
@@ -2847,6 +2842,7 @@ def scan_window(
         ),
         "failures": failures[:50],
         "truncated": (len(controls) >= max_controls or len(visual_targets) > max_controls
+                      or any(report.get("truncated") for report in local_reports)
                       or segmentation.get("coverage", {}).get("uia_enumerated", 0) >= max_controls
                       or segmentation.get("coverage", {}).get("desktop_limit_reached", False)),
         "elapsed_seconds": elapsed,

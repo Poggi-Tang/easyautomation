@@ -82,6 +82,15 @@ def test_disabled_reference_and_deleted_reference_no_longer_enter_context(librar
     assert archive.is_file() and library.reference_documents('demo')==[]
 
 
+def test_reference_context_reports_omitted_text(library,tmp_path,understand):
+    library.import_reference('demo',source(tmp_path),settings=SETTINGS)
+    report={}
+    refs.context(library.directory('demo'),limit=10,report=report)
+    assert report['truncated']
+    refs.context(library.directory('demo'),report=report)
+    assert not report['truncated']
+
+
 def test_word_table_keeps_steps_and_expected_cells_together():
     data=io.BytesIO()
     with ZipFile(data,'w') as z:

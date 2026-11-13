@@ -17,6 +17,7 @@ NODE_ICONS = {"vault":"library", "application":"window", "usage-root":"book-open
 
 
 def control_status(record):
+    if record.get("availability", {}).get("state") == "unobserved":return "更新后待定位"
     status = record.get("status")
     verification = record.get("verification", {})
     if knowledge.runtime_quarantined(record):return "已隔离"
@@ -113,6 +114,7 @@ class KnowledgeModel(QStandardItemModel):
             actions = add(app, "actions-root:"+app_id, "组合动作", app_id, "actions-root", {})
             for flow in index["workflows"]:
                 add(actions, f"workflow:{app_id}:{flow['id']}", flow["keyword"], app_id, "workflow", flow,
+                         "更新后待验证" if flow.get("update_validation",{}).get("status") in {"pending","failed"} else
                          "可运行" if flow.get("status") == "ready" else "待完善")
         return rows
 

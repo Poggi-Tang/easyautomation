@@ -11,7 +11,7 @@ from uuid import uuid4
 
 from .mcp import knowledge
 
-ACTIONS = {"click", "double-click", "right-click", "set-text", "press-key", "hotkey", "inspect", "manual"}
+ACTIONS = {"click", "double-click", "right-click", "hover", "set-text", "press-key", "hotkey", "inspect", "manual", "call"}
 CHECKS = {"exists", "not-visible", "text", "window-title", "read-only", "menu-items",
           "node-exists", "node-absent", "selected", "manual"}
 
@@ -132,6 +132,10 @@ def validate(flow):
     for step in steps:
         if not isinstance(step, dict): raise ValueError("步骤必须为对象")
         if not isinstance(step.get("action"), str) or step["action"] not in ACTIONS: raise ValueError("未知流程动作")
+        if step["action"] == "call":
+            if not isinstance(step.get("workflow_id"), str) or not step["workflow_id"]:raise ValueError("调用步骤缺少组合动作 ID")
+            if not isinstance(step.get("parameters", {}), dict):raise ValueError("调用参数必须为对象")
+            if step.get("target") or step.get("checks"):raise ValueError("调用步骤的目标和校验应放在被调用的组合动作中")
         if not isinstance(step.get("checks", []), list) or len(step.get("checks", [])) > 100: raise ValueError("校验项必须为列表且不超过 100 项")
         for item in [step, *step.get("checks", [])]:
             if not isinstance(item, dict): raise ValueError("校验必须为对象")
@@ -149,14 +153,67 @@ def validate(flow):
     return flow
 
 
-def definition_hash(flow):
+def load_catalog(directory):
+    if directory is None:return {}
+    from pathlib import Path
+    from .mcp import image_storage
+    directory = Path(directory)
+    result = {}
+    for path in (directory / "workflows").glob("*.md"):
+        if image_storage._safe_path(directory, path) is None:raise ValueError("流程文件不能为链接")
+        record, _ = knowledge.read_markdown(path)
+        if record.get("kind") == "workflow":result[record["id"]] = record
+    return result
+
+
+def expand_calls(flow, catalog=None, *, parameters=None):
+    """Resolve shared definitions afresh; reject cycles and bound expansion before input."""
+    catalog = catalog or {}
+    output = deepcopy(flow);steps = [];seen = set()
+    def partial(value, values):
+        if isinstance(value, str):
+            return re.sub(r"\$\{([\w.]+)\}", lambda m: str(values.get(m[1], m[0])), value)
+        if isinstance(value, dict):return {k:partial(v, values) for k,v in value.items()}
+        if isinstance(value, list):return [partial(v, values) for v in value]
+        return value
+    def walk(current, trail, prefix, values):
+        validate(current)
+        if len(trail) > 102:raise ValueError("组合动作调用层级超过 102 层")
+        for step in current["steps"]:
+            if step["action"] == "call":
+                identifier = step["workflow_id"]
+                if identifier in trail:raise ValueError("组合动作不能循环调用")
+                child = catalog.get(identifier)
+                if child is None:raise ValueError("被调用的组合动作不存在："+identifier)
+                if child.get("precondition", "").strip() not in {"", "软件已启动"}:
+                    raise ValueError("子流程前置条件需要转换为校验")
+                bindings = {**child.get("parameters", {}), **values, **partial(step.get("parameters", {}), values)}
+                walk(child, [*trail, identifier], prefix+step["id"]+"/", bindings)
+            else:
+                copied = partial(deepcopy(step), values)
+                copied["id"] = prefix+step["id"]
+                for check in copied.get("checks", []):check["id"] = prefix+check["id"]
+                for item in [copied, *copied.get("checks", [])]:
+                    if item["id"] in seen:raise ValueError("展开后的步骤和校验 ID 重复")
+                    seen.add(item["id"])
+                steps.append(copied)
+                if len(steps) > 2000:raise ValueError("展开后的组合动作超过 2000 步")
+    walk(flow, [flow.get("id", "")], "", {**flow.get("parameters", {}), **(parameters or {})})
+    output["steps"] = steps
+    return output
+
+
+def definition_hash(flow, catalog=None):
     """Keep evidence tied to the exact steps and bindings that were executed."""
     definition = {key: flow.get(key) for key in ("keyword", "precondition", "parameters", "steps")}
+    if any(s.get("action") == "call" for s in flow.get("steps", [])):
+        definition["expanded"] = expand_calls(flow, catalog)["steps"]
     return hashlib.sha256(json.dumps(definition, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
 
 
-def control_hash(flow, controls):
+def control_hash(flow, controls, catalog=None):
     """Explicit steps reference control IDs; locator changes invalidate old evidence."""
+    if any(s.get("action") == "call" for s in flow.get("steps", [])):flow = expand_calls(flow, catalog)
     records = {r["id"]: r for r in controls}
     referenced = {}
     for _identifier, target in targets(flow):
@@ -164,15 +221,30 @@ def control_hash(flow, controls):
         record = records.get(identifier, {})
         keys = ("location", "window_scope", "control_type", "status")
         referenced[identifier] = {k: record.get(k) for k in keys}
+        if record.get("availability",{}).get("state")=="unobserved":referenced[identifier]["availability"]="unobserved"
         if not record.get("location"):
             referenced[identifier].update({k: record.get(k) for k in ("image", "visual_target", "normalized_rect")})
     return hashlib.sha256(json.dumps(referenced, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
 
 
-def readiness(flow, controls):
+def update_validation(flow, controls, catalog=None):
+    result=deepcopy(flow.get("update_validation",{}))
+    if result.get("status")=="passed":
+        try:
+            current=(result.get("definition_hash")==definition_hash(flow,catalog) and
+                     result.get("control_hash")==control_hash(flow,controls,catalog))
+        except ValueError:current=False
+        if not current:result.update(status="pending",reason="流程定义或引用控件已变化，需要重新验证")
+    return result
+
+
+def readiness(flow, controls, catalog=None):
     from .library_actions import validate_plan
 
     validate(flow)
+    if any(s.get("action") == "call" for s in flow["steps"]):
+        try:flow = expand_calls(flow, catalog)
+        except ValueError as error:return dict(ready=False, issues=[dict(id="call", message=str(error))], targets=0)
     issues = []
     for identifier, target in targets(flow):
         control_id = target.get("control_id")
@@ -282,7 +354,7 @@ def _blank_offset(control):
 
 
 def execute(flow, controls, expected_window, *, parameters=None, progress=None, checkpoint=None,
-            before_action=None, after_action=None, after_check=None, skip_open_entries=False, directory=None):
+            before_action=None, after_action=None, after_check=None, skip_open_entries=False, directory=None, catalog=None):
     """Run explicit steps once through Controller; only observations are polled."""
     from .library_actions import bind_window, owned_windows, resolve_record
     from .ctrl import Controller
@@ -291,18 +363,21 @@ def execute(flow, controls, expected_window, *, parameters=None, progress=None, 
     from _ctypes import COMError
     import uiautomation
 
-    report = readiness(flow, controls)
+    catalog = load_catalog(directory) if catalog is None else catalog
+    report = readiness(flow, controls, catalog)
     if not report["ready"]: raise ValueError("流程尚不可运行："+"；".join(i["message"] for i in report["issues"]))
     progress, checkpoint = progress or (lambda _m: None), checkpoint or (lambda _r: None)
     if parameters is not None and not isinstance(parameters, dict): raise ValueError("流程参数必须为对象")
     parameters = {**flow.get("parameters", {}), **(parameters or {})}
     flow = deepcopy(flow)
-    original_hash = definition_hash(flow)
+    original_hash = definition_hash(flow, catalog)
+    original_control_hash = control_hash(flow, controls, catalog)
+    if any(s.get("action") == "call" for s in flow["steps"]):flow = expand_calls(flow, catalog, parameters=parameters)
     flow["steps"] = substitute(flow["steps"], parameters)
     texts = {step["id"]: str(step.get("text", "")) for step in flow["steps"]}
     records = {r["id"]: r for r in controls}
     result = dict(ok=False, run_id=uuid4().hex, keyword=flow["keyword"], definition_hash=original_hash,
-                  control_hash=control_hash(flow, controls),
+                  control_hash=original_control_hash,
                   parameters=parameters, steps=[], input_attempted=False)
     main, activated = None, False
 

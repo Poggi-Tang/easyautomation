@@ -97,7 +97,7 @@ def _native():
     return user
 
 
-def pick_region(expected: dict, folder: Path, progress, *, preview=None, match_mode="position"):
+def pick_region(expected: dict, folder: Path, progress, *, preview=None, match_mode="position", title="添加 / 修改区域"):
     """Run inside a cancellable LibraryTask process; UIA never blocks the Tk loop."""
     import tkinter as tk
     from tkinter import ttk
@@ -118,7 +118,7 @@ def pick_region(expected: dict, folder: Path, progress, *, preview=None, match_m
     allowed_windows = {expected["handle"]: expected}
     result = {}
     root = tk.Tk(); root.withdraw(); apply_window_icon(root)
-    root.title("easy-uiauto · 添加 / 修改区域")
+    root.title("easy-uiauto · "+title)
     root.resizable(False, False); root.attributes("-topmost", True)
     body = ttk.Frame(root, padding=12); body.pack(fill="both", expand=True)
     ttk.Label(body, text="悬浮选择控件 · 滚轮切换层级", font=("Microsoft YaHei UI", 11, "bold")).grid(

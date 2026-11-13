@@ -16,6 +16,13 @@ with the GUI's vault path, then the shared GUI workers and `save_ui_workflow`.
 Preserve manual regions, names and entry steps. This route uses local YOLO + RapidOCR;
 the remote whole-window readiness check below does not apply.
 
+For these saved regions, basic learning (`learn-region`) observes the current visible
+state without replaying entry steps or sending input. Deep learning
+(`deep-learn-region`) uses the configured API to explore branches, archive new
+regions/controls/workflows and share common suffixes by workflow reference. Supply
+the user's test inputs and scope in `learning_options`; report partial coverage and
+blocked branches instead of presenting budget exhaustion as completed learning.
+
 For a supplied image, use **Supplied UI Images**. For a new whole-window scan without
 saved GUI regions, use **Live Application Workflow**. If an existing app has manual
 regions, select the GUI route before starting a scan that would create another map.

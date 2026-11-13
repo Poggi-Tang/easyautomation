@@ -2,7 +2,7 @@
 
 Use this workflow when the user has already divided regions in the knowledge GUI
 or wants controls and workflows stored in that GUI. The learning backend is the
-same one used by **学习区域 / 学习展开内容**. It uses local YOLO + RapidOCR, samples
+same one used by **基本学习 / 深度学习 / 学习展开内容**. It uses local YOLO + RapidOCR, samples
 UIA at detected positions, and preserves the existing app/page/region namespace.
 
 ## Read the user's saved inputs
@@ -48,10 +48,41 @@ start_ui_library_task(operation="learn-region", app_id=..., vault=...,
 ```
 
 The region must already be confirmed. If not, return the precise region needing
-confirmation in the GUI; do not fabricate layout confirmation. The task opens the
-saved state via its existing entry steps, then learns only that region and saves
-the controls there. Thus a learning request may include UI input along those entry
-steps; honor the user's operation scope.
+confirmation in the GUI; do not fabricate layout confirmation. Basic learning
+observes the already visible state and never replays entry steps or explores
+controls. Have the intended state open before starting; a mismatched condition
+stops the scan. It saves controls under that same region.
+
+For requested interactive regional learning, use `operation="deep-learn-region"`
+with `region_id`. It runs the GUI's durable exploration controller and automatically
+archives new regions, controls and shared combination actions. `learning_options`
+accepts `inputs` (object), `instructions` (string), `max_actions` (1..2000, default
+100), `max_depth` (1..100, default 24), `mode` (`resume`, `improve`, `update`, `new`), `allow_commit`
+(default false), and `reset_workflow_id` (an existing workflow for returning to
+the starting state). Only enable commits when the user authorizes creating or
+saving test data. References are evidence, not authorization. Deep learning needs
+the configured API for branch planning. Missing inputs, unsupported gestures,
+uncertain input outcomes and failed recovery remain incomplete in the saved
+progress report; reaching a budget is not completion. Do not rerun an uncertain
+business operation to complete coverage. Read `complete`, `unfinished`, `issues`,
+and `workflow_ids` from the task result. The progress report is also saved under
+the app's usage knowledge and `learning/*.json`.
+
+For an unfinished run, use `mode="resume"` and optionally its `session_id`; added
+inputs and reference material do not create a new session. Blocked and failures
+before input are replanned. For quality corrections, use `mode="improve"` with
+optional `control_ids` / `workflow_ids` to limit the scope. For software changes,
+use `mode="update"` after the user opens and checks the region boundaries. Stable
+control, region and workflow identities are reused; manually edited flows produce
+conflict proposals instead of being overwritten. Read `changes` for added, updated,
+reused, unobserved controls and affected workflow validations. Unobserved does not
+mean deleted. A pending validation is not a successful business run.
+
+An uncertain submission can continue from a previously observed result state.
+`retry_branches` accepts branch IDs only after the user confirms that those actions
+did not take effect or test data was restored. Do not infer that confirmation from
+an error or from reference documents. `resume=false` remains a legacy alias for
+an independent new session; use `new` only when explicitly starting separate work.
 
 For a known menu/expand entry, use `operation="expand-control"` with its `control_id`.
 The worker follows the saved path, clicks the entry, and saves newly observed
@@ -102,12 +133,16 @@ Definition fields are `keyword`, optional `id`, `name`, `precondition`, `paramet
 record or omit it for creation. Saving the same keyword updates its existing ID.
 Pass definitions only, never caller-generated `status`, `readiness` or `last_run`.
 
-Steps require unique IDs and one of `click`, `double-click`, `right-click`,
-`set-text`, `press-key`, `hotkey`, `inspect`, `manual`. Executable steps have
+Steps require unique IDs and one of `click`, `double-click`, `right-click`, `hover`,
+`set-text`, `press-key`, `hotkey`, `inspect`, `manual`, `call`. Ordinary executable steps have
 `target={"control_id":"...","label":"..."}`. `target.hit="blank"` requests
 verified blank space inside a native container. Input values and keys use `text`;
 hotkeys use `text="ctrl+s"`. `timeout_seconds` is 0–60 and controls observation waits,
-not repeated input. A workflow contains 1–200 steps.
+not repeated input. A workflow contains 1–200 steps. A `call` step instead uses
+`workflow_id` and optional `parameters` bindings, with no target or nested checks.
+It references another saved combination action and resolves its latest definition
+at execution. Shared suffixes can therefore be maintained once. Missing calls and
+cycles block execution; shared edits invalidate prior run evidence.
 
 Checks nested under steps each have a unique `id`, `kind`, `target`, and `expected`
 when applicable. Supported kinds: `exists`, `not-visible`, `text`, `window-title`,

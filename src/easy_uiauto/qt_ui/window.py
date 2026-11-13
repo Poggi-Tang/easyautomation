@@ -22,7 +22,7 @@ from ..mcp.protocol import CONTROL_IDENTITY_KEYS, normalize_location, with_contr
 from .. import workflows
 from .models import KnowledgeModel, KnowledgeFilter, ROLE
 from .widgets import ImageView, IoJob, StepEditor, ControlChooser, button, ACTION_NAMES
-from .dialogs import ParameterDialog, SettingsDialog, WindowDialog
+from .dialogs import CapturedControlDialog, DeepLearningDialog, ParameterDialog, SettingsDialog, WindowDialog
 from .icons import icon, IconLabel, action_icon_name, set_button_icon, decorate_button_box, decorate_search
 
 
@@ -72,9 +72,7 @@ class KnowledgeWindow(QMainWindow):
         self.delete_shortcut=QShortcut(QKeySequence(Qt.Key.Key_Delete),self.tree)
         self.delete_shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
         self.delete_shortcut.setAutoRepeat(False);self.delete_shortcut.activated.connect(self.remove)
-        self.tree.header().setStretchLastSection(False)
-        self.tree.header().setSectionResizeMode(0,QHeaderView.ResizeMode.Stretch)
-        self.tree.header().setSectionResizeMode(1,QHeaderView.ResizeMode.ResizeToContents)
+        self.configure_tree_columns()
         nav_layout.addWidget(self.tree,1);self.main_split.addWidget(nav)
         self.search_timer=QTimer(self);self.search_timer.setSingleShot(True);self.search_timer.setInterval(180)
         self.search.textChanged.connect(lambda text:self.search_timer.start() if text else self.filter_tree())
@@ -95,7 +93,7 @@ class KnowledgeWindow(QMainWindow):
         self.usage=QPlainTextEdit();self.usage.setAccessibleName("使用知识正文");self.usage.textChanged.connect(self.changed);self.center.addWidget(self.usage)
         self.flow_page=QWidget();flow_layout=QVBoxLayout(self.flow_page);flow_layout.setContentsMargins(0,0,0,0)
         self.flow_title=QLineEdit();self.flow_title.setAccessibleName("组合动作标题");self.flow_title.textEdited.connect(self.changed);flow_layout.addWidget(self.flow_title)
-        self.flow_steps=StepEditor(self.choose_control,inline=False);self.flow_steps.changed.connect(self.changed);flow_layout.addWidget(self.flow_steps)
+        self.flow_steps=StepEditor(self.choose_control,inline=False,choose_workflow=self.choose_workflow);self.flow_steps.changed.connect(self.changed);flow_layout.addWidget(self.flow_steps)
         self.center.addWidget(self.flow_page)
         self.results_page=QWidget();results_layout=QVBoxLayout(self.results_page);results_layout.setContentsMargins(0,0,0,0)
         self.result_summary=IconLabel();results_layout.addWidget(self.result_summary)
@@ -165,6 +163,12 @@ class KnowledgeWindow(QMainWindow):
             for widget,key in ((self.main_split,"navigation"),(self.work_split,"workspace")):
                 value=self.settings.value(key)
                 if value:widget.restoreState(value)
+
+    def configure_tree_columns(self):
+        header=self.tree.header()
+        header.setStretchLastSection(False)
+        header.setSectionResizeMode(0,QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(1,QHeaderView.ResizeMode.ResizeToContents)
 
     @property
     def app_id(self):return self.current.get("app_id","")
@@ -339,6 +343,8 @@ class KnowledgeWindow(QMainWindow):
         if self.model_root!=library.root:
             self.model_root=library.root;self.snapshots={};self.pending_apps.clear()
             self.model.clear();self.model.setHorizontalHeaderLabels(["知识节点","状态"])
+            # clear() removes header sections and their individual resize modes.
+            self.configure_tree_columns()
             self.model.nodes.clear();self.model.rows.clear()
         self.full_reload_pending=self.full_reload_pending or not key or key=="vault"
         if app_ids:self.pending_apps.update(app_ids)
@@ -451,7 +457,7 @@ class KnowledgeWindow(QMainWindow):
         elif kind in {"region","control","area"}:self.show_reference()
         else:
             index=self.snapshots.get(self.app_id,{})
-            self.overview.setPlainText(("选择软件窗口 → 添加区域 → 学习区域\n\n" if kind in {"vault","application","controls-root"} else "")+
+            self.overview.setPlainText(("选择软件窗口 → 添加区域 → 基本学习 / 深度学习\n\n" if kind in {"vault","application","controls-root"} else "")+
                 (f"控件：{len(index.get('controls',[]))}    区域：{len(index.get('regions',[]))}    组合动作：{len(index.get('workflows',[]))}\n\n" if index else "")+
                 {"vault":"从左侧选择已有软件，或点击“添加软件”。","actions-root":"选择已有组合动作查看步骤，或新建组合动作。","usage-root":"选择文档查看软件使用说明，也可以新建说明。",
                  "references-root":"添加用户手册、测试用例、脑图或网页。首次使用设置中的 API 整理为标准 Markdown；可直接编辑，学习时读取修订后的内容。参考资料只用于推断，不会自动执行其中的步骤。"}.get(kind,"选中区域可查看参考图和前置步骤。"))
@@ -545,16 +551,17 @@ class KnowledgeWindow(QMainWindow):
         actions=[]
         if kind=="vault":actions=[("添加软件",lambda:self.choose_window(new=True))]
         elif kind in {"application","controls-root","area"}:actions=[("添加区域",self.add_region),("查看区域",self.review_layout),("刷新截图",self.capture)]
-        elif kind=="region":actions=[("打开区域",self.open_region),("查看区域",self.review_layout),("修改边界",lambda:self.pick_region(modify=True)),("学习区域",self.learn),("添加状态",self.add_variant),("保存",self.save)]
+        elif kind=="region":actions=[("打开区域",self.open_region),("查看区域",self.review_layout),("修改边界",lambda:self.pick_region(modify=True)),("基本学习",self.learn),("深度学习",self.deep_learn),("添加状态",self.add_variant),("保存",self.save)]
         elif kind=="control":actions=[("验证定位",self.verify),("执行",self.execute_control),("学习展开内容",self.expand),("插入前置步骤",self.insert_entries),("保存",self.save)]
         elif kind in {"actions-root","workflow"}:actions=[("新建",self.new_flow),("参数",self.parameters),("运行",self.run_flow),("运行结果",self.show_results),("保存",self.save)]
         if kind=="workflow":actions.insert(2,("插入前置步骤",self.insert_entries))
         if kind=="region" and dynamic_regions.is_dynamic(self.record):
-            actions=[("打开区域",self.open_region),("细分区域",self.subdivide),("重新学习展开内容",self.relearn_dynamic),("保存",self.save)]
+            actions=[("打开区域",self.open_region),("细分区域",self.subdivide),("深度学习",self.deep_learn),("重新学习展开内容",self.relearn_dynamic),("保存",self.save)]
         elif kind in {"usage-root","usage"}:actions=[("新建说明",self.new_usage),("保存",self.save)]
         elif kind=="references-root":actions=[("添加参考文件",self.import_reference_files),("添加网页",self.import_reference_url)]
         elif kind=="reference":actions=[("保存",self.save),("重新整理",self.reimport_reference),
                                         ("停用参考" if self.record.get("enabled",True) else "启用参考",self.toggle_reference)]
+        if kind in {"application","controls-root","area","region"}:actions.insert(1,("添加控件",self.add_control))
         if multiple:
             actions=[(f"删除所选（{len(deletable)}）",self.remove),("取消多选",self.clear_multiselection)]
         elif deletable:
@@ -619,7 +626,11 @@ class KnowledgeWindow(QMainWindow):
         index=index.siblingAtColumn(0)
         if not self.tree.selectionModel().isSelected(index):self.goto(index.data(ROLE)["key"])
         count=len(self.deletable_nodes(self.selected_nodes()))
-        menu=QMenu(self.tree);action=menu.addAction(f"删除所选（{count}）")
+        menu=QMenu(self.tree)
+        if len(self.selected_nodes())==1 and self.current.get("kind") in {"application","controls-root","area","region"}:
+            add=menu.addAction(icon("target"),"添加控件");add.triggered.connect(self.add_control)
+            add.setEnabled(not (self.task or self.deleting or self.saving))
+        action=menu.addAction(f"删除所选（{count}）")
         action.setIcon(icon("trash"))
         action.setEnabled(bool(count) and not self.task and not self.deleting);action.triggered.connect(self.remove)
         menu.exec(self.tree.viewport().mapToGlobal(position))
@@ -641,6 +652,12 @@ class KnowledgeWindow(QMainWindow):
             regions.append({**region,"name":region.get("name","")+(" / "+state if state else "")})
         dialog=ControlChooser(index.get("controls",[]),regions,self)
         return dialog.selected_record() if dialog.exec()==QDialog.DialogCode.Accepted else None
+
+    def choose_workflow(self):
+        flows=[r for r in self.snapshots.get(self.app_id,{}).get("workflows",[]) if r["id"]!=(self.flow or {}).get("id")]
+        if not flows:self.status_label.setText("没有可引用的其他组合动作");return None
+        label,ok=QInputDialog.getItem(self,"选择组合动作","组合动作",[r["keyword"] for r in flows],0,False)
+        return next((r for r in flows if r["keyword"]==label),None) if ok else None
 
     def inspect_popups(self):
         if self.task:return
@@ -789,6 +806,23 @@ class KnowledgeWindow(QMainWindow):
             self.mutate(app_id,lambda:scope.save_captured_control(app_id,result),callback)
         self.start_task("pick-region",{"window":window,"match_mode":"identity"},done,hide=True)
 
+    def add_control(self):
+        if (not self.app_id or self.task or self.saving or self.deleting
+                or not self.maybe_save(self.add_control)):return
+        window=self.bound_window()
+        if not window:return
+        app_id=self.app_id;library=self.library;snapshot=deepcopy(self.snapshots[app_id])
+        region_id=self.record.get("id","") if self.current.get("kind") in {"region","area"} else ""
+        def done(result):
+            dialog=CapturedControlDialog(result["selection"],snapshot,self,region_id=region_id)
+            try:
+                if dialog.exec()!=QDialog.DialogCode.Accepted:return
+                values=dialog.values();scope=library.scoped(values.pop("page_id"))
+                self.mutate(app_id,lambda:scope.save_captured_control(app_id,result,**values),
+                            key=lambda record:f"control:{app_id}:{record['id']}",message="正在保存控件和截图…")
+            finally:dialog.deleteLater()
+        self.start_task("pick-region",{"window":window,"match_mode":"identity","picker_title":"添加控件"},done,hide=True)
+
     def pick_entry(self):
         if not self.app_id:return
         def added(record):
@@ -844,8 +878,32 @@ class KnowledgeWindow(QMainWindow):
         if not page.get("layout_confirmed") and not self.review_layout(for_learning=True):return
         def prepared(layout):
             self.start_task("learn",dict(layout=layout,window=window,window_name=window["title"],vault=str(self.library.root),
-                                        region_id=record["id"],semantic_mode="native"),lambda _r:self.reload(f"region:{app_id}:{record['id']}"),hide=True)
+                                        region_id=record["id"],semantic_mode="auto"),lambda _r:self.reload(f"region:{app_id}:{record['id']}"),hide=True)
         self.mutate(app_id,lambda:scope.learning_layout(app_id,window,region_id=record["id"]),prepared,message="正在准备区域学习…")
+
+    def deep_learn(self, mode=None):
+        if self.current.get("kind")!="region" or not self.maybe_save(lambda:self.deep_learn(mode)):return
+        window=self.bound_window()
+        if not window:return
+        app_id=self.app_id;record=deepcopy(self.record)
+        page=next((p for p in self.snapshots[app_id]["pages"] if p["id"]==record.get("page_id")),{})
+        if not dynamic_regions.is_dynamic(record) and not page.get("layout_confirmed") and not self.review_layout(for_learning=True):return
+        from ..relearning import sessions
+        library=self.library;selected_key=self.current["key"]
+        def choose(history):
+            if self.library.root!=library.root or self.current.get("key")!=selected_key or self.task:return
+            snapshot=self.snapshots[app_id]
+            controls=[r for r in snapshot["controls"] if r.get("region_id")==record["id"]]
+            dialog=DeepLearningDialog(record,snapshot["workflows"],self,sessions=history,controls=controls,mode=mode)
+            try:
+                if dialog.exec()!=QDialog.DialogCode.Accepted:return
+                options=dialog.values()
+            finally:dialog.deleteLater()
+            def finished(result):
+                self.reload(f"region:{app_id}:{record['id']}",message=result.get("message"),app_ids={app_id})
+            self.start_task("deep-learn",dict(vault=str(self.library.root),app_id=app_id,region_id=record["id"],
+                                            window=window,learning_options=options),finished,hide=True)
+        self.async_io(lambda:sessions(library.directory(app_id),record["id"]),choose)
 
     def verify(self):
         if not self.maybe_save(self.verify):return
@@ -992,7 +1050,7 @@ class KnowledgeWindow(QMainWindow):
         library=self.library;scope=self.scoped;key=self.current.get("key")
         try:
             if kind=="workflow" and self.flow:
-                flow={**deepcopy(self.flow),"keyword":self.flow_title.text().strip(),"steps":deepcopy(self.flow_steps.steps)}
+                flow={**deepcopy(self.flow),"keyword":self.flow_title.text().strip(),"steps":self.flow_steps.validated_steps()}
                 def write():
                     saved=library.save_workflow(app_id,flow)
                     return f"workflow:{app_id}:{saved['id']}"
@@ -1150,7 +1208,7 @@ class KnowledgeWindow(QMainWindow):
         if self.task or self.deleting or self.saving:return
         try:
             self.task=LibraryTask({"operation":operation,**payload,"capture_handshake":hide and operation not in {"pick-region","record-steps"}},
-                                 timeout=3600 if operation in {"import-reference","supplement-descriptions","download-image-models"} else 600 if operation in {"learn","expand","record-steps"} else 300 if operation=="pick-region" else 90)
+                                 timeout=7200 if operation=="deep-learn" else 3600 if operation in {"import-reference","supplement-descriptions","download-image-models"} else 600 if operation in {"learn","expand","record-steps"} else 300 if operation=="pick-region" else 90)
         except Exception as error:self.error("任务无法启动",error);return
         self.task_done=done;self.task_hidden=hide;self.stop_button.setEnabled(True);self.progress.setRange(0,0);self.progress.show()
         process=getattr(self.task,"process",None)
@@ -1209,6 +1267,8 @@ class KnowledgeWindow(QMainWindow):
         finally:
             self.cleanup_result();self.build_toolbar()
             if task.operation=="download-image-models":self.refresh_image_models()
+            if task.operation=="deep-learn" and state["state"]!="completed":
+                self.reload(app_ids={self.task_app_id},message="深度学习已停止；已保存的结果已更新，详情见使用知识中的学习进度。")
             self.update_model_buttons()
 
     def stop(self):

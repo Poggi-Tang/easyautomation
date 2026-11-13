@@ -59,7 +59,11 @@ def segmentation(layout: dict, window_rect: dict) -> dict:
     """Map user rectangles to a same-size screenshot; never infer a new layout."""
     size = layout.get("image_size", {})
     if (size.get("width"), size.get("height")) != (window_rect["width"], window_rect["height"]):
-        raise ValueError("软件窗口尺寸已改变，请刷新截图并确认区域后再学习")
+        raise ValueError(
+            "软件窗口尺寸已改变，请刷新截图并确认区域后再学习；"
+            f"记录尺寸={size.get('width')}×{size.get('height')}，"
+            f"当前可见帧={window_rect['width']}×{window_rect['height']}，"
+            f"window_handle={layout.get('window_handle', 0)}，坐标来源=visible-window-bounds")
     regions = validate_regions(layout.get("regions", []))
     width, height = window_rect["width"], window_rect["height"]
     output = []

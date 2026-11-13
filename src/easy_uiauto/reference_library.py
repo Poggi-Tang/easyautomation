@@ -531,7 +531,7 @@ def save(directory, identifier, body, *, enabled=True):
         _write_markdown(directory/record["document_path"],metadata,body)
 
 
-def context(directory, query="", *, limit=16000):
+def context(directory, query="", *, limit=16000, report=None):
     tokens=set(re.findall(r"[a-z]{2,}|[\u4e00-\u9fff]{1,4}", re.sub(r"([a-z])([A-Z])",r"\1 \2",query).lower()))
     pieces=[]
     for doc in documents(directory):
@@ -547,6 +547,9 @@ def context(directory, query="", *, limit=16000):
         if size>=limit: break
         text=part[:min(5000,limit-size)]
         output.append(dict(reference_id=identifier,section=index,text=text));size+=len(text)
+    if report is not None:
+        report.update(truncated=len(output)<len(pieces) or size<sum(len(p[3]) for p in pieces),
+                      sections_used=len(output),sections_total=len(pieces))
     return output
 
 

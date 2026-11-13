@@ -232,6 +232,16 @@ def build_tree(controls: list[dict], regions: list[dict]) -> dict:
             parents[node] = "region:"+selected
             current = selected
 
+    # A manually chosen destination is independent of screenshot geometry and
+    # native parent inference, including regions from another capture frame.
+    destinations = {r["id"]: r for r in regions}
+    for identifier, record in records.items():
+        region = destinations.get(record.get("region_id"), {})
+        if (record.get("region_source") == "manual-selection" and identifier not in containers
+                and record.get("hierarchy_parent", "auto") == "auto" and region
+                and region.get("page_id") == record.get("page_id")):
+            parents["control:"+identifier] = "region:"+region["id"]
+
     # Corrupt metadata must not create a recursive GUI or discard learned controls.
     roots = {"region:"+r["id"] for r in regions if not is_dynamic(r)}
     for node in list(parents):

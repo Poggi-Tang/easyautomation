@@ -157,7 +157,7 @@ def test_scanner_binds_only_selected_handle_without_touching_other_uia_providers
 
 def test_scanner_missing_target_does_not_fall_back_to_desktop_uia(monkeypatch):
     monkeypatch.setattr(scanner.uiautomation, "GetRootControl", _forbid_root)
-    monkeypatch.setattr(native_windows, "enumerate_windows", lambda: [])
+    monkeypatch.setattr(native_windows, "enumerate_windows", lambda **_kw: [])
     bind = Mock(side_effect=_forbid_root)
     monkeypatch.setattr(scanner.uiautomation, "ControlFromHandle", bind)
     with pytest.raises(RuntimeError, match="Window not found"):

@@ -9,6 +9,7 @@ import io
 import json
 import re
 import time
+from uuid import uuid4
 from collections.abc import Callable
 from pathlib import Path
 from urllib import error as urlerror
@@ -106,16 +107,36 @@ def _control_properties(control) -> dict:
     return result
 
 
-def capture_snapshot(window_name: str, action_location: dict | None = None) -> dict:
+def capture_snapshot(window_name: str | dict, action_location: dict | None = None) -> dict:
     """Capture full pixels, top-level windows, and the operated control state."""
-    window = scanner._find_window(window_name)
-    window_rect = scanner._window_rect(window)
-    target_image = scanner._screenshot_window(window_rect)
-    target_image, window_rect = scanner._trim_window_capture(target_image, window_rect, window)
+    from PIL import Image
+    from .results import ActionError
+
+    try:
+        window = scanner._find_window(window_name)
+    except ActionError as error:
+        if (error.reason != "session_window_missing" or not isinstance(window_name, dict)
+                or not window_name.get("window_rect")):
+            raise
+        window = None
+    if window is None:
+        # A menu/dialog may legitimately close after input. Never rebind its title
+        # or capture arbitrary pixels at its old location as the target window.
+        window_rect = dict(window_name["window_rect"])
+        target_image = Image.new("RGB", (window_rect["width"], window_rect["height"]), "white")
+        identity = {key: window_name[key] for key in (
+            "window_name", "window_identity", "target_handle", "target_process_id", "target_native_class")
+                    if key in window_name}
+    else:
+        window_rect = scanner._window_rect(window)
+        target_image = scanner._screenshot_window(window_rect)
+        target_image, window_rect = scanner._trim_window_capture(target_image, window_rect, window)
+        hint = window_name if isinstance(window_name, str) else window_name.get("window_name", "")
+        identity = scanner.window_identity.session(window, hint)
     with Controller.suspend_highlights():
         desktop_image, desktop_origin = _capture_virtual_desktop()
     action_control = None
-    if action_location:
+    if action_location and window is not None:
         try:
             action_control = scanner.resolve_location(action_location, window=window)
         except Exception:
@@ -129,9 +150,10 @@ def capture_snapshot(window_name: str, action_location: dict | None = None) -> d
         ],
     }
     return {
+        **identity,
         "captured_at": knowledge.utc_now(),
-        "window_name": str(getattr(window, "Name", "") or window_name),
-        "target_handle": int(getattr(window, "NativeWindowHandle", 0) or 0),
+        "target_present": window is not None,
+        "target_image_role": "window-capture" if window is not None else "closed-window-placeholder",
         "window_rect": window_rect,
         "windows": windows,
         "desktop_origin": desktop_origin,
@@ -241,7 +263,7 @@ def _window_differences(before: list[dict], after: list[dict]) -> dict:
 
 
 def wait_for_stability(
-    window_name: str,
+    window_name: str | dict,
     action_location: dict,
     minimum_seconds: float = 0.2,
     maximum_seconds: float = 3.0,
@@ -292,10 +314,12 @@ def wait_for_stability(
 
 
 def _controls_in_changed_regions(
-    window_name: str,
+    window_name: str | dict,
     window_rect: dict,
     regions: list[dict],
 ) -> list[dict]:
+    if isinstance(window_name, dict) and window_name.get("target_present") is False:
+        return []
     window = scanner._find_window(window_name)
     controls = []
     seen = set()
@@ -527,7 +551,7 @@ def _attempt_recovery(
         )
     for method, operation in methods:
         try:
-            window = scanner._find_window(window_name)
+            window = scanner._find_window(before)
             expected = int(before.get("target_handle", 0) or 0)
             if expected and int(getattr(window, "NativeWindowHandle", 0) or 0) != expected:
                 raise RuntimeError("The original target window was replaced")
@@ -560,7 +584,7 @@ def _attempt_recovery(
         time.sleep(0.15)
         try:
             recovered, stability = wait_for_stability(
-                window_name,
+                before,
                 action_location,
                 minimum_seconds=0.1,
                 maximum_seconds=1.5,
@@ -638,217 +662,234 @@ def learn_command_effect(
         "interaction",
         record["app_id"],
         command,
-        knowledge.utc_now(),
+        uuid4().hex,
     )
-    window = scanner._find_window(record["app_name"])
+    window = scanner._find_window(record)
     scanner._activate_window(window)
     time.sleep(0.05)
     progress(f"Capturing before state for {command}")
-    before = capture_snapshot(record["app_name"], record["location"])
+    anchor = scanner.window_identity.session(window, record["app_name"])
+    before = capture_snapshot(anchor if anchor.get("target_handle") else record, record["location"])
     progress(f"Executing reversible command {command}")
     execution = ui_cli.execute(directory, command, text, confirm, highlight=highlight)
-    if not execution.get("ok", False):
-        raise RuntimeError(
-            "Action was executed but its preview did not close cleanly; "
-            "effect observation stopped. Do not repeat the action. "
-            + str(execution.get("overlay", {}).get("error", "")))
-    progress(f"Waiting for UI stability after {command}")
-    after, stability = wait_for_stability(
-        record["app_name"],
-        record["location"],
-        maximum_seconds=max(0.5, min(float(maximum_wait_seconds), 15.0)),
-    )
-    progress(f"Inspecting changed regions after {command}")
-    regions = changed_regions(before["_target_image"], after["_target_image"])
-    window_changes = _window_differences(before["windows"], after["windows"])
-    allowed_foreground = _related_window_handles(before, after)
-    foreground_after = next(
-        (item.get("handle") for item in after["windows"] if item.get("foreground")), 0)
-    interference = {
-        "detected": bool(foreground_after and foreground_after not in allowed_foreground),
-        "detail": "foreground moved to an unrelated window during observation"
-        if foreground_after and foreground_after not in allowed_foreground else ""}
-    related_changes = {**window_changes, "added": [
-        entry for entry in window_changes.get("added", [])
-        if entry.get("handle") in allowed_foreground]}
-    changed_controls = [] if interference["detected"] else _controls_in_changed_regions(
-        after["window_name"],
-        after["window_rect"],
-        regions,
-    )
-    popup_controls = [] if interference["detected"] else _popup_controls(related_changes)
-    popup_images = [] if interference["detected"] else _popup_images(after, related_changes)
-    action_property_changes = {
-        key: {
-            "before": before["action_control"].get(key),
-            "after": after["action_control"].get(key),
-        }
-        for key in set(before["action_control"]) | set(after["action_control"])
-        if before["action_control"].get(key) != after["action_control"].get(key)
-    }
-    progress("Stopping effect learning after foreground interference" if interference["detected"]
-             else f"Understanding operation effect for {command} with remote AI")
-    from .. import reference_library
-    reference_context=reference_library.context(directory,record.get("semantic_name","")+" "+command)
-    interpretation = (dict(effects=[], summary="Interference detected; effect not attributed",
-                           confidence=0, success_condition="")
-                      if interference["detected"] else _interpret_effects(
-        before["_target_image"],
-        after["_target_image"],
-        regions,
-        window_changes,
-        changed_controls,
-        popup_controls,
-        popup_images,
-        stability.get("dynamic_regions", []),
-        command,
-        api_url,
-        api_key,
-        model,
-        version,
-        reference_context,
-    ))
-    change_ratio = image_change_ratio(before["_target_image"], after["_target_image"])
-    effect_context = {
-        "command": command,
-        "page_id": record.get("page_id", "unknown"),
-        "before_state_id": before["state_id"],
-        "after_state_id": after["state_id"],
-        "window_name": after["window_name"],
-        "target_handle": after.get("target_handle", 0),
-        "window_changes": related_changes,
-        "effects": interpretation["effects"],
-        "image_change_ratio": round(change_ratio, 6),
-    }
-    discovery = {"attempted": False}
-    if post_effect and not interference["detected"] and _navigation_likely(effect_context):
-        try:
-            discovery = {"attempted": True, **post_effect(effect_context)}
-        except Exception as error:
-            discovery = {
-                "attempted": True,
-                "ok": False,
-                "error": f"{type(error).__name__}: {error}",
+    try:
+        if not execution.get("ok", False):
+            raise RuntimeError(
+                "Action was executed but its preview did not close cleanly; "
+                "effect observation stopped. Do not repeat the action. "
+                + str(execution.get("overlay", {}).get("error", "")))
+        progress(f"Waiting for UI stability after {command}")
+        after, stability = wait_for_stability(
+            before,
+            record["location"],
+            maximum_seconds=max(0.5, min(float(maximum_wait_seconds), 15.0)),
+        )
+        progress(f"Inspecting changed regions after {command}")
+        regions = changed_regions(before["_target_image"], after["_target_image"])
+        window_changes = _window_differences(before["windows"], after["windows"])
+        allowed_foreground = _related_window_handles(before, after)
+        foreground_after = next(
+            (item.get("handle") for item in after["windows"] if item.get("foreground")), 0)
+        interference = {
+            "detected": bool(foreground_after and foreground_after not in allowed_foreground),
+            "detail": "foreground moved to an unrelated window during observation"
+            if foreground_after and foreground_after not in allowed_foreground else ""}
+        related_changes = {**window_changes, "added": [
+            entry for entry in window_changes.get("added", [])
+            if entry.get("handle") in allowed_foreground]}
+        changed_controls = [] if interference["detected"] else _controls_in_changed_regions(
+            after,
+            after["window_rect"],
+            regions,
+        )
+        popup_controls = [] if interference["detected"] else _popup_controls(related_changes)
+        popup_images = [] if interference["detected"] else _popup_images(after, related_changes)
+        action_property_changes = {
+            key: {
+                "before": before["action_control"].get(key),
+                "after": after["action_control"].get(key),
             }
-    images = _save_interaction_images(directory, interaction_id, before, after)
-    changed = bool(regions or any(window_changes.values()) or action_property_changes)
-    observed_handles = {
-        item.get("handle")
-        for item in stability.get("observed_windows", [])
-        if item.get("handle")
-    }
-    before_handles = {item["handle"] for item in before["windows"] if item["handle"]}
-    after_handles = {item["handle"] for item in after["windows"] if item["handle"]}
-    transient_handles = observed_handles - before_handles - after_handles
-    transient_windows = [
-        item
-        for item in stability.get("observed_windows", [])
-        if item.get("handle") in transient_handles
-    ]
-    if recover:
-        progress(f"Recovering previous UI state after {command}")
-    recovery = {"ok": False, "detail": (
-        "Interference detected; no recovery input was sent" if interference["detected"]
-        else "Nested discovery stopped; no parent recovery input was sent")
-    } if (
-        recover and (interference["detected"] or discovery.get("ok") is False)
-    ) else _attempt_recovery(
-        record["app_name"],
-        before,
-        record["location"],
-        _action,
-    ) if recover else {
-        "ok": None,
-        "detail": "not requested",
-    }
-    interaction = {
-        "id": interaction_id,
-        "app_id": record["app_id"],
-        "app_name": record["app_name"],
-        "page_id": record.get("page_id", "unknown"),
-        "semantic_name": record.get("semantic_name") or command,
-        "command": command,
-        "control_id": record["id"],
-        "control_anchor": knowledge.control_anchor(record),
-        "action": _action,
-        "status": (
-            "interference-detected"
-            if interference["detected"]
-            else "effect-observed"
-            if changed
-            else "no-observable-change"
-        ),
-        "before_state_id": before["state_id"],
-        "after_state_id": after["state_id"],
-        "before": _public_snapshot(before),
-        "after": _public_snapshot(after),
-        "images": images,
-        "changed_regions": regions,
-        "image_change_ratio": round(change_ratio, 6),
-        "window_changes": window_changes,
-        "transient_windows": transient_windows,
-        "changed_controls": changed_controls,
-        "popup_controls": popup_controls,
-        "action_property_changes": action_property_changes,
-        "effects": interpretation["effects"],
-        "effect_summary": interpretation["summary"],
-        "effect_confidence": interpretation["confidence"],
-        "success_condition": interpretation["success_condition"],
-        "stability": stability,
-        "execution": execution,
-        "recovery": recovery,
-        "discovery": discovery,
-        "interference": interference,
-        "model": model,
-    }
-    progress(f"Saving interaction knowledge for {command}")
-    path = knowledge.save_interaction(directory, interaction)
-    found = knowledge.find_control_record(directory, record["id"])
-    if found:
-        _path, updated = found
-        if (changed and not interference["detected"] and interpretation.get("confidence",0)>=.72
-                and interpretation.get("summary") and updated.get("semantic_source")!="manual"):
-            updated.update(description=interpretation["summary"],description_source="interaction-observation",
-                           description_status="observed",description_effect_record=str(path.relative_to(directory)).replace("\\","/"))
-        updated["function_verification"] = {
-            **updated.get("function_verification", {}),
+            for key in set(before["action_control"]) | set(after["action_control"])
+            if before["action_control"].get(key) != after["action_control"].get(key)
+        }
+        progress("Stopping effect learning after foreground interference" if interference["detected"]
+                 else f"Understanding operation effect for {command} with remote AI")
+        from .. import reference_library
+        reference_context=reference_library.context(directory,record.get("semantic_name","")+" "+command)
+        interpretation = (dict(effects=[], summary="Interference detected; effect not attributed",
+                               confidence=0, success_condition="")
+                          if interference["detected"] else _interpret_effects(
+            before["_target_image"],
+            after["_target_image"],
+            regions,
+            window_changes,
+            changed_controls,
+            popup_controls,
+            popup_images,
+            stability.get("dynamic_regions", []),
+            command,
+            api_url,
+            api_key,
+            model,
+            version,
+            reference_context,
+        ))
+        change_ratio = image_change_ratio(before["_target_image"], after["_target_image"])
+        effect_context = {
+            "command": command,
+            "page_id": record.get("page_id", "unknown"),
+            "before_state_id": before["state_id"],
+            "after_state_id": after["state_id"],
+            "window_name": after["window_name"],
+            "target_handle": after.get("target_handle", 0),
+            "window_changes": related_changes,
+            "effects": interpretation["effects"],
+            "image_change_ratio": round(change_ratio, 6),
+        }
+        discovery = {"attempted": False}
+        if post_effect and not interference["detected"] and _navigation_likely(effect_context):
+            try:
+                discovery = {"attempted": True, **post_effect(effect_context)}
+            except Exception as error:
+                discovery = {
+                    "attempted": True,
+                    "ok": False,
+                    "error": f"{type(error).__name__}: {error}",
+                }
+        images = _save_interaction_images(directory, interaction_id, before, after)
+        changed = bool(regions or any(window_changes.values()) or action_property_changes)
+        observed_handles = {
+            item.get("handle")
+            for item in stability.get("observed_windows", [])
+            if item.get("handle")
+        }
+        before_handles = {item["handle"] for item in before["windows"] if item["handle"]}
+        after_handles = {item["handle"] for item in after["windows"] if item["handle"]}
+        transient_handles = observed_handles - before_handles - after_handles
+        transient_windows = [
+            item
+            for item in stability.get("observed_windows", [])
+            if item.get("handle") in transient_handles
+        ]
+        if recover:
+            progress(f"Recovering previous UI state after {command}")
+        recovery = {"ok": False, "detail": (
+            "Interference detected; no recovery input was sent" if interference["detected"]
+            else "Nested discovery stopped; no parent recovery input was sent")
+        } if (
+            recover and (interference["detected"] or discovery.get("ok") is False)
+        ) else _attempt_recovery(
+            record["app_name"],
+            before,
+            record["location"],
+            _action,
+        ) if recover else {
+            "ok": None,
+            "detail": "not requested",
+        }
+        interaction = {
+            "id": interaction_id,
+            "app_id": record["app_id"],
+            "app_name": record["app_name"],
+            "page_id": record.get("page_id", "unknown"),
+            "semantic_name": record.get("semantic_name") or command,
+            "command": command,
+            "control_id": record["id"],
+            "control_anchor": knowledge.control_anchor(record),
+            "action": _action,
             "status": (
                 "interference-detected"
                 if interference["detected"]
                 else "effect-observed"
                 if changed
-                else "executed-no-visible-effect"
+                else "no-observable-change"
             ),
-            "effect_record": str(path.relative_to(directory)).replace("\\", "/"),
-            "last_effect_observed_at": knowledge.utc_now(),
+            "before_state_id": before["state_id"],
+            "after_state_id": after["state_id"],
+            "before": _public_snapshot(before),
+            "after": _public_snapshot(after),
+            "images": images,
+            "changed_regions": regions,
+            "image_change_ratio": round(change_ratio, 6),
+            "window_changes": window_changes,
+            "transient_windows": transient_windows,
+            "changed_controls": changed_controls,
+            "popup_controls": popup_controls,
+            "action_property_changes": action_property_changes,
+            "effects": interpretation["effects"],
+            "effect_summary": interpretation["summary"],
+            "effect_confidence": interpretation["confidence"],
+            "success_condition": interpretation["success_condition"],
+            "stability": stability,
+            "execution": execution,
+            "recovery": recovery,
+            "discovery": discovery,
+            "interference": interference,
+            "model": model,
         }
-        knowledge.save_control(directory, updated)
-    try:
-        storage_result = image_storage.cleanup_images(directory, dry_run=False)
-    except (OSError, ValueError) as error:
-        storage_result = {"ok": False, "detail": f"Image cleanup deferred: {error}"}
-    knowledge.rebuild_index(directory)
-    return {
-        "ok": True,
-        "interaction_id": interaction_id,
-        "image_storage": storage_result,
-        "command": command,
-        "status": interaction["status"],
-        "before_state_id": before["state_id"],
-        "after_state_id": after["state_id"],
-        "changed_regions": regions,
-        "image_change_ratio": round(change_ratio, 6),
-        "window_changes": window_changes,
-        "changed_controls": changed_controls,
-        "popup_controls": popup_controls,
-        "effects": interpretation["effects"],
-        "success_condition": interpretation["success_condition"],
-        "stability": stability,
-        "recovery": recovery,
-        "discovery": discovery,
-        "interference": interference,
-        "record": str(path),
-    }
+        progress(f"Saving interaction knowledge for {command}")
+        path = knowledge.save_interaction(directory, interaction)
+        found = knowledge.find_control_record(directory, record["id"])
+        if found:
+            _path, updated = found
+            if (changed and not interference["detected"] and interpretation.get("confidence",0)>=.72
+                    and interpretation.get("summary") and updated.get("semantic_source")!="manual"):
+                updated.update(description=interpretation["summary"],description_source="interaction-observation",
+                               description_status="observed",description_effect_record=str(path.relative_to(directory)).replace("\\","/"))
+            updated["function_verification"] = {
+                **updated.get("function_verification", {}),
+                "status": (
+                    "interference-detected"
+                    if interference["detected"]
+                    else "effect-observed"
+                    if changed
+                    else "executed-no-visible-effect"
+                ),
+                "effect_record": str(path.relative_to(directory)).replace("\\", "/"),
+                "last_effect_observed_at": knowledge.utc_now(),
+            }
+            knowledge.save_control(directory, updated)
+        try:
+            storage_result = image_storage.cleanup_images(directory, dry_run=False)
+        except (OSError, ValueError) as error:
+            storage_result = {"ok": False, "detail": f"Image cleanup deferred: {error}"}
+        knowledge.rebuild_index(directory)
+        return {
+            "ok": True,
+            "interaction_id": interaction_id,
+            "image_storage": storage_result,
+            "command": command,
+            "status": interaction["status"],
+            "before_state_id": before["state_id"],
+            "after_state_id": after["state_id"],
+            "changed_regions": regions,
+            "image_change_ratio": round(change_ratio, 6),
+            "window_changes": window_changes,
+            "changed_controls": changed_controls,
+            "popup_controls": popup_controls,
+            "effects": interpretation["effects"],
+            "success_condition": interpretation["success_condition"],
+            "stability": stability,
+            "recovery": recovery,
+            "discovery": discovery,
+            "interference": interference,
+            "record": str(path),
+        }
+    except Exception as error:
+        # Input already succeeded. Record the attempt so exploration cannot silently
+        # repeat it on a later run, and distinguish failed observation from failed input.
+        failure = dict(id=interaction_id, app_id=record["app_id"], app_name=record["app_name"],
+                       page_id=record.get("page_id", "unknown"), command=command,
+                       control_id=record["id"], control_anchor=knowledge.control_anchor(record),
+                       action=_action, status="observation-failed", before=_public_snapshot(before),
+                       execution=execution, observation_error=f"{type(error).__name__}: {error}")
+        path = knowledge.save_interaction(directory, failure)
+        knowledge.rebuild_index(directory)
+        return dict(ok=False, code="result_unconfirmed", action_executed=True, retryable=False,
+                    command=command, interaction_id=interaction_id, status="observation-failed",
+                    message="动作已执行，但效果观察失败；请检查当前界面，不要直接重复该动作。",
+                    error=failure["observation_error"], record=str(path),
+                    recovery={"ok": False, "attempted": False, "detail": "observation failed"})
 
 
 def explore_application(

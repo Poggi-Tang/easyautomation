@@ -53,6 +53,62 @@ def scan(layout,root):
 def records(root):return knowledge.load_index(knowledge.app_dir("chosen-app",root))["controls"]
 
 
+@pytest.mark.parametrize("failure_first", [False, True])
+def test_one_stale_point_keeps_other_controls_and_failed_visual_observation(local, monkeypatch, failure_first):
+    layout, root, _window, _button, detections, *_ = local
+    detections[1] = element(2, "text-label", (20, 100, 100, 125), "Status")
+    if failure_first:
+        detections.reverse()
+    original = utils.get_control_info
+    def lookup(x, y, **kwargs):
+        if y > 90:
+            raise ValueError("Recorded control is no longer a child of its parent")
+        return original(x, y, **kwargs)
+    monkeypatch.setattr(utils, "get_control_info", lookup)
+    result = scan(layout, root)
+    saved = records(root)
+    assert any(r["control_type"] == "ButtonControl" for r in saved)
+    failed = next(r for r in saved if r["control_type"] == "VisualElement")
+    assert not failed["location"]["Xpath"]
+    assert failed["verification"]["reason"] == "point_binding_failed"
+    assert result["visual_only_observations"] == 1
+    assert result["failures"][0]["diagnostics"]["error_type"] == "ValueError"
+
+
+@pytest.mark.parametrize("error", [PermissionError("access denied"), RuntimeError("provider disconnected")])
+def test_global_lookup_failures_are_not_silently_downgraded(local, monkeypatch, error):
+    layout, root, *_ = local
+    def lookup(*a, **kw):
+        raise error
+    monkeypatch.setattr(utils, "get_control_info", lookup)
+    with pytest.raises(type(error), match=str(error)):
+        scan(layout, root)
+
+
+def test_basic_scan_analyzes_semantics_without_activation_or_input(local,monkeypatch):
+    from easy_uiauto import library_actions
+    from easy_uiauto.ctrl import Controller
+    layout,root,window,button,*_=local
+    window.NativeWindowHandle=1
+    monkeypatch.setattr(library_actions,"bind_window",lambda _:window)
+    monkeypatch.setattr(library_actions,"owned_windows",lambda _:[])
+    def forbidden(*a,**kw):raise AssertionError("basic learning attempted desktop input")
+    monkeypatch.setattr(scanner,"_activate_window",forbidden)
+    monkeypatch.setattr(Controller,"activate_window_handle",forbidden)
+    monkeypatch.setattr(Controller,"execute_resolved",forbidden)
+    candidates=[]
+    def semantics(image,items,*a):
+        candidates.extend(items)
+        return {1:dict(semantic_name="保存文档",description="保存当前文档",confidence=.95)}
+    monkeypatch.setattr(scanner,"analyze_control_semantics",semantics)
+    scanner.scan_window("Example","","","","test",manual_layout=layout,semantic_mode="api",root=root,
+                        observation_owner=dict(handle=1))
+    saved=records(root)[0]
+    assert candidates[0]["uia_name"]=="Save" and candidates[0]["relative_rect"]["left"]==40
+    assert saved["semantic_name"]=="保存文档" and saved["region_id"]=="toolbar"
+    assert saved["location"]["Xpath"][-1]["Name"]=="Save"
+
+
 def test_gui_region_default_annotates_then_uses_recorder_point_method(local):
     layout,root,_window,_button,_detections,calls,points=local
     result=scan(layout,root)

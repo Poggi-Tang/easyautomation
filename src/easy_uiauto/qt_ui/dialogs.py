@@ -6,8 +6,8 @@ import os
 
 from PySide6.QtCore import QThreadPool, Qt
 from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QDialog, QDialogButtonBox,
-    QFileDialog, QFormLayout, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPushButton,
-    QTableWidget, QTableWidgetItem, QVBoxLayout)
+    QFileDialog, QFormLayout, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMessageBox, QPushButton,
+    QCheckBox, QSpinBox, QPlainTextEdit, QTableWidget, QTableWidgetItem, QTreeWidget, QTreeWidgetItem, QVBoxLayout)
 
 from ..mcp import configuration, native_windows, knowledge
 from .widgets import IoJob, button
@@ -60,6 +60,176 @@ class WindowDialog(QDialog):
 
     @property
     def app_id(self):return self.application.get("id") or knowledge.slugify(self.name.text().strip())
+
+
+class CapturedControlDialog(QDialog):
+    def __init__(self, selection, snapshot, parent=None, *, region_id=""):
+        super().__init__(parent);self.setWindowTitle("添加控件");self.resize(520,350)
+        self.selection=selection;self.snapshot=snapshot
+        layout=QVBoxLayout(self);form=QFormLayout();layout.addLayout(form)
+        self.region=QComboBox();self.region.addItem("未分区",None)
+        pages={p["id"]:p for p in snapshot["pages"]}
+        scope=selection.get("window_scope",{"kind":"main"})
+        for region in snapshot["regions"]:
+            page=pages.get(region.get("page_id"),{})
+            if region.get("window_scope",page.get("window_scope",{"kind":"main"}))!=scope:continue
+            state=region.get("state_name") or page.get("region_state",{}).get("name","")
+            label=region.get("name",region["id"])+(f" / {state}" if state else "")
+            self.region.addItem(label,region)
+            if region["id"]==region_id:self.region.setCurrentIndex(self.region.count()-1)
+        self.name=QLineEdit();self.description=QPlainTextEdit()
+        self.name.setAccessibleName("控件名称");self.description.setAccessibleName("控件说明")
+        self.region.setAccessibleName("所属区域")
+        self.description.setPlaceholderText("说明控件用途、输入要求或使用注意事项")
+        form.addRow("所属区域",self.region);form.addRow("名称",self.name);form.addRow("说明",self.description)
+        native=QLabel(f"{selection['control_type']} · {selection.get('native_name') or '无原生名称'}")
+        native.setWordWrap(True);form.addRow("拾取结果",native)
+        self.message=QLabel();self.message.setWordWrap(True);layout.addWidget(self.message)
+        self.buttons=QDialogButtonBox(QDialogButtonBox.StandardButton.Save|QDialogButtonBox.StandardButton.Cancel)
+        self.buttons.button(QDialogButtonBox.StandardButton.Save).setText("保存")
+        self.buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("取消")
+        decorate_button_box(self.buttons);layout.addWidget(self.buttons)
+        self.buttons.accepted.connect(self.accept);self.buttons.rejected.connect(self.reject)
+        self.region.currentIndexChanged.connect(self.destination_changed);self.destination_changed()
+        if region_id and not self.region.currentData():
+            self.message.setText("所选控件不在原区域的窗口内，请选择对应窗口的区域，或保存为未分区。")
+
+    def destination_changed(self):
+        from ..knowledge_library import KnowledgeLibrary, PAGE_ID
+        region=self.region.currentData() or {};self.match_error=""
+        try:
+            old=KnowledgeLibrary.matching_captured_control(self.snapshot["controls"],self.selection,
+                region.get("page_id",PAGE_ID),region.get("navigation_path",[]))
+        except ValueError as error:old={};self.match_error=str(error)
+        if not self.name.isModified():
+            self.name.setText(old.get("semantic_name") or self.selection.get("native_name") or self.selection["control_type"])
+        if not self.description.document().isModified():self.description.setPlainText(old.get("description",""))
+        self.message.setText(self.match_error or ("已存在该控件，保存将更新原记录。" if old else
+            "保存后可在属性中调整定位和前置步骤；所属区域的前置步骤会自动继承。"))
+        self.buttons.button(QDialogButtonBox.StandardButton.Save).setEnabled(not self.match_error)
+
+    def values(self):
+        from ..knowledge_library import PAGE_ID
+        region=self.region.currentData() or {}
+        return dict(page_id=region.get("page_id",PAGE_ID),region_id=region.get("id",""),
+                    name=self.name.text().strip(),description=self.description.toPlainText())
+
+    def accept(self):
+        if self.match_error:return
+        if not self.name.text().strip():self.message.setText("请输入控件名称");self.name.setFocus();return
+        super().accept()
+
+
+class DeepLearningDialog(QDialog):
+    def __init__(self, region, flows, parent=None, *, sessions=(), controls=(), mode=None):
+        from ..relearning import MODES
+        super().__init__(parent);self.setWindowTitle("深度学习 · "+region.get("name","区域"));self.resize(760,790)
+        self.sessions=list(sessions)
+        layout=QVBoxLayout(self)
+        hint=QLabel("从当前区域探索交互分支，自动保存新区域、控件和组合动作。请使用测试工程；未完成的分支会保留在学习进度中。")
+        hint.setWordWrap(True);layout.addWidget(hint);form=QFormLayout();layout.addLayout(form)
+        self.mode=QComboBox()
+        for value in ("resume","improve","update","new"):self.mode.addItem(MODES[value],value)
+        self.mode.setCurrentIndex(self.mode.findData(mode or ("resume" if sessions else "new")))
+        self.session=QComboBox()
+        for graph in sessions:
+            status={"partial":"部分完成","complete":"已完成","running":"待继续"}.get(graph.get("status"),"待检查")
+            self.session.addItem(f"{graph.get('updated_at','')} · {status} · {len(graph.get('states',{}))} 个状态",graph["id"])
+        if not sessions:self.session.addItem("暂无历史记录，将建立首次学习记录","")
+        self.mode_hint=QLabel();self.mode_hint.setWordWrap(True)
+        form.addRow("本次目的",self.mode);form.addRow("已有学习记录",self.session);form.addRow(self.mode_hint)
+        self.instructions=QPlainTextEdit();self.instructions.setPlaceholderText("学习范围、需要覆盖的业务流程，以及参考资料中的要求")
+        self.instructions.setMaximumHeight(110)
+        self.inputs=QPlainTextEdit("{}");self.inputs.setPlaceholderText('例如：{"工程名称":"学习测试", "保存路径":"D:/测试工程"}')
+        self.inputs.setMaximumHeight(110)
+        self.actions=QSpinBox();self.actions.setRange(1,2000);self.actions.setValue(100)
+        self.depth=QSpinBox();self.depth.setRange(1,100);self.depth.setValue(24)
+        self.reset=QComboBox();self.reset.addItem("未配置；无法返回时保留进度并停止","")
+        for flow in flows:self.reset.addItem(flow["keyword"],flow["id"])
+        self.commit=QCheckBox("允许新建、保存等测试数据提交（不包括删除或外部发送）")
+        form.addRow("学习要求",self.instructions);form.addRow("测试输入（JSON）",self.inputs)
+        form.addRow("本次交互步数",self.actions);form.addRow("探索深度",self.depth);form.addRow("返回起点动作",self.reset)
+        layout.addWidget(self.commit)
+        self.scope=QTreeWidget();self.scope.setHeaderLabels(["指定内容（不勾选表示整个区域）","类型"]);self.scope.setMaximumHeight(150)
+        for kind,records in (("control",controls),("workflow",flows)):
+            for record in records:
+                item=QTreeWidgetItem([record.get("semantic_name") or record.get("keyword") or record.get("name") or record["id"],
+                                      "控件" if kind=="control" else "组合动作"])
+                item.setData(0,Qt.ItemDataRole.UserRole,(kind,record["id"]));item.setCheckState(0,Qt.CheckState.Unchecked)
+                item.setToolTip(0,item.text(0))
+                self.scope.addTopLevelItem(item)
+        self.scope.header().setStretchLastSection(False)
+        self.scope.header().setSectionResizeMode(0,QHeaderView.ResizeMode.Stretch)
+        self.scope.header().setSectionResizeMode(1,QHeaderView.ResizeMode.ResizeToContents)
+        layout.addWidget(self.scope)
+        self.pending=QTreeWidget();self.pending.setHeaderLabels(["未完成分支","原因"]);self.pending.setMaximumHeight(150)
+        self.pending.setColumnWidth(0,280)
+        layout.addWidget(self.pending)
+        retry_hint=QLabel("仅在确认上次操作未生效，或测试数据已恢复后，勾选结果不明的分支允许重试。其余未完成分支会自动重新分析。")
+        retry_hint.setWordWrap(True);layout.addWidget(retry_hint)
+        self.mode.currentIndexChanged.connect(self.update_mode)
+        self.session.currentIndexChanged.connect(self.select_session)
+        self.select_session();self.update_mode()
+        self.message=QLabel();self.message.setWordWrap(True);layout.addWidget(self.message)
+        buttons=QDialogButtonBox(QDialogButtonBox.StandardButton.Ok|QDialogButtonBox.StandardButton.Cancel)
+        buttons.button(QDialogButtonBox.StandardButton.Ok).setText("开始深度学习")
+        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("取消")
+        decorate_button_box(buttons);buttons.accepted.connect(self.accept);buttons.rejected.connect(self.reject);layout.addWidget(buttons)
+
+    def values(self):
+        import json
+        inputs=json.loads(self.inputs.toPlainText())
+        if not isinstance(inputs,dict):raise ValueError("测试输入必须为 JSON 对象")
+        selected={"control":[],"workflow":[]}
+        if self.mode.currentData()=="improve":
+            for n in range(self.scope.topLevelItemCount()):
+                item=self.scope.topLevelItem(n)
+                if item.checkState(0)==Qt.CheckState.Checked:
+                    kind,identifier=item.data(0,Qt.ItemDataRole.UserRole);selected[kind].append(identifier)
+        retry=[self.pending.topLevelItem(n).data(0,Qt.ItemDataRole.UserRole) for n in range(self.pending.topLevelItemCount())
+               if self.pending.topLevelItem(n).checkState(0)==Qt.CheckState.Checked]
+        return dict(inputs=inputs,instructions=self.instructions.toPlainText().strip(),max_actions=self.actions.value(),
+                    max_depth=self.depth.value(),allow_commit=self.commit.isChecked(),mode=self.mode.currentData(),
+                    session_id=self.session.currentData() if self.mode.currentData()!="new" else "",
+                    control_ids=selected["control"],workflow_ids=selected["workflow"],
+                    retry_branches=retry if self.mode.currentData()!="new" else [],reset_workflow_id=self.reset.currentData())
+
+    def update_mode(self):
+        mode=self.mode.currentData();self.session.setEnabled(mode!="new");self.scope.setEnabled(mode=="improve")
+        self.pending.setEnabled(mode!="new")
+        self.mode_hint.setText({
+            "resume":"保留已完成结果，重新分析受阻分支；可以补充输入和参考资料后继续。请打开原起点或已记录的结果界面。",
+            "improve":"重新分析指定内容，更新原控件和组合动作；保留人工修改，并报告冲突。",
+            "update":"请先打开并确认当前区域边界。比较新旧控件、更新定位，并验证受影响流程；未找到的控件保留为待定位。",
+            "new":"建立新的学习记录；已有控件继续按身份合并。已有学习建议选择继续、改进或适配，避免重复生成流程。"}[mode])
+        self.populate_pending()
+
+    def select_session(self):
+        import json
+        graph=next((g for g in self.sessions if g["id"]==self.session.currentData()),{})
+        options=graph.get("options",{})
+        self.inputs.setPlainText(json.dumps(options.get("inputs",{}),ensure_ascii=False,indent=2))
+        self.instructions.setPlainText(options.get("instructions",""));self.commit.setChecked(options.get("allow_commit",False))
+        self.reset.setCurrentIndex(max(0,self.reset.findData(options.get("reset_workflow_id",""))))
+        self.populate_pending()
+
+    def populate_pending(self):
+        self.pending.clear()
+        graph=next((g for g in self.sessions if g["id"]==self.session.currentData()),{})
+        for node in graph.get("states",{}).values():
+            for branch in node["branches"]:
+                if branch["status"] in {"done","cycle"} and self.mode.currentData()=="resume":continue
+                item=QTreeWidgetItem([node["name"]+" / "+branch["name"],branch.get("reason") or branch["status"]])
+                item.setToolTip(0,item.text(0));item.setToolTip(1,item.text(1))
+                item.setData(0,Qt.ItemDataRole.UserRole,branch["id"])
+                if branch["status"] in {"uncertain","running","observed","done"}:
+                    item.setCheckState(0,Qt.CheckState.Unchecked)
+                self.pending.addTopLevelItem(item)
+
+    def accept(self):
+        try:self.values()
+        except ValueError as error:self.message.setText(str(error));return
+        super().accept()
 
 
 class ParameterDialog(QDialog):

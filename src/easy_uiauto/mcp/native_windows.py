@@ -172,6 +172,15 @@ def request_close_window(handle: int) -> bool:
 
 def process_elevated(process_id: int) -> bool:
     """Read TokenElevation; access denial is unknown, never proof of elevation."""
+    return _process_token_flag(process_id, 20)
+
+
+def process_ui_access(process_id: int) -> bool:
+    """UIAccess-enabled assistive processes may cross the integrity boundary."""
+    return _process_token_flag(process_id, 26)
+
+
+def _process_token_flag(process_id: int, information_class: int) -> bool:
     kernel=ctypes.WinDLL("kernel32",use_last_error=True)
     security=ctypes.WinDLL("advapi32",use_last_error=True)
     kernel.OpenProcess.argtypes=[wintypes.DWORD,wintypes.BOOL,wintypes.DWORD]
@@ -189,9 +198,74 @@ def process_elevated(process_id: int) -> bool:
         if not security.OpenProcessToken(process,8,ctypes.byref(token)):  # TOKEN_QUERY
             raise ctypes.WinError(ctypes.get_last_error())
         value,length=wintypes.DWORD(),wintypes.DWORD()
-        if not security.GetTokenInformation(token,20,ctypes.byref(value),ctypes.sizeof(value),ctypes.byref(length)):
+        if not security.GetTokenInformation(token,information_class,ctypes.byref(value),ctypes.sizeof(value),ctypes.byref(length)):
             raise ctypes.WinError(ctypes.get_last_error())
         return bool(value.value)
     finally:
         if token:kernel.CloseHandle(token)
         kernel.CloseHandle(process)
+
+
+def process_integrity_level(process_id: int) -> int:
+    """Read the token integrity RID (Low=4096, Medium=8192, High=12288)."""
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    security = ctypes.WinDLL("advapi32", use_last_error=True)
+    kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel.OpenProcess.restype = wintypes.HANDLE
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel.CloseHandle.restype = wintypes.BOOL
+    security.OpenProcessToken.argtypes = [wintypes.HANDLE, wintypes.DWORD, ctypes.POINTER(wintypes.HANDLE)]
+    security.OpenProcessToken.restype = wintypes.BOOL
+    security.GetTokenInformation.argtypes = [wintypes.HANDLE, ctypes.c_int, wintypes.LPVOID,
+                                            wintypes.DWORD, ctypes.POINTER(wintypes.DWORD)]
+    security.GetTokenInformation.restype = wintypes.BOOL
+    security.GetSidSubAuthorityCount.argtypes = [wintypes.LPVOID]
+    security.GetSidSubAuthorityCount.restype = ctypes.POINTER(ctypes.c_ubyte)
+    security.GetSidSubAuthority.argtypes = [wintypes.LPVOID, wintypes.DWORD]
+    security.GetSidSubAuthority.restype = ctypes.POINTER(wintypes.DWORD)
+
+    class Label(ctypes.Structure):
+        _fields_ = [("sid", wintypes.LPVOID), ("attributes", wintypes.DWORD)]
+
+    process = kernel.OpenProcess(0x1000, False, int(process_id))
+    if not process:
+        raise ctypes.WinError(ctypes.get_last_error())
+    token = wintypes.HANDLE()
+    try:
+        if not security.OpenProcessToken(process, 8, ctypes.byref(token)):
+            raise ctypes.WinError(ctypes.get_last_error())
+        length = wintypes.DWORD()
+        security.GetTokenInformation(token, 25, None, 0, ctypes.byref(length))
+        if not length.value:
+            raise ctypes.WinError(ctypes.get_last_error())
+        buffer = ctypes.create_string_buffer(length.value)
+        if not security.GetTokenInformation(token, 25, buffer, length, ctypes.byref(length)):
+            raise ctypes.WinError(ctypes.get_last_error())
+        label = ctypes.cast(buffer, ctypes.POINTER(Label)).contents
+        count = security.GetSidSubAuthorityCount(label.sid)[0]
+        return int(security.GetSidSubAuthority(label.sid, count - 1)[0])
+    finally:
+        if token:
+            kernel.CloseHandle(token)
+        kernel.CloseHandle(process)
+
+
+def check_uia_access(process_id: int) -> dict:
+    """Only confirmed lower integrity blocks scanning; unknown permissions do not."""
+    import os
+    from .results import ActionError
+
+    if not process_id:
+        return {"status": "unknown", "detail": "Target process ID unavailable"}
+    try:
+        current, target = process_integrity_level(os.getpid()), process_integrity_level(process_id)
+        ui_access = process_ui_access(os.getpid()) if current < target else False
+    except (OSError, AttributeError) as error:
+        return {"status": "unknown", "detail": str(error)}
+    if current < target and not ui_access:
+        raise ActionError("operation_blocked",
+            f"UI Automation 进程权限低于目标软件（当前完整性级别={current}，目标={target}，PID={process_id}）；"
+            "可能只能读取窗口外框。请在同一账户下以与目标相同的权限启动 GUI/MCP；"
+            "目标以管理员运行时，请从管理员终端启动。", reason="uia_integrity_mismatch")
+    return {"status": "compatible", "current_integrity": current, "target_integrity": target,
+            "ui_access": ui_access}

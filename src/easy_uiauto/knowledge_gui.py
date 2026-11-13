@@ -387,7 +387,7 @@ class KnowledgeWindow:
         if self.tree.exists(key):
             for node in [key, *self._descendants(key)]: self.nodes.pop(node, None)
             self.tree.delete(key)
-        report = workflows.readiness(flow, self.indexes[app_id]["controls"])
+        report = workflows.readiness(flow, self.indexes[app_id]["controls"], workflows.load_catalog(self.library.directory(app_id)))
         status = "待完善" if not report["ready"] else "需重验" if flow.get("last_run", {}).get("outdated") else "配置完整"
         self.tree.insert(f"actions-root:{app_id}", "end", iid=key, text=flow["keyword"], values=(status,), open=True)
         self.nodes[key] = (app_id, "combination", {"flow": flow, "target_id": None})

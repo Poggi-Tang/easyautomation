@@ -75,7 +75,7 @@ def test_prepare_learning_retains_selected_manual_region_and_state(library, regi
     assert request["layout"]["restrict_regions"] is True
     assert request["layout"]["regions"][0]["id"] == region.removeprefix(PAGE_ID+".")
     assert request["layout"]["regions"][0]["normalized_rect"] == before["regions"][0]["normalized_rect"]
-    assert request["semantic_mode"] == "native" and request["capture_handshake"] is False
+    assert request["semantic_mode"] == "auto" and request["capture_handshake"] is False
     assert library.read("demo") == before  # Preparing never rewrites the manual layout.
 
 

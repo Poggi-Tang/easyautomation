@@ -84,7 +84,7 @@ def sanitize_interaction_geometry(record: dict) -> dict:
             }
             snapshot["observed_window_size"] = size
             observed_size = observed_size or size
-        for key in ("target_handle", "desktop_origin"):
+        for key in ("target_handle", "target_process_id", "desktop_origin"):
             snapshot.pop(key, None)
         snapshot["windows"] = [
             _public_window_observation(item)
@@ -162,12 +162,15 @@ def app_dir(app_id: str, root: Path | None = None) -> Path:
     return (root or vault_root()) / "applications" / slugify(app_id, "application")
 
 
+@image_storage.serialized_learning
 def initialize_app(app_id: str, app_name: str, root: Path | None = None,
                    *, preserve_name: bool = False) -> Path:
     directory = app_dir(app_id, root)
-    if preserve_name and (directory / "app.md").is_file():
-        previous, _body = read_markdown(directory / "app.md")
-        app_name = previous.get("name") or app_name
+    previous, body = {}, None
+    if (directory / "app.md").is_file():
+        previous, body = read_markdown(directory / "app.md")
+        if preserve_name:
+            app_name = previous.get("name") or app_name
     for child in (
         "pages",
         "regions",
@@ -182,13 +185,15 @@ def initialize_app(app_id: str, app_name: str, root: Path | None = None,
     ):
         (directory / child).mkdir(parents=True, exist_ok=True)
     app_record = {
+        **previous,
         "kind": "application",
         "id": slugify(app_id, "application"),
         "name": app_name,
         "updated_at": utc_now(),
         "schema_version": INDEX_VERSION,
     }
-    write_markdown(directory / "app.md", app_record, f"# {app_name}\n\nUI knowledge root.\n")
+    write_markdown(directory / "app.md", app_record,
+                   body if body is not None else f"# {app_name}\n\nUI knowledge root.\n")
     return directory
 
 
@@ -272,6 +277,9 @@ def runtime_quarantined(record: dict) -> bool:
 def merge_control_state(previous: dict, record: dict) -> dict:
     """Refresh observations without erasing runtime failures or learned effects."""
     record = dict(record)
+    if previous.get("region_source") == "manual-selection" and record.get("region_source") != "manual-selection":
+        for key in ("region_id", "region_source"):
+            if key in previous:record[key] = previous[key]
     if (previous.get("description_source")=="interaction-observation"
             and record.get("semantic_source")!="manual"):
         for key in ("description","description_source","description_status","description_effect_record"):
@@ -431,6 +439,24 @@ def save_page(directory: Path, record: dict) -> Path:
     title = record.get("name") or record["id"]
     body = f"# {title}\n\n{record.get('description', '')}\n"
     path = directory / "pages" / f"{slugify(record['id'])}.md"
+    if path.is_file():
+        content = path.read_bytes()
+        previous, previous_body = read_markdown(path)
+        # The initial page write and final annotation write belong to one scan.
+        if not record.get("scan_id") or previous.get("scan_id") != record["scan_id"]:
+            annotation = (directory / previous.get("annotated_image", "")).resolve()
+            if annotation.is_relative_to(directory.resolve()) and annotation.is_file():
+                image_bytes = annotation.read_bytes()
+                archived_image = directory / "images" / "pages" / (
+                    hashlib.sha256(image_bytes).hexdigest()+".annotated.png")
+                if not archived_image.is_file():
+                    temporary = archived_image.with_suffix(".tmp")
+                    temporary.write_bytes(image_bytes)
+                    temporary.replace(archived_image)
+                previous["annotated_image"] = archived_image.relative_to(directory).as_posix()
+            revision = directory / "history" / "pages" / slugify(record["id"]) / (hashlib.sha256(content).hexdigest()+".md")
+            if not revision.is_file():
+                write_markdown(revision, previous, previous_body)
     write_markdown(path, record, body)
     return path
 

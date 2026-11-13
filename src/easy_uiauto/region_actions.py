@@ -59,3 +59,16 @@ def open_region(library, app_id, region, expected, *, progress, checkpoint=lambd
         resolve_record({**region,"window_scope":scope},expected,main)
     Controller.activate_window_handle(target["handle"])
     return dict(ok=True,target_window=target,execution=execution,message="区域已打开")
+
+
+def visible_region(library, app_id, region, expected):
+    """Basic learning observes the current state and never replays entry steps."""
+    from .library_actions import bind_window, resolve_record
+    main = bind_window(expected)
+    condition = library.record_state(app_id, region).get("condition")
+    if condition and not condition_matches(condition, expected, main):
+        raise ValueError("请先手动打开该区域的状态，再进行基本学习；基本学习不会执行前置步骤")
+    scope = region.get("window_scope") or library.scoped(region.get("page_id",library.page_id)).page(app_id).get("window_scope", {"kind":"main"})
+    target = target_window(expected, scope)
+    if region.get("location"):resolve_record({**region,"window_scope":scope}, expected, main)
+    return target

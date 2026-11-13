@@ -139,34 +139,72 @@ class KnowledgeLibrary:
             for check in step.get("checks",[]):check["id"]="entry-check-"+uuid4().hex[:10]
         return copied
 
-    def save_captured_control(self, app_id: str, result: dict, *, name="") -> dict:
-        """Archive a picked entry before learning its destination; no live COM crosses here."""
+    @staticmethod
+    def matching_captured_control(controls, selection, page_id, navigation_path=None):
+        """Reuse learned IDs as well as picked IDs, without merging different states."""
+        from .mcp.control_hierarchy import _path
+        path = _path(selection)
+        matches = [r for r in controls if path and r.get("page_id") == page_id
+                   and r.get("window_scope", {"kind":"main"}) == selection.get("window_scope", {"kind":"main"})
+                   and (navigation_path is None or r.get("navigation_path", []) == navigation_path)
+                   and _path(r) == path]
+        if len(matches) > 1:raise ValueError("已有多个相同定位的控件，请在控件库中选择原记录修改")
+        return matches[0] if matches else {}
+
+    def save_captured_control(self, app_id: str, result: dict, *, name="", description=None, region_id=None) -> dict:
+        """Archive a picked control; an explicit destination marks a manual addition."""
         from PIL import Image
         selection, capture = result["selection"], result["capture"]
         location = normalize_location(selection["location"])
         if not location["Xpath"]: raise ValueError("所选控件没有 XPath")
-        identifier = knowledge.stable_id("control", app_id, self.page_id, location, selection.get("window_scope", {}))
         directory = self.directory(app_id)
         with image_storage._vault_lock(self.root):
+            snapshot = self.read(app_id)
+            region = next((r for r in snapshot["regions"] if r["id"] == region_id), {})
+            if region_id and not region:raise ValueError("所属区域已不存在，请重新选择")
+            if region and region.get("page_id") != self.page_id:raise ValueError("控件与所属区域的状态不一致")
+            scope = selection.get("window_scope", {"kind":"main"})
+            page = next((p for p in snapshot["pages"] if p["id"] == self.page_id), {})
+            if region and scope != region.get("window_scope", page.get("window_scope", {"kind":"main"})):
+                raise ValueError("所选控件不属于该区域的窗口，请选择对应窗口的区域")
+            navigation = region.get("navigation_path", []) if region_id is not None else None
+            old = self.matching_captured_control(snapshot["controls"], selection, self.page_id, navigation)
+            identifier = old.get("id") or knowledge.stable_id("control", app_id, self.page_id, location,
+                selection.get("window_scope", {}), *([navigation] if navigation else []))
+            # An earlier record may have been moved to another route while
+            # retaining its ID. Do not overwrite it with this new observation.
+            if not old and any(r["id"] == identifier for r in snapshot["controls"]):
+                identifier = knowledge.stable_id("control", identifier, uuid4().hex)
+            if identifier in (navigation or []):raise ValueError("入口控件不能归入由它自身打开的区域")
+            if region:self.entry_steps(app_id, region, snapshot=snapshot)
             n = selection["normalized_rect"]
+            if not (0 <= n["left"] < n["right"] <= 1 and 0 <= n["top"] < n["bottom"] <= 1):
+                raise ValueError("所选控件的截图边界无效")
             with Image.open(capture["image"]) as image:
+                bounds = tuple(round(n[k] * (image.width if k in {"left", "right"} else image.height))
+                               for k in ("left", "top", "right", "bottom"))
+                if bounds[0] >= bounds[2] or bounds[1] >= bounds[3]:raise ValueError("所选控件的截图为空")
                 context_ref=image_storage.save_interaction_image(directory,image)
                 context_size=dict(width=image.width,height=image.height)
-                crop = image.crop(tuple(round(n[k] * (image.width if k in {"left", "right"} else image.height))
-                                        for k in ("left", "top", "right", "bottom")))
+                crop = image.crop(bounds)
                 image_ref = image_storage.save_interaction_image(directory, crop)
-            old = knowledge.find_control_record(directory, identifier, include_quarantine=True)
-            record = {**(old[1] if old else {}), "id": identifier, "app_id": app_id, "page_id": self.page_id,
-                      "name": selection["native_name"], "semantic_name": name or selection["native_name"] or selection["control_type"],
+            record = {**old, "id": identifier, "app_id": app_id, "page_id": self.page_id,
+                      "name": selection["native_name"], "semantic_name": name.strip() or old.get("semantic_name") or selection["native_name"] or selection["control_type"],
                       "control_type": selection["control_type"], "class_name": selection["class_name"],
                       "automation_id": selection["automation_id"], "location": location, "image": image_ref,
-                      "normalized_rect": n, "region_id": "unassigned", "status": "observed",
+                      "normalized_rect": n, "region_id": old.get("region_id", "unassigned"),
+                      "status": old.get("status", "observed") if old.get("location") == location else "observed",
                       "visual_observation":dict(phase="picked",purpose="learning-reference",context_image=context_ref,
                                                 context_size=context_size,normalized_rect=n),
-                      "window_scope": selection.get("window_scope", {"kind":"main"}),
-                      "notes": "Captured prerequisite; business effect has not been verified."}
+                      "window_scope": scope,
+                      "notes": old.get("notes", "Captured control; business effect has not been verified.")}
+            if description is not None:record["description"] = description
+            if region_id is not None:
+                record.update(region_id=region_id or "unassigned", region_source="manual-selection",
+                              navigation_path=list(navigation), semantic_source="manual", semantic_status="manual",
+                              semantic_confidence=1.0)
             knowledge.save_control(directory, record); self._refresh(directory)
-        return record
+        return knowledge.find_control_record(directory, identifier, include_quarantine=True)[1]
 
     def directory(self, app_id: str) -> Path:
         if not app_id or knowledge.slugify(app_id) != app_id:
@@ -229,14 +267,22 @@ class KnowledgeLibrary:
         result = []
         directory = self.directory(app_id)
         controls = [r for _p, r in knowledge.iter_records(directory, "control")]
+        catalog = workflows.load_catalog(directory)
         for path in sorted((directory / "workflows").glob("*.md")):
             if image_storage._safe_path(directory, path) is None: raise ValueError("流程文件不能为链接")
             record, _body = knowledge.read_markdown(path)
             if record.get("kind") == "workflow":
+                if record.get("update_validation"):
+                    record["update_validation"]=workflows.update_validation(record,controls,catalog)
                 if record.get("last_run"):
-                    record["last_run"] = {**record["last_run"], "outdated":
-                        record["last_run"].get("definition_hash") != workflows.definition_hash(record)
-                        or record["last_run"].get("control_hash") != workflows.control_hash(record, controls)}
+                    try:
+                        outdated = (record["last_run"].get("definition_hash") != workflows.definition_hash(record, catalog)
+                                    or record["last_run"].get("control_hash") != workflows.control_hash(record, controls, catalog))
+                    except ValueError:outdated = True
+                    record["last_run"] = {**record["last_run"], "outdated":outdated}
+                if any(s.get("action") == "call" for s in record.get("steps", [])):
+                    record["readiness"] = workflows.readiness(record, controls, catalog)
+                    record["status"] = "ready" if record["readiness"]["ready"] else "draft"
                 result.append(record)
         return result
 
@@ -284,14 +330,19 @@ class KnowledgeLibrary:
             if any(r["keyword"] == flow["keyword"] and r["id"] != identifier for r in self.workflows(app_id)):
                 raise ValueError("本软件已有同名流程关键字")
             controls = self.read(app_id)["controls"]
-            status = workflows.readiness(flow, controls)
+            catalog = workflows.load_catalog(directory);catalog[identifier] = flow
+            status = workflows.readiness(flow, controls, catalog)
+            try:digest = workflows.definition_hash(flow, catalog)
+            except ValueError:digest = ""
             record = {**flow, "id": identifier, "kind": "workflow", "app_id": app_id,
                       "status": "ready" if status["ready"] else "draft", "readiness": status,
-                      "definition_hash": workflows.definition_hash(flow), "updated_at": knowledge.utc_now()}
+                      "definition_hash": digest, "updated_at": knowledge.utc_now()}
+            if record.get("update_validation"):
+                record["update_validation"]=workflows.update_validation(record,controls,catalog)
             if record.get("last_run"):
                 record["last_run"] = {**record["last_run"], "outdated":
                     record["last_run"].get("definition_hash") != record["definition_hash"]
-                    or record["last_run"].get("control_hash") != workflows.control_hash(record, controls)}
+                    or not status["ready"] or record["last_run"].get("control_hash") != workflows.control_hash(record, controls, catalog)}
             body = f"# {record['keyword']}\n\n{record.get('name', '')}\n\n前置条件：{record.get('precondition', '')}\n\n"
             body += "\n".join(f"{n}. {s.get('description', s['action'])}\n   预期：{s.get('expected_description', '')}"
                               for n, s in enumerate(record["steps"], 1))
@@ -308,9 +359,21 @@ class KnowledgeLibrary:
             return self.save_workflow(app_id, workflows.suggest_bindings(flow, self.read(app_id)["controls"]))
 
     def save_workflow_execution(self, app_id: str, flow_id: str, execution: dict) -> dict:
+        from . import workflows
         with image_storage._vault_lock(self.root):
             flow = next((r for r in self.workflows(app_id) if r["id"] == flow_id), None)
             if flow is None: raise ValueError("流程已不存在")
+            update = flow.get("update_validation")
+            if update:
+                catalog=workflows.load_catalog(self.directory(app_id))
+                controls=[r for _p,r in knowledge.iter_records(self.directory(app_id),"control")]
+                current=(execution.get("definition_hash")==workflows.definition_hash(flow,catalog) and
+                         execution.get("control_hash")==workflows.control_hash(flow,controls,catalog))
+                checked=any(s.get("checks") for s in execution.get("steps",[]))
+                flow={**flow,"update_validation":{**update,"status":"passed" if execution.get("ok") and current and checked else "failed",
+                     "reason":"实际执行及结果校验通过" if execution.get("ok") and current and checked else "运行失败、缺少结果校验或运行证据已过期",
+                     "definition_hash":execution.get("definition_hash"),"control_hash":execution.get("control_hash"),
+                     "at":knowledge.utc_now()}}
             return self.save_workflow(app_id, {**flow, "last_run": {**execution, "at": knowledge.utc_now()}})
 
     def bind(self, app_id: str, name: str, window: dict) -> Path:
@@ -629,6 +692,7 @@ class KnowledgeLibrary:
         for _path, record in knowledge.iter_records(directory, "control"):
             if record.get("page_id") != self.page_id or not record.get("normalized_rect"):
                 continue
+            if record.get("region_source") == "manual-selection":continue
             original = dict(record)
             previous = record.get("region_id", "unassigned").removeprefix(self.page_id + ".")
             identifier, reason = manual_layout.assign_region(record["normalized_rect"], regions)

@@ -13,7 +13,7 @@ from . import dynamic_regions, image_storage, knowledge, native_windows
 
 
 SECTIONS = {"pages", "regions", "controls", "references", "usage", "workflows"}
-OPERATIONS = {"learn-region", "expand-control", "run-workflow", "supplement-descriptions"}
+OPERATIONS = {"learn-region", "deep-learn-region", "expand-control", "run-workflow", "supplement-descriptions"}
 
 
 def get_library(app_id="", *, vault="", section="overview", record_id="", page_id="",
@@ -73,15 +73,18 @@ def readiness():
 def _window(application, handle):
     if isinstance(handle, bool) or not isinstance(handle, int) or handle < 0:
         raise ValueError("window_handle 必须是非负整数")
+    window_class = application.get("window_class")
+    if not handle and (not application.get("window_name") or not window_class):
+        raise ValueError("软件窗口绑定缺失；请在 GUI 重新选择窗口，或从 list_windows 选择主窗口并传入 window_handle")
     matches = [w for w in native_windows.matching_windows(application.get("window_name", ""), handle=handle)
-               if w["visible"] and w["class_name"] == application.get("window_class")]
+               if w["visible"] and (w["class_name"] == window_class or handle and not window_class)]
     if len(matches) != 1:
         raise ValueError("无法唯一确定已绑定的软件窗口；请从 list_windows 选择主窗口并传入 window_handle")
     return matches[0]
 
 
 def _request(operation, app_id, *, vault="", region_id="", control_id="", workflow_id="",
-             window_handle=0, parameters=None, max_controls=3000):
+             window_handle=0, parameters=None, max_controls=3000, learning_options=None):
     if operation not in OPERATIONS:raise ValueError("未知知识库任务")
     if isinstance(max_controls, bool) or not isinstance(max_controls, int) or not 1 <= max_controls <= 20000:
         raise ValueError("max_controls 必须为 1..20000")
@@ -105,11 +108,20 @@ def _request(operation, app_id, *, vault="", region_id="", control_id="", workfl
     if operation == "run-workflow":
         flow = next((r for r in snapshot["workflows"] if r["id"] == workflow_id), None)
         if flow is None:raise ValueError("组合动作不存在，请先保存")
-        report = workflows.readiness(flow, snapshot["controls"])
+        report = workflows.readiness(flow, snapshot["controls"],{r["id"]:r for r in snapshot["workflows"]})
         if not report["ready"]:raise ValueError("组合动作尚未完善："+"；".join(i["message"] for i in report["issues"]))
         if parameters is not None and not isinstance(parameters, dict):raise ValueError("parameters 必须为对象")
-        workflows.substitute(flow["steps"], {**flow.get("parameters", {}), **(parameters or {})})
+        values={**flow.get("parameters", {}), **(parameters or {})}
+        expanded=workflows.expand_calls(flow,{r["id"]:r for r in snapshot["workflows"]},parameters=values)
+        workflows.substitute(expanded["steps"], values)
         return {**payload, "operation": "workflow", "flow_id": workflow_id, "parameters": parameters or {}}
+    if operation == "deep-learn-region":
+        from ..region_learning import validate_options
+        region=next((r for r in snapshot["regions"] if r["id"]==region_id),None)
+        if region is None:raise ValueError("请选择已保存的区域 ID")
+        options=validate_options(learning_options or {})
+        return {**payload,"operation":"deep-learn","region_id":region_id,
+                "learning_options":{**options,"max_controls":max_controls}}
     if operation == "learn-region":
         region = next((r for r in snapshot["regions"] if r["id"] == region_id), None)
         if region is None:raise ValueError("请选择已保存的区域 ID")
@@ -126,7 +138,7 @@ def _request(operation, app_id, *, vault="", region_id="", control_id="", workfl
         library.click_plan(app_id, control_id)
         layout = library.scoped(control["page_id"]).learning_layout(app_id, window)
         payload.update(operation="expand", control_id=control_id, layout=layout)
-    return {**payload, "semantic_mode": "native", "max_controls": max_controls}
+    return {**payload, "semantic_mode": "auto" if operation=="learn-region" else "native", "max_controls": max_controls}
 
 
 class LibraryJobs:
@@ -146,7 +158,7 @@ class LibraryJobs:
         with self.lock:
             self.require_idle()
             payload = _request(operation, app_id, **kwargs)
-            worker = LibraryTask(payload, timeout=3600 if operation == "supplement-descriptions" else 600)
+            worker = LibraryTask(payload, timeout=7200 if operation == "deep-learn-region" else 3600 if operation == "supplement-descriptions" else 600)
             identifier = "library-"+worker.folder.name
             entry = dict(task_id=identifier, operation=operation, app_id=app_id, vault=payload["vault"],
                          state="running", worker_running=True, elapsed_seconds=0, message="任务已启动",

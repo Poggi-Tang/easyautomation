@@ -1312,15 +1312,24 @@ def get_ui_library_readiness() -> str:
 
 @mcp.tool()
 def start_ui_library_task(
-    operation: Literal["learn-region", "expand-control", "run-workflow", "supplement-descriptions"],
+    operation: Literal["learn-region", "deep-learn-region", "expand-control", "run-workflow", "supplement-descriptions"],
     app_id: str, vault: str = "", region_id: str = "", control_id: str = "",
     workflow_id: str = "", window_handle: int = 0, parameters: dict | None = None,
     max_controls: int = 3000,
+    learning_options: dict | None = None,
 ) -> str:
     """Start one cancellable GUI-backend task and immediately return its task_id.
 
-    learn-region requires a saved, confirmed manual region_id; it follows the saved
-    entry steps and stores local-visual controls under that same app/page/region.
+    learn-region scans the already visible confirmed region without executing entry
+    steps. Open the intended region state before starting basic learning.
+    deep-learn-region explores interaction branches and archives regions, controls,
+    shared workflows and a progress report. learning_options accepts inputs (object),
+    instructions (text), max_actions (1..2000), max_depth (1..100), resume (legacy bool),
+    mode (resume/improve/update/new), session_id (optional existing regional session),
+    control_ids/workflow_ids (improvement scope), retry_branches (explicitly confirmed
+    safe-to-retry uncertain branch IDs, never infer this confirmation),
+    allow_commit (bool, default false), reset_workflow_id (explicit recovery workflow).
+    Deep learning requires the configured API. Partial coverage is reported explicitly.
     expand-control clicks a known control_id through its entry path and learns the
     resulting menu/dialog into dynamic child regions. Both can send UI input.
     run-workflow executes an already saved workflow_id with optional parameter
@@ -1341,7 +1350,8 @@ def start_ui_library_task(
                 raise ValueError(blocked)
         return json.dumps(library_tools.jobs.start(operation, app_id, vault=vault,
             region_id=region_id, control_id=control_id, workflow_id=workflow_id,
-            window_handle=window_handle, parameters=parameters, max_controls=max_controls), ensure_ascii=False)
+            window_handle=window_handle, parameters=parameters, max_controls=max_controls,
+            learning_options=learning_options), ensure_ascii=False)
     except Exception as error:
         return json.dumps(dict(ok=False, error=str(error)), ensure_ascii=False)
 
@@ -1385,7 +1395,9 @@ def save_ui_workflow(app_id: str, workflow: dict, vault: str = "") -> str:
     Each step has a unique id, action, target={control_id,label}, optional text,
     description, checks, timeout_seconds (0..60). Use text for set-text/press-key/
     hotkey values; hotkey text joins keys with '+', e.g. 'ctrl+s'. Actions: click,
-    double-click, right-click, set-text, press-key, hotkey, inspect, manual.
+    double-click, right-click, hover, set-text, press-key, hotkey, inspect, manual, call.
+    A call step uses workflow_id and optional parameters bindings instead of target
+    and checks; shared definitions are resolved at run time, with cycles rejected.
     Each check has a unique id, kind, target and optional expected. Kinds: exists,
     not-visible, text, window-title, read-only, menu-items, node-exists, node-absent,
     selected, manual. Use ${parameter} in text/expected and declare defaults.

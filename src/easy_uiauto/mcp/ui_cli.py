@@ -86,7 +86,7 @@ def _resolve_verified_control(
     record: dict,
     allow_vision_fallback: bool = False,
 ):
-    window = _find_window(record["app_name"])
+    window = _find_window(record)
     window_rect = _window_rect(window, _rect(window))
     current_screen = _screenshot_window(window_rect)
     current_screen, window_rect = _trim_window_capture(current_screen, window_rect, window)
@@ -691,7 +691,7 @@ def execute_many(
     if len(app_names) != 1:
         raise ValueError("batch commands must belong to one application window")
 
-    window = _find_window(prepared[0]["record"]["app_name"])
+    window = _find_window(prepared[0]["record"])
     window_rect = _window_rect(window, _rect(window))
     current_screen = _screenshot_window(window_rect)
     current_screen, window_rect = _trim_window_capture(current_screen, window_rect, window)

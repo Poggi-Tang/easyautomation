@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import json
 from collections import OrderedDict
 from pathlib import Path
 from uuid import uuid4
@@ -15,8 +16,8 @@ from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QFormLayout, QGraph
 from .. import workflows
 from .icons import icon, set_button_icon, decorate_button_box, decorate_search
 
-ACTION_NAMES = {"click":"点击", "double-click":"双击", "right-click":"右击", "set-text":"输入",
-                "press-key":"按键", "hotkey":"组合键", "inspect":"检查"}
+ACTION_NAMES = {"click":"点击", "double-click":"双击", "right-click":"右击", "hover":"悬停", "set-text":"输入",
+                "press-key":"按键", "hotkey":"组合键", "inspect":"检查", "call":"调用组合动作"}
 CHECK_NAMES = {"exists":"存在", "not-visible":"不可见", "text":"文本等于", "window-title":"窗口标题",
                "read-only":"只读", "menu-items":"菜单包含", "node-exists":"包含树节点",
                "node-absent":"不含树节点", "selected":"已选中"}
@@ -154,12 +155,14 @@ class ControlChooser(QDialog):
 
 class StepEditor(QWidget):
     changed=Signal()
-    def __init__(self, choose_control, parent=None, *, inline=True):
+    def __init__(self, choose_control, parent=None, *, inline=True, choose_workflow=None):
         super().__init__(parent); self.choose_control=choose_control; self.steps=[]; self.loading=False;self.parameters={}
+        self.choose_workflow=choose_workflow;self.invalid_values={}
         layout=QVBoxLayout(self);layout.setContentsMargins(0,0,0,0)
         bar=QHBoxLayout()
         for text,slot in (("添加动作",self.add_action),("添加预期",self.add_check),("上移",lambda:self.move(-1)),("下移",lambda:self.move(1)),("移除",self.remove)):
             bar.addWidget(button(text,slot))
+        if choose_workflow:bar.insertWidget(1,button("调用组合动作",self.add_call))
         bar.addStretch();layout.addLayout(bar)
         self.tree=QTreeWidget();self.tree.setHeaderLabels(["步骤 / 预期","区域 / 控件","值"])
         self.tree.setColumnWidth(0,190);self.tree.setColumnWidth(1,240)
@@ -170,6 +173,8 @@ class StepEditor(QWidget):
         self.value_source=QComboBox();self.value_source.addItem("固定值","")
         form.addRow("动作 / 预期",self.kind);form.addRow("目标",self.target);form.addRow("标题",self.description)
         form.addRow("值来源",self.value_source);form.addRow("输入 / 预期",self.value)
+        self.validation_error=QLabel();self.validation_error.setWordWrap(True)
+        form.addRow(self.validation_error)
         self.value_source.currentIndexChanged.connect(self.source_changed)
         details_layout.addLayout(form)
         row=QHBoxLayout();row.addWidget(button("选择目标",self.change_target));row.addStretch();details_layout.addLayout(row);details_layout.addStretch()
@@ -178,7 +183,11 @@ class StepEditor(QWidget):
         self.kind.currentIndexChanged.connect(self.edit); self.value.textEdited.connect(self.edit);self.description.textEdited.connect(self.edit)
 
     def load(self, steps):
-        self.steps=deepcopy(steps);self.render()
+        self.invalid_values.clear();self.steps=deepcopy(steps);self.render()
+
+    def validated_steps(self):
+        if self.invalid_values:raise ValueError("调用组合动作的参数必须是 JSON 对象，请修正输入")
+        return deepcopy(self.steps)
 
     def current(self):
         item=self.tree.currentItem()
@@ -194,6 +203,8 @@ class StepEditor(QWidget):
         self.loading=True;self.tree.clear();selected=None
         for index,step in enumerate(self.steps,1):
             item=QTreeWidgetItem([f"{index}. {ACTION_NAMES.get(step['action'],step['action'])} · {step.get('description','')}",step.get("target",{}).get("label",""),str(step.get("text",""))])
+            if step["action"]=="call":
+                item.setText(1,step.get("workflow_id",""));item.setText(2,json.dumps(step.get("parameters",{}),ensure_ascii=False))
             item.setData(0,Qt.ItemDataRole.UserRole,(step["id"],False));self.tree.addTopLevelItem(item)
             item.setIcon(0,icon("control"))
             if step["id"]==identifier:selected=item
@@ -211,19 +222,26 @@ class StepEditor(QWidget):
     def select(self,*_):
         if self.loading:return
         self.loading=True;item,is_check=self.current(); self.kind.clear()
-        for key,label in (CHECK_NAMES if is_check else ACTION_NAMES).items():self.kind.addItem(label,key)
+        for key,label in (CHECK_NAMES if is_check else ACTION_NAMES).items():
+            if key!="call" or self.choose_workflow:self.kind.addItem(label,key)
         self.kind.setEnabled(bool(item));self.value.setEnabled(bool(item));self.description.setEnabled(bool(item))
         if item:
             self.kind.setCurrentIndex(max(0,self.kind.findData(item.get("kind" if is_check else "action"))))
             self.target.setText(item.get("target",{}).get("label","未选择")); self.description.setText(item.get("description",""))
             value=item.get("expected" if is_check else "text","")
             self.value.setText(", ".join(value) if isinstance(value,list) else "true" if value is True else "false" if value is False else str(value))
+            if item.get("action")=="call":
+                self.target.setText(item.get("workflow_id",""));self.value.setText(json.dumps(item.get("parameters",{}),ensure_ascii=False))
+                if item["id"] in self.invalid_values:self.value.setText(self.invalid_values[item["id"]])
         else:self.value.clear();self.description.clear();self.target.setText("请选择步骤")
         self.value_source.clear();self.value_source.addItem("固定值","")
         for name in self.parameters:self.value_source.addItem("参数："+name,name)
         value=self.value.text();parameter=value[2:-1] if value.startswith("${") and value.endswith("}") else ""
         self.value_source.setCurrentIndex(max(0,self.value_source.findData(parameter)))
-        self.value.setReadOnly(bool(self.value_source.currentData()));self.value_source.setEnabled(bool(item))
+        is_call=bool(item and item.get("action")=="call")
+        self.value.setReadOnly(bool(self.value_source.currentData()) and not is_call)
+        self.value_source.setEnabled(bool(item) and not is_call)
+        self.validation_error.setText("请输入有效的 JSON 对象，例如 {}" if item and item["id"] in self.invalid_values else "")
         self.loading=False
 
     def set_parameters(self,parameters):
@@ -240,12 +258,39 @@ class StepEditor(QWidget):
         if self.loading:return
         item,is_check=self.current()
         if not item:return
-        item["kind" if is_check else "action"]=self.kind.currentData()
+        previous=item.get("kind" if is_check else "action")
+        action=self.kind.currentData()
+        if not is_check and action!=previous and (action=="call" or previous=="call"):
+            if action=="call":
+                record=self.choose_workflow() if self.choose_workflow else None
+                if not record:self.select();return
+                item.update(workflow_id=record["id"],parameters={},checks=[],description=record["keyword"])
+                item.pop("target",None);item.pop("text",None)
+            else:
+                record=self.choose()
+                if not record:self.select();return
+                item.update(target=dict(control_id=record["id"],label=record.get("semantic_name") or record.get("name","")),text="")
+                item.pop("workflow_id",None);item.pop("parameters",None)
+            item["action"]=action;self.invalid_values.pop(item["id"],None)
+            self.render(item["id"]);self.changed.emit();return
+        item["kind" if is_check else "action"]=action
         item["description"]=self.description.text()
-        value=self.value.text()
-        if is_check and item["kind"]=="read-only":value=value.lower() in {"true","是","只读"}
-        if is_check and item["kind"]=="menu-items":value=[v.strip() for v in value.split(",") if v.strip()]
-        item["expected" if is_check else "text"]=value
+        if item.get("action")=="call":
+            try:
+                parameters=json.loads(self.value.text() or "{}")
+                if not isinstance(parameters,dict):raise ValueError("parameters must be an object")
+            except ValueError:
+                self.invalid_values[item["id"]]=self.value.text()
+                self.validation_error.setText("请输入有效的 JSON 对象，例如 {}")
+                self.changed.emit();return
+            self.invalid_values.pop(item["id"],None);self.validation_error.clear()
+            item["parameters"]=parameters;item.pop("target",None);item.pop("text",None);item["checks"]=[]
+            value=self.value.text()
+        else:
+            value=self.value.text()
+            if is_check and item["kind"]=="read-only":value=value.lower() in {"true","是","只读"}
+            if is_check and item["kind"]=="menu-items":value=[v.strip() for v in value.split(",") if v.strip()]
+            item["expected" if is_check else "text"]=value
         row=self.tree.currentItem();row.setText(2,str(value))
         row.setText(0,("预期："+CHECK_NAMES.get(item["kind"],item["kind"])) if is_check else
                     f"{self.steps.index(item)+1}. {ACTION_NAMES.get(item['action'],item['action'])} · {item.get('description','')}")
@@ -258,10 +303,17 @@ class StepEditor(QWidget):
         if not record:return
         step=workflows.click_step(record);self.steps.append(step);self.render(step["id"]);self.changed.emit()
 
+    def add_call(self):
+        record=self.choose_workflow() if self.choose_workflow else None
+        if not record:return
+        step=dict(id="call-"+uuid4().hex[:10],action="call",workflow_id=record["id"],description=record["keyword"],parameters={})
+        self.steps.append(step);self.render(step["id"]);self.changed.emit()
+
     def add_check(self):
         item,is_check=self.current()
         if not item:return
         parent=next((s for s in self.steps if s is item or item in s.get("checks",[])),None)
+        if parent.get("action")=="call":return
         record=self.choose()
         if not record:return
         check=dict(id="check-"+uuid4().hex[:10],kind="exists",target=dict(control_id=record["id"],label=record.get("semantic_name") or record.get("name","")))
@@ -270,6 +322,10 @@ class StepEditor(QWidget):
     def change_target(self):
         item,_=self.current()
         if not item:return
+        if item.get("action")=="call":
+            record=self.choose_workflow() if self.choose_workflow else None
+            if record:item["workflow_id"]=record["id"];item["description"]=record["keyword"];self.render(item["id"]);self.changed.emit()
+            return
         record=self.choose()
         if record:item["target"]=dict(control_id=record["id"],label=record.get("semantic_name") or record.get("name",""));self.render(item["id"]);self.changed.emit()
 
@@ -285,4 +341,4 @@ class StepEditor(QWidget):
 
     def remove(self):
         item,_=self.current()
-        if item:self.sequence(item).remove(item);self.render();self.changed.emit()
+        if item:self.invalid_values.pop(item["id"],None);self.sequence(item).remove(item);self.render();self.changed.emit()
