@@ -4,6 +4,9 @@ Release notes and upgrade instructions.
 
 ## [Unreleased]
 
+- 修复通过 `pip --user` 安装或从源码启动时，YOLO 设备检查因隔离模式无法读取现有包路径而误报运行环境缺失的问题。独立 GUI 包继续使用隔离的推理环境。
+- YOLO 设备检查失败时显示子进程退出码和具体导入 / DLL 错误，方便定位缺失依赖。
+
 ## [1.1.1] - 2026-11-15
 
 ### Qt 菜单学习修复

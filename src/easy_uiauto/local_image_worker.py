@@ -30,15 +30,26 @@ def inspect_yolo_device():
     python = Path(sys._MEIPASS) / "image-runtime/python.exe" if frozen else Path(sys.executable)
     environment = os.environ.copy()
     environment[CONFIG_ENV] = str(configuration_path())
+    # A pip --user install and source workers need their existing package paths.
+    # Keep frozen/explicitly isolated runtimes isolated, but do not introduce -I
+    # into a normal Python installation. -P still excludes the working directory.
+    flags = ["-I"] if frozen or sys.flags.isolated else ["-P"]
+    if not frozen and not sys.flags.isolated:
+        if sys.flags.no_user_site:
+            flags.append("-s")
+        if sys.flags.ignore_environment:
+            flags.append("-E")
     if frozen:
         import ctypes
         ctypes.windll.kernel32.SetDllDirectoryW(None)
     try:
-        result = subprocess.run([str(python), "-I", "-X", "utf8", "-m", "easy_uiauto.inference_device"],
+        result = subprocess.run([str(python), *flags, "-X", "utf8", "-m", "easy_uiauto.inference_device"],
             env=environment, stdin=subprocess.DEVNULL, capture_output=True, text=True,
             encoding="utf-8", timeout=30, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         if result.returncode:
-            raise RuntimeError("无法检测 YOLO 推理设备；请检查标注运行环境")
+            lines = (result.stderr or result.stdout or "").strip().splitlines()
+            detail = lines[-1][:1000] if lines else "子进程未返回错误详情"
+            raise RuntimeError(f"无法检测 YOLO 推理设备（退出码 {result.returncode}）：{detail}")
         return json.loads(result.stdout)
     finally:
         if frozen:
