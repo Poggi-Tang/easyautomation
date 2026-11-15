@@ -553,7 +553,7 @@ with tempfile.TemporaryDirectory() as scratch:
         example = source.convert("RGB")
     ocr = image_detection.run_ocr(example, threads=1, recover_small_text=False)
     assert "BUS_2" in ocr["texts"], ocr["texts"]
-    detection = image_detection.run_yolo(example, weights, threads=2)
+    detection = image_detection.run_yolo(example, weights, threads=2, device="cpu")
     assert detection["boxes"], "YOLO returned no graphics for the installation example"
 gui = pathlib.Path(easy_uiauto.__file__).parent / "bin/easy-uiauto-config.exe"
 assert gui.is_file() and gui.read_bytes()[:2] == b"MZ", "Configuration EXE missing"

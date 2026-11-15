@@ -1,5 +1,7 @@
 param(
     [string]$Target = "",
+    [switch]$Gpu,
+    [ValidatePattern('^cu[0-9]{3}$')][string]$CudaIndex = "cu128",
     [switch]$NoLaunch,
     [switch]$NoShortcut
 )
@@ -38,6 +40,7 @@ if (Test-Path -LiteralPath (Join-Path $guiRoot "gui-distribution.json")) {
     $launchArguments = ""
     $workingDirectory = $guiRoot
     $shortcutIcon = $guiExe
+    $inferencePython = Join-Path $guiRoot "_internal\image-runtime\python.exe"
 } else {
     if (-not (Test-Path -LiteralPath (Join-Path $guiRoot "pyproject.toml"))) {
         throw "Neither a complete GUI ZIP nor a source checkout was found."
@@ -72,6 +75,13 @@ if (Test-Path -LiteralPath (Join-Path $guiRoot "gui-distribution.json")) {
     $launchArguments = "-I -X utf8 -m easy_uiauto.library_launcher"
     $workingDirectory = $Target
     $shortcutIcon = Join-Path $Target "python\Lib\site-packages\easy_uiauto\resources\easy-uiauto.ico"
+    $inferencePython = Join-Path $Target "python\python.exe"
+}
+
+if ($Gpu) {
+    Write-Host "Preparing optional NVIDIA GPU inference. Internet access and a compatible NVIDIA driver are required."
+    & $inferencePython -I -X utf8 (Join-Path $PSScriptRoot "install_gpu.py") --cuda-index $CudaIndex
+    if ($LASTEXITCODE -ne 0) { throw "GPU setup failed. The previous runtime is unchanged. Check the NVIDIA driver or use CPU mode." }
 }
 
 if (-not $NoShortcut) {

@@ -1,15 +1,11 @@
 import pytest
 pytest.importorskip('PySide6')
 
-from PySide6.QtWidgets import QApplication,QFileDialog
+from PySide6.QtWidgets import QFileDialog
 from easy_uiauto.qt_ui.window import KnowledgeWindow
 from easy_uiauto.mcp import knowledge
 from test_knowledge_library import library
-from test_qt_knowledge_gui import settle
-
-
-@pytest.fixture(scope='module')
-def app():return QApplication.instance() or QApplication([])
+from test_qt_knowledge_gui import app,settle
 
 
 def test_reference_is_listed_under_usage_and_edited_md_is_saved(app,library):

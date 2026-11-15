@@ -39,6 +39,8 @@ setup.bat
 
 可选参数：`setup.bat -Target "D:\easy-uiauto-gui"` 指定源码安装位置，`-NoLaunch` 仅准备环境，`-NoShortcut` 不创建桌面快捷方式。完整 ZIP 直接在解压位置运行，不使用 `-Target`。`knowledge-library.cmd` 也调用此一键入口。
 
+NVIDIA GPU 用户可联网运行 `setup.bat -Gpu` 安装可选 CUDA 环境；在“本地标注模型”中选择“自动 / CPU / NVIDIA GPU”，面板会显示实际设备及回退原因。OCR 仍使用 CPU，Intel / AMD 显卡暂不支持 GPU 推理。安装方法与配置优先级见 [YOLO GPU 使用说明](yolo-gpu.zh-CN.md)。
+
 已有 Python 的开发者也可手动安装当前源码：
 
 ```console

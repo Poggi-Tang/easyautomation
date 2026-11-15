@@ -282,6 +282,7 @@ def test_detector_can_load_non_ascii_windows_paths(monkeypatch, tmp_path):
         return model
 
     monkeypatch.setitem(sys.modules, "torch", SimpleNamespace(
+        __version__="test+cpu", version=SimpleNamespace(cuda=None),
         set_num_threads=lambda _threads: None, jit=SimpleNamespace(load=load)))
     monkeypatch.setattr(image_detection, "_predict_yolo", lambda *_args, **_kwargs: dict(
         boxes=[[1, 2, 20, 30]], scores=[0.9], forward_seconds=0.01, tensor_shape=[1, 3, 1280, 1280]))

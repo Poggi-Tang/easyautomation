@@ -85,6 +85,7 @@ def package_directory(source: Path, output: Path, *, vc_installer: Path | None =
     (target / "prerequisites").mkdir()
     shutil.copy2(ROOT / "setup.bat", target / "setup.bat")
     shutil.copy2(ROOT / "scripts/gui_setup.ps1", target / "scripts/gui_setup.ps1")
+    shutil.copy2(ROOT / "scripts/install_gpu.py", target / "scripts/install_gpu.py")
     shutil.copy2(installer, target / "prerequisites/VC_redist.x64.exe")
     manifest = dict(format=1, version=build["version"], exe_sha256=build["exe_sha256"],
                     vc_redist_sha256=digest, models_included=True)
@@ -98,6 +99,8 @@ def package_directory(source: Path, output: Path, *, vc_installer: Path | None =
         "2. 双击 setup.bat，按 Windows 提示授权；将创建桌面快捷方式并打开 GUI。\n"
         "3. 以后双击桌面的 easy-uiauto GUI，或目录内的 EXE 即可。\n\n"
         "Python、界面依赖、图形检测和文字识别模型已随包附带；本地功能无需联网。\n"
+        "默认附带 CPU 环境；NVIDIA GPU 用户可联网运行 setup.bat -Gpu 安装可选 CUDA 环境，安装成功后重启 GUI。\n"
+        "在“本地标注模型”中选择自动、CPU 或 NVIDIA GPU；OCR 仍使用 CPU。\n"
         "初次使用可直接选择软件窗口、添加区域并学习。知识库默认保存到用户目录下的 easy_uiauto_vault。\n"
         "需要导入参考资料、生成说明时，再到“设置”填写 API。\n"
         "移动整个目录后重新运行 setup.bat 更新快捷方式；不要只复制 EXE。\n"

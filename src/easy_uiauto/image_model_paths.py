@@ -4,6 +4,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import re
 from pathlib import Path
 import sys
 from uuid import uuid4
@@ -11,6 +12,7 @@ from uuid import uuid4
 MODEL_FILES = {"yolo": "model.pt", "det": "PP-OCRv6_det_small.onnx",
                "rec": "PP-OCRv6_rec_small.onnx"}
 CONFIG_ENV = "EASY_UIAUTO_MODEL_PATHS_FILE"
+DEVICE_ENV = "EASY_UIAUTO_YOLO_DEVICE"
 
 
 def configuration_path():
@@ -44,31 +46,69 @@ def _validate_paths(paths):
     return result
 
 
-def load_model_paths():
+def _load_configuration():
     file = configuration_path()
     try:
         data = json.loads(file.read_text(encoding="utf-8"))
     except FileNotFoundError:
-        return {}
+        return {"version": 1, "paths": {}}
     except (OSError, ValueError) as error:
         raise ValueError(f"无法读取模型路径配置：{file}（{error}）") from error
     if not isinstance(data, dict) or data.get("version") != 1:
         raise ValueError(f"模型路径配置格式不正确：{file}")
-    return _validate_paths(data.get("paths"))
+    _validate_paths(data.get("paths"))
+    validate_yolo_device(data.get("yolo_device", "auto"))
+    return data
+
+
+def load_model_paths():
+    return _validate_paths(_load_configuration()["paths"])
+
+
+def validate_yolo_device(value):
+    if not isinstance(value, str):
+        raise ValueError("YOLO device must be auto, cpu, cuda or cuda:N")
+    value = value.strip().lower()
+    if value not in {"auto", "cpu", "cuda"} and not re.fullmatch(r"cuda:[0-9]+", value):
+        raise ValueError("YOLO device must be auto, cpu, cuda or cuda:N")
+    return value
+
+
+def configured_yolo_device():
+    return validate_yolo_device(_load_configuration().get("yolo_device", "auto"))
+
+
+def yolo_device(value=""):
+    """Per-call selection wins over environment, then GUI preferences, then auto."""
+    return validate_yolo_device(value or os.environ.get(DEVICE_ENV) or configured_yolo_device())
+
+
+def save_yolo_device(value):
+    value = validate_yolo_device(value)
+    data = _load_configuration()
+    data["yolo_device"] = value
+    _save_configuration(data)
+    return value
 
 
 def save_model_paths(paths):
     paths = _validate_paths(paths)
+    data = _load_configuration()
+    data["paths"] = paths
+    _save_configuration(data)
+    return paths
+
+
+def _save_configuration(data):
     file = configuration_path()
     file.parent.mkdir(parents=True, exist_ok=True)
     temporary = file.with_name(f"{file.name}.{uuid4().hex}.tmp")
     try:
-        temporary.write_text(json.dumps(dict(version=1, paths=paths), ensure_ascii=False, indent=2),
+        temporary.write_text(json.dumps(data, ensure_ascii=False, indent=2),
                              encoding="utf-8")
         temporary.replace(file)
     finally:
         temporary.unlink(missing_ok=True)
-    return paths
 
 
 def default_yolo_path():

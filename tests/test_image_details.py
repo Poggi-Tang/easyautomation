@@ -50,6 +50,7 @@ def test_detector_loads_weights_once_for_whole_and_detail_passes(monkeypatch):
     calls=[]
     model=SimpleNamespace(eval=lambda:model)
     monkeypatch.setitem(sys.modules,'torch',SimpleNamespace(
+        __version__='test+cpu',version=SimpleNamespace(cuda=None),
         set_num_threads=lambda _n:None,
         jit=SimpleNamespace(load=lambda *a,**kw:loads.append(a) or model)))
     def predict(image,got_model,confidence,**_options):

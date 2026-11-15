@@ -2,7 +2,7 @@
 from pathlib import Path
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import (QDialog, QFileDialog, QGridLayout, QHBoxLayout,
+from PySide6.QtWidgets import (QComboBox, QDialog, QFileDialog, QGridLayout, QHBoxLayout,
                               QLabel, QLineEdit, QVBoxLayout)
 
 from .widgets import button
@@ -23,6 +23,21 @@ class ImageModelsDialog(QDialog):
         hint = QLabel("选择文件后自动保存；输入路径后按回车或移开焦点保存，清空恢复默认位置。")
         hint.setWordWrap(True)
         layout.addWidget(hint)
+        device_row = QHBoxLayout()
+        device_row.addWidget(QLabel("YOLO 推理设备"))
+        self.device_combo = QComboBox()
+        self.device_combo.setAccessibleName("YOLO 推理设备")
+        for label, value in (("自动（优先 NVIDIA GPU）", "auto"), ("CPU", "cpu"), ("NVIDIA GPU（CUDA）", "cuda")):
+            self.device_combo.addItem(label, value)
+        self.device_combo.currentIndexChanged.connect(self.save_device)
+        device_row.addWidget(self.device_combo)
+        self.device_status = QLabel("检查中…")
+        self.device_status.setWordWrap(True)
+        device_row.addWidget(self.device_status, 1)
+        layout.addLayout(device_row)
+        device_hint = QLabel("自动模式在 CUDA 不可用或推理失败时回退 CPU；明确选择 GPU 时会报告错误。OCR 使用 CPU。GPU 环境可通过 setup.bat -Gpu 安装。")
+        device_hint.setWordWrap(True)
+        layout.addWidget(device_hint)
         grid = QGridLayout()
         grid.setColumnStretch(2, 1)
         for column, label in enumerate(("模型", "状态", "文件路径")):
@@ -76,6 +91,21 @@ class ImageModelsDialog(QDialog):
 
     def set_report(self, report):
         self.report = report
+        configured = report.get("configured_device", "auto")
+        self.device_combo.blockSignals(True)
+        if self.device_combo.findData(configured) < 0:
+            self.device_combo.addItem("NVIDIA GPU（" + configured + "）", configured)
+        self.device_combo.setCurrentIndex(self.device_combo.findData(configured))
+        self.device_combo.blockSignals(False)
+        device = report.get("yolo_device", {})
+        detail = "实际设备：" + (device.get("device") or "未就绪")
+        if device.get("gpu_name"):
+            detail += " · " + device["gpu_name"]
+        if device.get("fallback_reason"):
+            detail += "；" + device["fallback_reason"]
+        if report.get("device_environment"):
+            detail += "；环境变量覆盖当前选择：" + report["device_environment"]
+        self.device_status.setText(detail)
         if not self.paths_dirty:
             self.loading_paths = True
             try:
@@ -112,6 +142,12 @@ class ImageModelsDialog(QDialog):
         self.message.setText("按回车或移开焦点自动保存路径。")
         self.update_statuses()
         self.set_busy(self.busy, checking=self.checking, downloading=self.downloading)
+
+    def save_device(self):
+        if not self.owner.save_yolo_device(self.device_combo.currentData()) and self.report:
+            self.device_combo.blockSignals(True)
+            self.device_combo.setCurrentIndex(self.device_combo.findData(self.report.get("configured_device", "auto")))
+            self.device_combo.blockSignals(False)
 
     def choose_file(self, key):
         current = self.path_fields[key].text().strip()
@@ -150,5 +186,5 @@ class ImageModelsDialog(QDialog):
         set_button_icon(self.download_button)
         self.download_button.setAccessibleName(self.download_button.text())
         self.download_button.setEnabled(downloading or (not busy and not checking and not self.paths_dirty and bool(missing)))
-        for widget in [*self.path_fields.values(), *self.browse_buttons]:
+        for widget in [*self.path_fields.values(), *self.browse_buttons, self.device_combo]:
             widget.setEnabled(not busy)

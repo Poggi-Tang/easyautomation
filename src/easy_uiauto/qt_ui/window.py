@@ -374,6 +374,17 @@ class KnowledgeWindow(QMainWindow):
         self.refresh_image_models()
         return True
 
+    def save_yolo_device(self,device):
+        if self.task:return False
+        from ..image_model_paths import save_yolo_device
+        try:save_yolo_device(device)
+        except (OSError,ValueError) as error:
+            if self.model_dialog:self.model_dialog.message.setText("设备未保存："+str(error))
+            return False
+        if self.model_check_job:self.model_check_again=True
+        self.refresh_image_models()
+        return True
+
     def reload(self,key=None,*,message=None,app_ids=None):
         if self.saving:return
         self.load_serial+=1;serial=self.load_serial;self.vault_label.setText("知识库："+self.library.root.name)

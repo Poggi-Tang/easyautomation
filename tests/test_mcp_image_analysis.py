@@ -238,6 +238,19 @@ def test_missing_local_dependencies_never_trigger_a_remote_fallback(monkeypatch)
     assert result["ok"] is False and "easy-uiauto[image]" in result["error"]
 
 
+def test_local_device_forwarded_and_rejected_before_remote_request(monkeypatch):
+    calls = []
+    def local(*args, **options):
+        calls.append(options)
+        return {"ok": True}
+    monkeypatch.setattr(server.image_cli, "analyze_local_image", local)
+    assert json.loads(asyncio.run(server.analyze_ui_image("input.png", device="cuda:1")))["ok"]
+    assert calls[0]["device"] == "cuda:1"
+    monkeypatch.setattr(server, "_vision_api_settings", lambda *_: pytest.fail("Remote request is forbidden"))
+    result = json.loads(asyncio.run(server.analyze_ui_image("input.png", engine="api", device="cpu")))
+    assert not result["ok"] and "device" in result["error"]
+
+
 @pytest.mark.parametrize("options", [{"engine": "unknown"}, {"model": "remote-model"}])
 def test_invalid_engine_or_implicit_remote_options_do_not_upload(monkeypatch, options):
     def forbidden(*_args, **_kwargs):

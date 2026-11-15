@@ -67,7 +67,7 @@ def readiness():
     settings = load_gui_configuration()
     return {**report, "ready": report["ok"], "engine": "local-visual",
             "reference_api_configured": all(settings.get(k) for k in ("api_url", "api_key", "api_model")),
-            "setup_instruction": "" if report["ok"] else "打开 GUI 的标注模型面板，配置模型路径或下载 / 修复模型。"}
+            "setup_instruction": "" if report["ok"] else "打开 GUI 的标注模型面板检查模型文件和推理设备；可下载 / 修复模型，或选择自动 / CPU。NVIDIA GPU 环境使用 setup.bat -Gpu 安装。"}
 
 
 def _window(application, handle):

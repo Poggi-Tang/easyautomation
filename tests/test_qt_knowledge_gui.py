@@ -18,7 +18,12 @@ from test_region_picker import picked
 
 @pytest.fixture(scope="module")
 def app():
-    return QApplication.instance() or QApplication([])
+    # Editor/navigation tests do not need a real PyTorch process at each startup.
+    # Device probing and model readiness have separate focused tests.
+    from easy_uiauto import image_models
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(image_models, "inspect_yolo_device", lambda: dict(ok=True, device="cpu"))
+        yield QApplication.instance() or QApplication([])
 
 
 def test_settings_key_is_masked_and_errors_are_redacted(app, monkeypatch, tmp_path):

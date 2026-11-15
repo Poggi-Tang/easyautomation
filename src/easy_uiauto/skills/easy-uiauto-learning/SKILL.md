@@ -86,6 +86,13 @@ YOLO and OCR share one CPU thread budget in parallel (default 3+1); single-threa
 and model-diagram runs stay sequential. Inspect input_shapes in raw-yolo.json and
 inference_execution; parallel engine timings overlap. --square-inference retains
 the default; --sequential-inference / parallel_inference=false compare scheduling.
+YOLO supports `device="auto"`, `"cpu"`, `"cuda"` or `"cuda:N"` (CLI `--device`).
+An omitted device uses `EASY_UIAUTO_YOLO_DEVICE`, then the GUI's saved choice,
+then auto. Auto uses NVIDIA CUDA when available and retries on CPU after a CUDA
+inference failure; explicit CUDA reports failure. OCR stays on CPU. Inspect
+`device`, `requested_device` and `fallback_reason` in `raw-yolo.json`, and
+`yolo_device` in `inference_execution`, before claiming GPU execution. CPU-only
+packages need an optional CUDA runtime; changing the selection does not install it.
 Blank predictions require their own foreground or a complete matching closed
 control border within the 2px context. Neighboring lines alone cannot validate
 them. Review pixel_evidence inside/context counts and closed-border support.
@@ -96,8 +103,8 @@ For standalone local YOLO + RapidOCR exports from CMD, use the checkout's
 `easy_uiauto_image "input-image" "output-parent"`. This creates an independent run
 folder with `text.png`, `controls.png`, `combined.png`, coordinates, raw detections,
 logs and `index.html`. Default profile is `ui`; use `--profile block-diagram`
-for both control and electrical model diagrams. Inference is
-local CPU with cached models; it does not use the configured remote vision API.
+for both control and electrical model diagrams. Inference uses cached models
+locally (YOLO on CPU or NVIDIA GPU, OCR on CPU); it does not use the configured remote vision API.
 The CMD pipeline automatically checks missed small text inside closed frames,
 using cached detection proposals and agreeing original/enlarged recognition.
 Review `ocr-recovery.json` and source `rapidocr-small-text-recovery`; recovered

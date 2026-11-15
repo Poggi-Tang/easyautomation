@@ -84,11 +84,13 @@ def analyze_local_image(image_path, output_dir="", *, weights=None, profile="ui"
                         threads=4, confidence=image_detection.DEFAULT_CONFIDENCE, offline=False, ocr_runtime="",
                         small_text_recovery=True, progress=print, auto_crop=True,
                         max_elements=None, box_padding=1, rectangle_snap=True, detail_recovery=True,
-                        rectangular_inference=False, parallel_inference=True):
+                        rectangular_inference=False, parallel_inference=True, device=""):
     """Save a self-contained run folder, preserving previous runs and input pixels."""
     from .mcp import diagram_geometry, image_analysis
 
     started = time.perf_counter()
+    from .image_model_paths import yolo_device
+    device = yolo_device(device)
     if not 1 <= threads <= 64:
         raise ValueError("threads must be between 1 and 64")
     if not math.isfinite(confidence) or not 0 < confidence < 1:
@@ -122,13 +124,13 @@ def analyze_local_image(image_path, output_dir="", *, weights=None, profile="ui"
         model = image_detection.ensure_weights(
             Path(weights) if weights else image_detection.default_weights(),
             offline=offline, progress=report)
-        report("[2/6] YOLO + OCR on CPU")
+        report(f"[2/6] YOLO device: {device}; OCR: CPU")
         yolo, ocr, execution = image_detection.run_detectors(
             image, model, threads=threads, confidence=confidence, runtime_dir=ocr_runtime,
             recover_details=detail_recovery and profile=='ui',
             recover_small_text=small_text_recovery,
             rectangular=rectangular_inference and profile=='ui',
-            parallel=parallel_inference and profile=='ui', progress=report)
+            parallel=parallel_inference and profile=='ui', progress=report, device=device)
         _write_json(directory / "raw-yolo.json", yolo)
         detail_report=yolo.get('detail_recovery',dict(enabled=False,reason='No detail pass reported'))
         _write_json(directory / 'detail-recovery.json',detail_report)
@@ -244,6 +246,7 @@ def build_parser():
     parser.add_argument("--ocr-runtime", default="",
                         help="Optional isolated RapidOCR package folder")
     parser.add_argument("--threads", type=int, default=4, help="CPU threads (default: 4)")
+    parser.add_argument("--device", default="", help="YOLO: auto, cpu, cuda or cuda:N; default: shared GUI/environment setting, otherwise auto")
     parser.add_argument("--confidence", type=float, default=image_detection.DEFAULT_CONFIDENCE,
                         help="YOLO threshold (default: 0.1)")
     parser.add_argument("--offline", action="store_true", help="Require cached models; no download")
@@ -275,7 +278,7 @@ def main(argv=None):
     try:
         result = analyze_local_image(
             args.image_path, args.output_dir, weights=args.weights, profile=args.profile,
-            threads=args.threads, confidence=args.confidence, offline=args.offline,
+            threads=args.threads, confidence=args.confidence, offline=args.offline, device=args.device,
             ocr_runtime=args.ocr_runtime, small_text_recovery=not args.no_small_text_recovery,
             auto_crop=not args.no_auto_crop,
             rectangle_snap=not args.no_rectangle_snap,

@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import importlib.util
+import os
+import subprocess
 from pathlib import Path
 import sys
 import time
@@ -10,6 +12,8 @@ from uuid import uuid4
 
 from .image_detection import MODEL_SHA256, MODEL_URL, default_weights, file_sha256
 from .image_model_paths import load_model_paths, ocr_model_paths, rapidocr_directory, save_model_paths
+from .image_model_paths import configured_yolo_device, DEVICE_ENV
+from .local_image_worker import inspect_yolo_device
 
 OCR_MODELS = (
     ("det", "OCR 文字检测", "PP-OCRv6_det_small.onnx",
@@ -61,13 +65,25 @@ def inspect_models(*, progress=lambda _message: None):
             state, detail = "unreadable", "无法读取：" + str(error)
         models.append({**spec, "state": state, "detail": detail})
     issues = runtime_issues()
+    device_report = {}
+    if not issues:
+        progress("正在检查 YOLO 推理设备")
+        try:
+            device_report = inspect_yolo_device()
+            if not device_report["ok"]:
+                issues.append(device_report["fallback_reason"])
+        except (OSError, ValueError, RuntimeError, TimeoutError) as error:
+            issues.append("YOLO 设备检查失败：" + str(error))
+        except subprocess.TimeoutExpired:
+            issues.append("YOLO 设备检查超时，请重新检查")
     ready = sum(model["state"] == "ready" for model in models)
     message = (f"标注模型已就绪（{ready}/{len(models)}）" if ready == len(models)
                else f"标注模型待补齐（{ready}/{len(models)} 已就绪）")
     if issues:
         message += "；运行环境不完整"
     return dict(ok=ready == len(models) and not issues, models=models,
-                runtime_issues=issues, message=message)
+                runtime_issues=issues, message=message, yolo_device=device_report,
+                configured_device=configured_yolo_device(), device_environment=os.environ.get(DEVICE_ENV, ""))
 
 
 def download_model(spec, *, progress):

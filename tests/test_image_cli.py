@@ -161,6 +161,33 @@ def test_cli_can_keep_the_entire_input():
     assert options.no_auto_crop is True
 
 
+@pytest.mark.parametrize("explicit,expected", [(False, "cuda:1"), (True, "cpu")])
+def test_cli_passes_saved_or_explicit_device_to_yolo_only(local_engines, tmp_path, monkeypatch, explicit, expected):
+    from easy_uiauto import image_model_paths
+    monkeypatch.setenv(image_model_paths.CONFIG_ENV, str(tmp_path / "models.json"))
+    monkeypatch.delenv(image_model_paths.DEVICE_ENV, raising=False)
+    image_model_paths.save_yolo_device("cuda:1")
+    calls = []
+    def yolo(*args, **options):
+        calls.append(options)
+        return {**local_engines[0], "device": expected, "requested_device": expected}
+    def ocr(*args, **options):
+        assert "device" not in options
+        return local_engines[1]
+    monkeypatch.setattr(image_detection, "run_yolo", yolo)
+    monkeypatch.setattr(image_detection, "run_ocr", ocr)
+    source = tmp_path / "input.png"
+    Image.new("RGB", (240, 160), "white").save(source)
+    args = [str(source), str(tmp_path / "results"), "--offline"]
+    if explicit:
+        args += ["--device", "cpu"]
+    assert image_cli.main(args) == 0
+    assert calls[0]["device"] == expected
+    saved = json.loads(next((tmp_path / "results").glob("*/summary.json")).read_text(encoding="utf-8"))
+    assert saved["inference_execution"]["yolo_device"] == expected
+    assert saved["inference_execution"]["ocr_device"] == "cpu"
+
+
 def test_cli_defaults_and_opt_out_for_rectangle_snapping():
     defaults = image_cli.build_parser().parse_args(["in.png", "out"])
     assert defaults.confidence == 0.1 and defaults.no_rectangle_snap is False

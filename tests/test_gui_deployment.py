@@ -50,7 +50,7 @@ def test_package_contains_complete_launch_path_and_no_old_exes(tmp_path, monkeyp
     with zipfile.ZipFile(archive) as zipped:
         names = zipped.namelist()
         prefix = "easy-uiauto-gui-win-x64/"
-        for name in ("setup.bat", "scripts/gui_setup.ps1", "gui-distribution.json", "使用说明.txt",
+        for name in ("setup.bat", "scripts/gui_setup.ps1", "scripts/install_gpu.py", "gui-distribution.json", "使用说明.txt",
                      "prerequisites/VC_redist.x64.exe", "_internal/image-runtime/python.exe"):
             assert prefix + name in names
         assert not any("old-debug" in name for name in names)
@@ -132,3 +132,29 @@ function Start-Process { throw "No processes should be launched during this chec
     result = subprocess.run(command, capture_output=True, timeout=30)
     assert result.returncode != 0
     assert b"checksum mismatch" in result.stderr
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows PowerShell setup")
+@pytest.mark.parametrize("failure", [False, True])
+def test_gpu_setup_uses_portable_inference_python_and_propagates_failure(tmp_path, monkeypatch, failure):
+    source = fake_distribution(tmp_path, monkeypatch)
+    (source / "scripts").mkdir()
+    shutil.copy2(ROOT / "scripts/gui_setup.ps1", source / "scripts/gui_setup.ps1")
+    (source / "gui-distribution.json").write_text(json.dumps(dict(format=1,
+        exe_sha256=packager.deployment.sha256(source / "easy-uiauto-library.exe"))))
+    harness = source / "check-gpu.ps1"
+    harness.write_text('''$ErrorActionPreference = "Stop"
+function Get-ItemProperty { [pscustomobject]@{ Installed = 1 } }
+function Start-Process { throw "No desktop processes should be launched" }
+$gpuTestCommand = Join-Path $PSScriptRoot "_internal/image-runtime/python.exe"
+Set-Item -LiteralPath ("Function:\\" + $gpuTestCommand) -Value {
+    $args | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $PSScriptRoot "gpu-args.json") -Encoding UTF8
+    $global:LASTEXITCODE = EXIT_CODE
+}
+& (Join-Path $PSScriptRoot "scripts/gui_setup.ps1") -Gpu -CudaIndex cu130 -NoLaunch -NoShortcut
+'''.replace("EXIT_CODE", "1" if failure else "0"), encoding="utf-8-sig")
+    result = subprocess.run(["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(harness)],
+                            capture_output=True, timeout=30)
+    assert (result.returncode != 0) == failure, result.stderr.decode(errors="replace")
+    args = json.loads((source / "gpu-args.json").read_text(encoding="utf-8-sig"))
+    assert args == ["-I", "-X", "utf8", str(source / "scripts/install_gpu.py"), "--cuda-index", "cu130"]

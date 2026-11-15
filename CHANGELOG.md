@@ -4,6 +4,8 @@ Release notes and upgrade instructions.
 
 ## [Unreleased]
 
+- YOLO 支持自动选择 CPU / NVIDIA CUDA，以及指定 GPU 编号；GUI、MCP、CLI 和 Python 共用设备配置。自动模式在 CUDA 不可用或推理失败时回退 CPU 并记录原因，明确指定 GPU 时返回错误。OCR 仍使用 CPU。
+- 新增 `setup.bat -Gpu` 可选安装：独立保存 CUDA 依赖，通过真实 YOLO 推理后才启用，失败保留原环境；支持恢复 CPU 和移动完整 GUI 目录。
 - 将中英文文档与配置提示中的模型名称统一为“多模态模型 / multimodal model”。
 
 ## [1.1.0] - 2026-11-15

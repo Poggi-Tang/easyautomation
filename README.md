@@ -139,7 +139,7 @@ images, coordinates, recognition evidence and a local HTML viewer.
   commands instead of rediscovering coordinates for every task.
 - **Control overlays**: number every learned or executable control in one
   click-through overlay, save annotated page images, and preview operation targets.
-- **Local image annotation**: default to CPU-based YOLO + RapidOCR without a vision API;
+- **Local image annotation**: YOLO selects CPU or NVIDIA GPU automatically; RapidOCR uses CPU, without a vision API;
   export blue `G` graphics and orange `T` text with one-pixel boxes, adjacent IDs,
   local geometry correction and automatic small-text recovery.
 - **Effect learning**: compare before/after screenshots, inspect changed UIA
@@ -245,8 +245,8 @@ easy_uiauto_image "C:\images\input.bmp" "C:\images\results"
 
 Each run creates a result subdirectory containing `text.png`, `controls.png`,
 `combined.png`, `elements.json`, `elements.csv`, diagnostics and `index.html`.
-Open `index.html` after completion to view the results. Models run on the local
-CPU; the YOLO weights are downloaded and verified on first use. The default profile
+Open `index.html` after completion to view the results. Models run locally, with
+CPU or NVIDIA GPU for YOLO; weights are downloaded and verified on first use. The default profile
 is `ui` for ordinary software screenshots; use `--profile block-diagram` for
 control and electrical model diagrams. See
 [local image annotation from CMD](#local-image-annotation-from-cmd) for details.
@@ -865,7 +865,11 @@ easy_uiauto_image "C:\images\input.bmp" "C:\images\results"
 The official OmniParser YOLOv9-E model (~281 MB) is downloaded once, SHA256-verified
 and cached. RapidOCR includes the PP-OCRv6 ONNX models. Existing local experiment
 caches are reused when available. `--offline` requires cached models and prevents
-YOLO downloads. Inference runs on the local CPU without a vision API or API key.
+YOLO downloads. Inference runs locally without a vision API or API key. Select YOLO's
+device with `--device auto|cpu|cuda|cuda:N`; omitted values use the GUI/environment
+setting, otherwise auto. OCR stays on CPU. Default bundles include CPU packages;
+NVIDIA users can install the optional runtime with `setup.bat -Gpu`.
+See [YOLO GPU setup](docs/yolo-gpu.md).
 The CMD launcher uses `python` from PATH; set `EASY_UIAUTO_IMAGE_PYTHON` to select
 another interpreter. Use `annotate-image.cmd --help` for options. Exit status is 0
 on success and 2 on failure; failures after processing begins are recorded in that

@@ -140,7 +140,7 @@ def _yolo_input_size(image_size, *, rectangular=False, content_bottom=None):
     return resized, (math.ceil(resized[0] / 32) * 32, math.ceil(used_height / 32) * 32)
 
 
-def _predict_yolo(image, model, confidence, *, rectangular=False, content_bottom=None):
+def _predict_yolo(image, model, confidence, *, rectangular=False, content_bottom=None, device="cpu"):
     import numpy as np
     import torch
     from PIL import Image
@@ -151,17 +151,21 @@ def _predict_yolo(image, model, confidence, *, rectangular=False, content_bottom
                                         content_bottom=content_bottom)
     canvas = Image.new("RGB", canvas_size, (114, 114, 114))
     canvas.paste(image.resize(size, Image.Resampling.BILINEAR), (0, 0))
-    tensor = torch.from_numpy(np.array(canvas)).permute(2, 0, 1).float()[None] / 255
+    tensor = (torch.from_numpy(np.array(canvas)).permute(2, 0, 1).float()[None] / 255).to(device)
+    if device.startswith("cuda"):
+        torch.cuda.synchronize(device)
     forward_start = time.perf_counter()
     with torch.inference_mode():
         outputs = model(tensor)
+    if device.startswith("cuda"):
+        torch.cuda.synchronize(device)
     forward_seconds = time.perf_counter() - forward_start
     boxes, scores = [], []
     for i, stride in enumerate((8, 16, 32)):
         classes = outputs[2 * i].sigmoid()[0, 0]
         left, top, right, bottom = outputs[2 * i + 1][0]
-        gy, gx = torch.meshgrid(torch.arange(classes.shape[0], dtype=torch.float32),
-                               torch.arange(classes.shape[1], dtype=torch.float32), indexing="ij")
+        gy, gx = torch.meshgrid(torch.arange(classes.shape[0], dtype=torch.float32, device=classes.device),
+                               torch.arange(classes.shape[1], dtype=torch.float32, device=classes.device), indexing="ij")
         cx, cy = gx + 0.5, gy + 0.5
         decoded = torch.stack(((cx - left) * stride, (cy - top) * stride,
                                (cx + right) * stride, (cy + bottom) * stride), -1)
@@ -169,7 +173,7 @@ def _predict_yolo(image, model, confidence, *, rectangular=False, content_bottom
         scores.append(classes.reshape(-1))
     boxes, scores = torch.cat(boxes), torch.cat(scores)
     selected = scores > confidence
-    boxes, scores = boxes[selected].numpy(), scores[selected].numpy()
+    boxes, scores = boxes[selected].detach().cpu().numpy(), scores[selected].detach().cpu().numpy()
     keep = nms(boxes, scores)
     boxes, scores = boxes[keep], scores[keep]
     boxes[:, 0::2] /= size[0] / image.width
@@ -184,7 +188,44 @@ def _predict_yolo(image, model, confidence, *, rectangular=False, content_bottom
 
 
 def run_yolo(image, weights, *, threads=4, confidence=DEFAULT_CONFIDENCE,
-             recover_details=False, progress=None, rectangular=False):
+             recover_details=False, progress=None, rectangular=False, device=""):
+    """Select CUDA when available; only auto mode retries GPU failures on CPU."""
+    from .inference_device import require_device
+
+    selection = require_device(device)
+    options = dict(threads=threads, confidence=confidence, recover_details=recover_details,
+                   progress=progress, rectangular=rectangular)
+    if progress:
+        progress(f"YOLO: {selection['device']}" +
+                 (f" ({selection['gpu_name']})" if selection['gpu_name'] else "") +
+                 ("；" + selection['fallback_reason'] if selection['fallback_reason'] else ""))
+    try:
+        result = _run_yolo_on_device(image, weights, device=selection['device'], **options)
+    except RuntimeError as error:
+        if selection['requested'] != 'auto' or not selection['device'].startswith('cuda'):
+            raise
+        # Leaving the failed call releases model/tensor references before retrying.
+        detail = " ".join(str(error).split())[:240] or type(error).__name__
+        selection['fallback_reason'] = f"CUDA 推理失败（{detail}），已回退 CPU"
+        if progress:
+            progress(selection['fallback_reason'])
+        result = None
+    if result is None:
+        import torch
+        import gc
+        gc.collect()
+        try:
+            torch.cuda.empty_cache()
+        except RuntimeError:
+            pass  # A failed driver must not prevent the CPU retry.
+        result = _run_yolo_on_device(image, weights, device="cpu", **options)
+    result.update(requested_device=selection['requested'], gpu_name=selection['gpu_name'],
+                  cuda_version=selection['cuda_version'], fallback_reason=selection['fallback_reason'])
+    return result
+
+
+def _run_yolo_on_device(image, weights, *, threads, confidence, recover_details,
+                        progress, rectangular, device):
     """Keep the whole-image pass and optionally inspect native-scale UI patches."""
     import torch
 
@@ -194,11 +235,11 @@ def run_yolo(image, weights, *, threads=4, confidence=DEFAULT_CONFIDENCE,
     if os.name == "nt" and not str(weight_path).isascii():
         # Native fopen in PyTorch can misinterpret non-ASCII Windows paths.
         with weight_path.open("rb") as stream:
-            model = torch.jit.load(stream, map_location="cpu").eval()
+            model = torch.jit.load(stream, map_location=device).eval()
     else:
-        model = torch.jit.load(str(weight_path), map_location="cpu").eval()
+        model = torch.jit.load(str(weight_path), map_location=device).eval()
     loaded=time.perf_counter()
-    whole=_predict_yolo(image,model,confidence,rectangular=rectangular)
+    whole=_predict_yolo(image,model,confidence,rectangular=rectangular,device=device)
     boxes,scores=whole['boxes'],whole['scores']
     forward=whole['forward_seconds']
     detail=dict(enabled=False,reason='Native-scale UI detail recovery disabled',added_count=0)
@@ -217,7 +258,7 @@ def run_yolo(image, weights, *, threads=4, confidence=DEFAULT_CONFIDENCE,
             bottom=max(r['atlas_rect'][3] for r in detail['regions'])+detail.get(
                 'parameters',{}).get('gutter',16)
             extra=_predict_yolo(atlas,model,confidence,rectangular=rectangular,
-                                content_bottom=bottom)
+                                content_bottom=bottom,device=device)
             boxes,scores=image_details.merge_predictions(boxes,scores,extra['boxes'],extra['scores'],detail)
             detail['inference_seconds']=extra['elapsed_seconds']
             detail['tensor_shape']=extra.get('tensor_shape')
@@ -225,7 +266,7 @@ def run_yolo(image, weights, *, threads=4, confidence=DEFAULT_CONFIDENCE,
             forward+=extra['forward_seconds']
             passes+=1
     return dict(model_id=MODEL_ID,architecture='YOLOv9-E',model_sha256=MODEL_SHA256,
-                device='cpu',threads=threads,input_size=MODEL_SIZE,
+                device=device,threads=threads,input_size=MODEL_SIZE,
                 confidence_threshold=confidence,nms_iou_threshold=0.45,
                 load_seconds=round(loaded-started,3),forward_seconds=round(forward,3),
                 elapsed_seconds=round(time.perf_counter()-started,3),
@@ -236,7 +277,7 @@ def run_yolo(image, weights, *, threads=4, confidence=DEFAULT_CONFIDENCE,
 
 def run_detectors(image, weights, *, threads=4, confidence=DEFAULT_CONFIDENCE,
                   runtime_dir='', recover_details=False, recover_small_text=True,
-                  rectangular=False, parallel=True, progress=None):
+                  rectangular=False, parallel=True, progress=None, device=""):
     """Share one CPU thread budget; deliver all progress on the caller thread."""
     from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
     from queue import Empty, SimpleQueue
@@ -246,7 +287,8 @@ def run_detectors(image, weights, *, threads=4, confidence=DEFAULT_CONFIDENCE,
     messages = SimpleQueue()
     report = messages.put if parallel else progress
     yolo_options = dict(threads=yolo_threads, confidence=confidence,
-                        recover_details=recover_details, rectangular=rectangular, progress=report)
+                        recover_details=recover_details, rectangular=rectangular, progress=report,
+                        device=device)
     ocr_options = dict(threads=ocr_threads, runtime_dir=runtime_dir,
                        recover_small_text=recover_small_text, progress=report)
     if progress:
@@ -277,6 +319,9 @@ def run_detectors(image, weights, *, threads=4, confidence=DEFAULT_CONFIDENCE,
         yolo = run_yolo(image, weights, **yolo_options)
         ocr = run_ocr(image, **ocr_options)
     return yolo, ocr, dict(parallel=parallel, thread_budget=threads,
+                           yolo_device=yolo.get('device', 'cpu'), ocr_device='cpu',
+                           requested_device=yolo.get('requested_device', device),
+                           fallback_reason=yolo.get('fallback_reason', ''),
                            yolo_threads=yolo_threads, ocr_threads=ocr_threads,
                            rectangular_inference=rectangular,
                            wall_seconds=round(time.perf_counter()-started,3))

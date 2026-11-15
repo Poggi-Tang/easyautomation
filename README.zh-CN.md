@@ -120,7 +120,7 @@ GUI 安装默认不注册 MCP 客户端，也不修改用户 PATH。
   不必重新猜坐标。
 - **控件框选反馈**：使用一个点击穿透覆盖层为整页控件编号，保存页面标注图，
   并在执行命令前突出实际目标。
-- **本地图片标注**：默认 CPU 运行 YOLO＋RapidOCR，无需视觉 API；蓝色 G 编号表示图形、
+- **本地图片标注**：YOLO 支持自动选择 CPU / NVIDIA GPU，RapidOCR 使用 CPU，无需视觉 API；蓝色 G 编号表示图形、
   橙色 T 编号表示文字，使用 1 像素边框和贴边标签，支持几何纠正及小文字自动补检。
 - **操作响应学习**：比较操作前后截图，检查变化区域、UIA 属性和新窗口，
   保存有证据支撑的成功条件。
@@ -215,7 +215,7 @@ easy_uiauto_image "C:\images\input.bmp" "C:\images\results"
 
 每次在输出目录下新建独立结果子目录，生成 `text.png`、`controls.png`、`combined.png`、
 `elements.json`、`elements.csv`、诊断记录和 `index.html`。结束后打开 `index.html`
-集中查看。模型在本机 CPU 运行，首次使用会下载并校验 YOLO 权重。默认 `ui` 用于普通软件
+集中查看。模型在本机运行，YOLO 可选 CPU / NVIDIA GPU，首次使用会下载并校验权重。默认 `ui` 用于普通软件
 截图，控制框图和电气模型图统一加 `--profile block-diagram`。详见
 [CMD 本地图片标注](#cmd-本地图片标注)。
 
@@ -740,7 +740,9 @@ easy_uiauto_image "C:\images\input.bmp" "C:\images\results"
 
 YOLO 权重首次下载约 281 MB，校验 SHA256 后缓存；后续复用。OCR 使用 RapidOCR 包
 附带的 PP-OCRv6 ONNX 模型。`--offline` 要求已有缓存，禁止下载 YOLO 权重。
-整个识别流程在本机 CPU 执行，不使用视觉 API，也不需要 API key。
+整个识别流程在本机执行，不使用视觉 API，也不需要 API key。YOLO 可通过 `--device auto|cpu|cuda|cuda:N`
+选择设备；默认读取 GUI / 环境配置，未配置时自动选择。OCR 仍使用 CPU。
+默认安装包附带 CPU 环境，NVIDIA 用户可使用 `setup.bat -Gpu` 安装可选环境，详见 [YOLO GPU 使用说明](docs/yolo-gpu.zh-CN.md)。
 仓库的 CMD 启动器使用 PATH 中的 `python`；如需指定解释器，可先设置
 `EASY_UIAUTO_IMAGE_PYTHON`。用 `annotate-image.cmd --help` 查看全部参数。
 成功返回退出码 0，失败返回 2；进入处理阶段后的失败记录在结果目录的 `summary.json`

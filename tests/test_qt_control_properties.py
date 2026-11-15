@@ -3,18 +3,17 @@ from copy import deepcopy
 
 import pytest
 pytest.importorskip('PySide6')
-from PySide6.QtWidgets import QApplication,QLineEdit
+from PySide6.QtWidgets import QLineEdit
 
 from easy_uiauto.qt_ui.window import KnowledgeWindow
 from easy_uiauto.mcp import knowledge
 from easy_uiauto.mcp.protocol import with_control_identity
 from test_knowledge_library import library,add_control
-from test_qt_knowledge_gui import settle
+from test_qt_knowledge_gui import app,settle
 
 
 @pytest.fixture
-def editor(library):
-    app=QApplication.instance() or QApplication([])
+def editor(app,library):
     record=add_control(library,status='verified')
     record.update(verification=dict(location='passed',image='passed'),image='images/reference.png')
     knowledge.save_control(library.directory('demo'),record)

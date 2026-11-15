@@ -23,11 +23,33 @@ def read_text(source, *, progress):
     return analyze(source,"",progress=progress,_operation="ocr")["text"]
 
 
-def analyze(source, output, *, progress, _operation="analyze"):
+def inspect_yolo_device():
+    """Probe the exact inference runtime in a hidden process, outside the Qt thread."""
+    from .image_model_paths import CONFIG_ENV, configuration_path
+    frozen = getattr(sys, "frozen", False)
+    python = Path(sys._MEIPASS) / "image-runtime/python.exe" if frozen else Path(sys.executable)
+    environment = os.environ.copy()
+    environment[CONFIG_ENV] = str(configuration_path())
+    if frozen:
+        import ctypes
+        ctypes.windll.kernel32.SetDllDirectoryW(None)
+    try:
+        result = subprocess.run([str(python), "-I", "-X", "utf8", "-m", "easy_uiauto.inference_device"],
+            env=environment, stdin=subprocess.DEVNULL, capture_output=True, text=True,
+            encoding="utf-8", timeout=30, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        if result.returncode:
+            raise RuntimeError("无法检测 YOLO 推理设备；请检查标注运行环境")
+        return json.loads(result.stdout)
+    finally:
+        if frozen:
+            ctypes.windll.kernel32.SetDllDirectoryW(sys._MEIPASS)
+
+
+def analyze(source, output, *, progress, _operation="analyze", device=""):
     if not getattr(sys, "frozen", False):
         if _operation=="ocr":return _ocr(source)
         from .image_cli import analyze_local_image
-        return analyze_local_image(source, output, auto_crop=False, profile="ui", progress=progress)
+        return analyze_local_image(source, output, auto_crop=False, profile="ui", progress=progress, device=device)
     runtime = Path(sys._MEIPASS) / "image-runtime"
     python = runtime / "python.exe"
     if not python.is_file():
@@ -35,7 +57,7 @@ def analyze(source, output, *, progress, _operation="analyze"):
     with tempfile.TemporaryDirectory(prefix="easy-uiauto-inference-") as temporary:
         job = Path(temporary)
         request = job / "request.json"
-        request.write_text(json.dumps(dict(source=str(source), output=str(output),operation=_operation)), encoding="utf-8")
+        request.write_text(json.dumps(dict(source=str(source), output=str(output),operation=_operation,device=device)), encoding="utf-8")
         environment = os.environ.copy()
         environment.setdefault("EASY_UIAUTO_MODEL_DIR", str(runtime / "models"))
         from .image_model_paths import CONFIG_ENV, configuration_path
@@ -73,7 +95,8 @@ def main():
     def progress(message):
         _write(request.parent / "progress.json",dict(message=message))
     result = (_ocr(data["source"]) if data.get("operation")=="ocr" else
-              analyze_local_image(data["source"],data["output"],auto_crop=False,profile="ui",progress=progress))
+              analyze_local_image(data["source"],data["output"],auto_crop=False,profile="ui",progress=progress,
+                                  device=data.get("device", "")))
     (request.parent/"result.json").write_text(json.dumps(result,ensure_ascii=False),encoding="utf-8")
 
 

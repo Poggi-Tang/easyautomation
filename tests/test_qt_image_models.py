@@ -35,6 +35,8 @@ def window(tmp_path, monkeypatch):
     def inspect():
         configured = image_model_paths.load_model_paths()
         result = deepcopy(report)
+        result["configured_device"] = image_model_paths.configured_yolo_device()
+        result["yolo_device"] = dict(device="cpu", ok=True)
         for model in result["models"]:
             model["configured_path"] = configured.get(model["id"], "")
             model["path"] = configured.get(model["id"], model["path"])
@@ -210,3 +212,32 @@ def test_path_change_during_check_ignores_old_report_and_checks_latest_path(wind
     assert len(calls) == 2
     assert gui.model_report["models"][0]["path"] == str(tmp_path / "latest.pt")
     assert dialog.download_button.isEnabled()
+
+
+def test_device_choice_persists_across_dialog_reopen_and_is_disabled_when_busy(window):
+    app, gui, _ = window
+    gui.open_image_models()
+    settle(app, lambda: not gui.model_check_job)
+    dialog = gui.model_dialog
+    dialog.device_combo.setCurrentIndex(dialog.device_combo.findData("cuda"))
+    settle(app, lambda: not gui.model_check_job)
+    assert image_model_paths.yolo_device() == "cuda"
+    dialog.close()
+    gui.open_image_models()
+    settle(app, lambda: not gui.model_check_job)
+    assert dialog.device_combo.currentData() == "cuda"
+    dialog.set_busy(True)
+    assert not dialog.device_combo.isEnabled()
+    dialog.set_busy(False)
+
+
+def test_unsaved_device_choice_restores_previous_selection(window, monkeypatch):
+    app, gui, _ = window
+    gui.open_image_models()
+    settle(app, lambda: not gui.model_check_job)
+    def fail(*args):
+        raise OSError("read-only configuration")
+    monkeypatch.setattr(image_model_paths, "save_yolo_device", fail)
+    gui.model_dialog.device_combo.setCurrentIndex(1)
+    assert gui.model_dialog.device_combo.currentData() == "auto"
+    assert "设备未保存" in gui.model_dialog.message.text()

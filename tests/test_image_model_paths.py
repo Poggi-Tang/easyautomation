@@ -13,6 +13,8 @@ from easy_uiauto import image_detection, image_model_paths, image_models
 @pytest.fixture(autouse=True)
 def isolated_config(tmp_path, monkeypatch):
     monkeypatch.setenv(image_model_paths.CONFIG_ENV, str(tmp_path / "config/model-paths.json"))
+    monkeypatch.delenv(image_model_paths.DEVICE_ENV, raising=False)
+    monkeypatch.setattr(image_models, "inspect_yolo_device", lambda: dict(ok=True, device="cpu"))
 
 
 @pytest.fixture
@@ -98,3 +100,25 @@ def test_download_targets_persisted_paths_without_touching_default_models(select
     report = image_models.download_missing_models(progress=lambda _: None)
     assert report["ok"]
     assert all(Path(value).read_bytes() == source.read_bytes() for value in selected.values())
+
+
+def test_device_precedence_and_model_paths_preserved(selected, monkeypatch):
+    image_model_paths.save_model_paths(selected)  # Old format without a device remains valid.
+    assert image_model_paths.yolo_device() == "auto"
+    image_model_paths.save_yolo_device(" CUDA:1 ")
+    assert image_model_paths.yolo_device() == "cuda:1"
+    assert image_model_paths.load_model_paths() == selected
+    image_model_paths.save_model_paths({})
+    assert image_model_paths.yolo_device() == "cuda:1"
+    monkeypatch.setenv(image_model_paths.DEVICE_ENV, "cpu")
+    assert image_model_paths.yolo_device() == "cpu"
+    assert image_model_paths.yolo_device("auto") == "auto"
+
+
+@pytest.mark.parametrize("device", ["gpu", "cuda:-1", "cuda:abc", "", 0, None])
+def test_invalid_device_does_not_replace_preferences(selected, device):
+    image_model_paths.save_model_paths(selected)
+    before = image_model_paths.configuration_path().read_bytes()
+    with pytest.raises(ValueError):
+        image_model_paths.save_yolo_device(device)
+    assert image_model_paths.configuration_path().read_bytes() == before

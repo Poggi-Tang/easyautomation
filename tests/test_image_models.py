@@ -11,6 +11,7 @@ from easy_uiauto import image_detection, image_models, image_model_paths
 @pytest.fixture(autouse=True)
 def isolated_path_configuration(tmp_path, monkeypatch):
     monkeypatch.setenv(image_model_paths.CONFIG_ENV, str(tmp_path / "config/model-paths.json"))
+    monkeypatch.setattr(image_models, "inspect_yolo_device", lambda: dict(ok=True, device="cpu"))
 
 
 @pytest.fixture
@@ -73,6 +74,17 @@ def test_runtime_failure_is_separate_from_three_valid_models(models, monkeypatch
     report = image_models.inspect_models()
     assert not report["ok"] and report["runtime_issues"]
     assert all(m["state"] == "ready" for m in report["models"])
+
+
+@pytest.mark.parametrize("explicit", [False, True])
+def test_unavailable_cuda_blocks_only_explicit_gpu_mode(models, monkeypatch, explicit):
+    image_models.download_missing_models(progress=lambda _: None)
+    device = dict(ok=not explicit, device="" if explicit else "cpu", fallback_reason="CUDA unavailable")
+    monkeypatch.setattr(image_models, "inspect_yolo_device", lambda: device)
+    report = image_models.inspect_models()
+    assert report["ok"] == (not explicit)
+    assert report["yolo_device"] == device
+    assert report["runtime_issues"] == (["CUDA unavailable"] if explicit else [])
 
 
 def test_frozen_checker_uses_the_bundled_inference_paths(tmp_path, monkeypatch):

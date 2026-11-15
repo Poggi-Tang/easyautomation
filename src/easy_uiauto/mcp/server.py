@@ -2547,6 +2547,7 @@ async def analyze_ui_image(
     detail_recovery: bool = True,
     rectangular_inference: bool = False,
     parallel_inference: bool = True,
+    device: str = "",
 ) -> str:
     """Annotate a saved image with local YOLO + RapidOCR by default (recommended).
 
@@ -2589,6 +2590,9 @@ async def analyze_ui_image(
             the original square input to prioritize annotation quality.
         parallel_inference: Local UI mode runs YOLO and OCR concurrently within the
             same CPU thread budget. False runs them sequentially for comparison.
+        device: Local YOLO device: auto, cpu, cuda or cuda:N. Empty uses the shared
+            GUI/environment setting (default auto). OCR remains on CPU. Explicit
+            CUDA fails when unavailable; auto falls back to CPU and reports why.
     """
     async def report_progress(current: int, message: str) -> None:
         if ctx is None:
@@ -2617,8 +2621,11 @@ async def analyze_ui_image(
                 detail_recovery=detail_recovery,
                 rectangular_inference=rectangular_inference,
                 parallel_inference=parallel_inference,
+                device=device,
             )
         else:
+            if device:
+                raise ValueError("device requires engine='local'")
             api_url, api_key, selected_model = _vision_api_settings(model)
             result = await asyncio.to_thread(
                 image_analysis.analyze_image,
