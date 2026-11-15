@@ -38,7 +38,7 @@ easy_uiauto_config
 
 DSH 对话模型和 easy-uiauto 视觉接口分别配置：DSH 的模型负责调用工具，
 easy-uiauto 的界面扫描、语义分析和交互效果分析使用这里保存的视觉接口。
-视觉模型须支持 OpenAI 兼容的图片输入；仅配置 DSH 的模型和 Key 不会完成这一步。
+多模态模型须通过 OpenAI 兼容接口支持图片输入；仅配置 DSH 的模型和 Key 不会完成这一步。
 基础 UIA 操作不要求视觉 API，本地 YOLO＋RapidOCR 图片标注也不使用这个 API。
 
 ## 3. 添加 MCP

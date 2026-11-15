@@ -278,7 +278,7 @@ def _vision_api_settings(model: str) -> tuple[str, str, str]:
 
 
 def _vision_response_json(content: str) -> dict:
-    """Extract the single JSON object required from a vision model response."""
+    """Extract the single JSON object required from a multimodal model response."""
     content = content.strip()
     if content.startswith("```"):
         content = re.sub(r"^```(?:json)?\s*|\s*```$", "", content, flags=re.IGNORECASE)
@@ -2566,7 +2566,7 @@ async def analyze_ui_image(
         image_path: Local path to a single-frame image, such as PNG, JPEG or WebP.
         output_dir: Parent output directory; each call creates a separate run folder.
         max_elements: Maximum observations to return, 1 to 3000; truncation is reported.
-        model: API-only vision model override; empty uses the configured model.
+        model: API-only multimodal model override; empty uses the configured model.
         analysis_scale: API-only. 0 automatically enlarges small images up to 4x; 1 disables
             enlargement. Other values from 1 to 4 set an explicit scale. Returned
             coordinates always map back to the displayed input image.
@@ -3160,7 +3160,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         "--vision-model",
         default="",
         metavar="MODEL",
-        help="Remote vision model used by the quick and full Codex setup actions.",
+        help="Remote multimodal model used by the quick and full Codex setup actions.",
     )
     return parser
 

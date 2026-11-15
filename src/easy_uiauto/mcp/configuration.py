@@ -343,12 +343,12 @@ def _configure_remote_vision(api_url: str, model: str) -> tuple[str, str, str]:
     if not api_url:
         api_url = _prompt_required_text("Vision API URL", "--vision-url URL")
     if not model:
-        model = _prompt_required_text("Vision model", "--vision-model MODEL")
+        model = _prompt_required_text("Multimodal model", "--vision-model MODEL")
     if not api_url.startswith(("https://", "http://")):
         raise RuntimeError("Vision API URL must start with https:// or http://")
     api_url, _ = api_endpoints(api_url)
     if not model:
-        raise RuntimeError("Vision model must not be empty")
+        raise RuntimeError("Multimodal model must not be empty")
 
     api_key = _existing_vision_value(VISION_API_KEY)
     if not api_key:
@@ -394,7 +394,7 @@ def quick_setup_codex(api_url: str, model: str, version: str) -> str:
     return (
         f"easy_uiauto {version}\n"
         f"Vision API URL: {api_url}\n"
-        f"Vision model: {model}\n"
+        f"Multimodal model: {model}\n"
         "Vision API key: saved in Windows Credential Manager (value hidden)\n"
         f"{configured}\n"
         "Quick setup complete. Vision settings are available to a current easy_uiauto MCP "
@@ -432,7 +432,7 @@ def full_setup_codex(api_url: str, model: str, version: str) -> str:
     return (
         f"easy_uiauto {version}\n"
         f"Vision API URL: {api_url}\n"
-        f"Vision model: {model}\n"
+        f"Multimodal model: {model}\n"
         "Vision API key: saved in Windows Credential Manager (value hidden)\n"
         f"{report}\n"
         f"{configured}\n"

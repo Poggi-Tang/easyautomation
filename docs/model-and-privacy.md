@@ -5,8 +5,8 @@ English | [简体中文](model-and-privacy.zh-CN.md)
 ## Three ways to run
 
 - **Local features only**: leave the API settings empty. Manage the vault, add controls manually, scan with local YOLO / RapidOCR, and compose or execute saved workflows.
-- **Local features with a cloud model**: configure an OpenAI-compatible service with image support and JSON output for semantic descriptions, reference interpretation and deep learning. Pricing and availability depend on the provider.
-- **Local features with an intranet model**: configure a local or intranet model service with the same capabilities. The offline bundle does not include this service; deploy it separately.
+- **Local features with a cloud multimodal model**: configure a multimodal model with image input and JSON output through an OpenAI-compatible API for semantic descriptions, reference interpretation and deep learning. Pricing and availability depend on the provider.
+- **Local features with an intranet multimodal model**: configure a local or intranet multimodal model service with the same capabilities. The offline bundle does not include this service; deploy it separately.
 
 The first source installation through `setup.bat` downloads dependencies and models. Complete GUI
 and offline deployment ZIPs from Releases include the runtimes, detection weights and OCR models.

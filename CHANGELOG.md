@@ -4,6 +4,8 @@ Release notes and upgrade instructions.
 
 ## [Unreleased]
 
+- 将中英文文档与配置提示中的模型名称统一为“多模态模型 / multimodal model”。
+
 ## [1.1.0] - 2026-11-15
 
 ### 使用入口与密钥保护

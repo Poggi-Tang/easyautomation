@@ -47,8 +47,8 @@ See the [GUI guide](docs/knowledge-gui.zh-CN.md) for detailed steps. Choose an i
 | Image annotation, YOLO detection, RapidOCR text recognition | None | Offline after the model files are installed |
 | GUI basic learning | None for local scanning; required for added semantic descriptions | Local scanning; enabling API descriptions sends window images and control information |
 | Importing and understanding references, reference-assisted descriptions | Required | Local extraction; reference excerpts and relevant control information go to the API for interpretation. Import currently includes interpretation |
-| Deep learning of a region or single control | Model with image support and JSON output | Screenshots, task context and relevant test inputs go to the API to plan interactions |
-| CLI / MCP visual-first scanning and effect interpretation | Vision model | Selected-window images, or before/after images and related popup crops |
+| Deep learning of a region or single control | Multimodal model with image input and JSON output | Screenshots, task context and relevant test inputs go to the API to plan interactions |
+| CLI / MCP visual-first scanning and effect interpretation | Multimodal model | Selected-window images, or before/after images and related popup crops |
 | Remote vision lookup fallback | Required only when explicitly enabled | Sends the requested screenshot area; UIA, templates and local OCR need no API |
 
 **The offline bundle includes runtimes, detection and OCR models, but no semantic reasoning service.**
