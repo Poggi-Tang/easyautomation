@@ -21,6 +21,24 @@ def app():
     return QApplication.instance() or QApplication([])
 
 
+def test_settings_key_is_masked_and_errors_are_redacted(app, monkeypatch, tmp_path):
+    from PySide6.QtWidgets import QLineEdit
+    from easy_uiauto.qt_ui.dialogs import SettingsDialog
+    from easy_uiauto.mcp import configuration
+
+    monkeypatch.setattr(configuration,"load_gui_configuration",lambda:dict(api_key="test-secret"))
+    dialog=SettingsDialog(tmp_path)
+    dialog.show();app.processEvents()
+    assert dialog.fields["api_key"].echoMode()==QLineEdit.EchoMode.Password
+    dialog.key_toggle.click()
+    assert dialog.fields["api_key"].echoMode()==QLineEdit.EchoMode.Normal
+    dialog.fetched(None,RuntimeError("invalid key test-secret"))
+    assert "test-secret" not in dialog.message.text()
+    dialog.hide();dialog.show();app.processEvents()
+    assert dialog.fields["api_key"].echoMode()==QLineEdit.EchoMode.Password
+    dialog.close();dialog.deleteLater();app.processEvents()
+
+
 @pytest.mark.parametrize("record,expected",[
     (dict(status="verified",control_type="ButtonControl"),"定位已验证"),
     (dict(status="observed",control_type="VisualElement"),"图片定位待验证"),

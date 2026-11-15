@@ -281,7 +281,11 @@ class SettingsDialog(QDialog):
     def __init__(self, current_vault, parent=None, *, before_save=None, on_saved=None):
         super().__init__(parent);self.setWindowTitle("设置");self.resize(660,310)
         self.before_save=before_save or (lambda _values:None);self.on_saved=on_saved or (lambda _values:None)
-        self.job=None;self.initial=configuration.load_gui_configuration();self.initial["knowledge_dir"]=str(current_vault)
+        self.job=None;read_error=""
+        try:self.initial=configuration.load_gui_configuration()
+        except OSError:
+            self.initial={};read_error="读取现有配置失败，可填写后重新保存。"
+        self.initial["knowledge_dir"]=str(current_vault)
         layout=QVBoxLayout(self);form=QFormLayout();self.fields={}
         for key,label in (("knowledge_dir","知识库路径"),("api_url","API URL"),("api_key","API Key"),("api_model","API Model")):
             field=QComboBox() if key=="api_model" else QLineEdit()
@@ -290,17 +294,34 @@ class SettingsDialog(QDialog):
             field.setAccessibleName(label);self.fields[key]=field
             row=QHBoxLayout();row.addWidget(field)
             if key=="knowledge_dir":row.addWidget(button("浏览",self.browse))
+            elif key=="api_key":
+                field.setEchoMode(QLineEdit.EchoMode.Password)
+                self.key_toggle=button("显示",self.toggle_key);row.addWidget(self.key_toggle)
             elif key=="api_model":self.fetch_button=button("获取",self.fetch);row.addWidget(self.fetch_button)
             else:spacer=QLabel();spacer.setMinimumWidth(70);row.addWidget(spacer)
             form.addRow(label,row)
         layout.addLayout(form)
-        self.message=QLabel("API Key 明文显示；API Model 支持输入和选择。");self.message.setWordWrap(True);layout.addWidget(self.message)
+        self.message=QLabel(read_error or "API Key 保存到 Windows 凭据管理器；API Model 支持输入和选择。");self.message.setWordWrap(True);layout.addWidget(self.message)
         buttons=QDialogButtonBox(QDialogButtonBox.StandardButton.Save|QDialogButtonBox.StandardButton.Cancel)
         buttons.button(QDialogButtonBox.StandardButton.Save).setText("保存");buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("取消")
         decorate_button_box(buttons)
         buttons.accepted.connect(self.save);buttons.rejected.connect(self.reject);layout.addWidget(buttons)
 
     def values(self):return {k:(v.currentText() if k=="api_model" else v.text()) for k,v in self.fields.items()}
+
+    def toggle_key(self):
+        field=self.fields["api_key"];show=field.echoMode()==QLineEdit.EchoMode.Password
+        field.setEchoMode(QLineEdit.EchoMode.Normal if show else QLineEdit.EchoMode.Password)
+        self.key_toggle.setText("隐藏" if show else "显示")
+        self.key_toggle.setAccessibleName(self.key_toggle.text())
+
+    def hideEvent(self,event):
+        self.fields["api_key"].setEchoMode(QLineEdit.EchoMode.Password);self.key_toggle.setText("显示")
+        self.key_toggle.setAccessibleName("显示")
+        super().hideEvent(event)
+
+    def safe_error(self,error):
+        return configuration.redact_secret(str(error),self.fields["api_key"].text(),self.initial.get("api_key",""))
 
     def browse(self):
         path=QFileDialog.getExistingDirectory(self,"选择知识库目录",self.fields["knowledge_dir"].text())
@@ -314,7 +335,7 @@ class SettingsDialog(QDialog):
 
     def fetched(self,result,error):
         self.job=None;self.fetch_button.setEnabled(True)
-        if error:self.message.setText(str(error));return
+        if error:self.message.setText(self.safe_error(error));return
         model=self.fields["api_model"];current=model.currentText();model.clear();model.addItems(result);model.setCurrentText(current or result[0]);self.message.setText(f"已获取 {len(result)} 个模型")
 
     def save(self):
@@ -329,5 +350,5 @@ class SettingsDialog(QDialog):
                 values["knowledge_dir"]=str(directory.resolve());self.before_save(values)
                 configuration.save_knowledge_directory(values["knowledge_dir"])
             self.on_saved(values)
-        except Exception as error:self.message.setText(str(error));return
+        except Exception as error:self.message.setText(self.safe_error(error));return
         self.accept()

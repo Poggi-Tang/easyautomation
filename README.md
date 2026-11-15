@@ -10,12 +10,52 @@ English | [简体中文](README.zh-CN.md)
 
 ![logo](https://github.com/Poggi-Tang/easyautomation/blob/main/src/image/easy-uiauto.png)
 
-Windows desktop automation with Python, MCP, and a GUI for managing controls and workflows.
+Learn Windows applications in a GUI and save their controls and workflows for reuse by people and agents.
+
+Select a window, mark regions, learn controls, compose workflows, and run them again.
+The GUI, MCP and Python share one local Markdown knowledge vault, including manual edits
+and learned results. Current version: **1.1.0**. Windows only. The GUI is primarily
+Chinese; documentation is available in English and Chinese.
 
 **Free for individuals; enterprise use requires a paid license.** The same policy
 covers the GUI, MCP, Python API and bundled tools. Custom development, deployment,
 knowledge and workflow configuration, automation solutions, training and maintenance
 are separately scoped services. See [licensing and commercial services](docs/commercial-services.md).
+
+## From an interface to reusable workflows
+
+1. **Select an application**: open the target software, add it in the GUI and bind its window.
+2. **Mark regions**: outline menus, toolbars or project trees and describe their purpose.
+3. **Learn controls**: basic learning reads the visible region. Use deep learning on a region or a single control to explore menus and dialogs. Add missing controls or correct their names and descriptions manually.
+4. **Compose workflows**: combine control operations with parameters, ordered steps and checks. Deep learning also archives the workflows it explores.
+5. **Run and reuse**: execute a workflow in the GUI or call the same controls and workflows from an agent or Python. Resume incomplete learning, improve results or adapt them after a software update.
+
+See the [GUI guide](docs/knowledge-gui.zh-CN.md) for detailed steps. Choose an integration when needed:
+
+| Entry point | Purpose |
+| --- | --- |
+| GUI | Manage applications, regions, controls, references and workflows |
+| MCP + Skill | Let an agent learn from manual input, maintain knowledge and execute tasks |
+| Python API | Schedule controls and workflows from your own program |
+| CLI / TCP service | Call learned application commands from a shell or another process |
+
+## Local processing, models and offline use
+
+| Feature | Model API requirement | Network use and data sent |
+| --- | --- | --- |
+| GUI editing, manual controls, composing and running saved workflows | None | Local execution; the target application may itself need a network |
+| Image annotation, YOLO detection, RapidOCR text recognition | None | Offline after the model files are installed |
+| GUI basic learning | None for local scanning; required for added semantic descriptions | Local scanning; enabling API descriptions sends window images and control information |
+| Importing and understanding references, reference-assisted descriptions | Required | Local extraction; reference excerpts and relevant control information go to the API for interpretation. Import currently includes interpretation |
+| Deep learning of a region or single control | Model with image support and JSON output | Screenshots, task context and relevant test inputs go to the API to plan interactions |
+| CLI / MCP visual-first scanning and effect interpretation | Vision model | Selected-window images, or before/after images and related popup crops |
+| Remote vision lookup fallback | Required only when explicitly enabled | Sends the requested screenshot area; UIA, templates and local OCR need no API |
+
+**The offline bundle includes runtimes, detection and OCR models, but no semantic reasoning service.**
+The API can be a cloud, intranet or local OpenAI-compatible service. API-dependent features avoid
+public Internet access only when that endpoint is also local or on your intranet. YOLO and OCR
+detect elements and read text; they do not plan workflows. Vault files contain interface text,
+screenshots and reference material as ordinary local files. See [models, offline use and keys](docs/model-and-privacy.md).
 
 ## Start the GUI from this repository
 
@@ -53,10 +93,9 @@ and generate commands such as
 `main.keypad.enter-digit-6.click`.
 
 Use it to record desktop operations, write automated tests, or give an agent access
-to saved controls and workflows. Version `1.0.2` fixes page identity and learning
-evidence handling, improves upgrade safety, and preserves the 1.0.1 improvements that
-removed the 40 MB local reference-file limit and added MCP access to GUI regions and
-workflows.
+to saved controls and workflows. Version `1.1.0` unifies the GUI, MCP and Python control
+library, adds deep learning for individual controls, and stores newly saved API keys in
+Windows Credential Manager. See the [release notes](CHANGELOG.md).
 
 Saved-image annotation uses **YOLO + RapidOCR** by default: provide an image path and
 an output directory to receive separate text, graphic and combined annotation
@@ -312,9 +351,8 @@ Codex once after installing or updating the package, MCP entry, or skills; chang
 only the vision settings does not require a second restart.
 
 For a minimal Codex deployment with remote AI vision, use the quick setup
-command. When the API key is not already present in the Windows user
-environment, it prompts once through hidden terminal input or a password dialog
-for non-interactive agents. It persists the three vision variables, replaces
+command. When no saved API key is available, it prompts once through hidden terminal input or a password dialog
+for non-interactive agents. It stores the key in Credential Manager and the URL/model in user environment variables, replaces
 only the `easy_uiauto` Codex MCP entry, and skips OCR installation and UI tests:
 
 ```bash
@@ -389,10 +427,12 @@ Windows x64 wheels and source distributions include
 `easy_uiauto_config` to launch that bundled EXE, or double-click the standalone
 `dist/easy-uiauto-config.exe`. It configures the knowledge directory, API URL,
 API Key and API Model and includes its Python/Tk runtime for standalone use.
-The API Key is readable; the model dropdown accepts typed names as well
+The API Key is masked by default, with a reveal button; the model dropdown accepts typed names as well
 as selections from the provider's model list. Browse selects a local directory,
-Fetch retrieves models in the background, and Save persists the four settings to
-the Windows user environment. This window configures one API.
+Fetch retrieves models in the background, and Save stores the API key in the current
+user's Windows Credential Manager. Other settings remain in user environment variables.
+A failed save restores previous settings and never falls back to plaintext key storage.
+This window configures one API.
 
 URLs may be a provider base, a versioned `/v1` base or a full `/chat/completions`
 endpoint; saving normalizes the URL for the existing MCP. Model retrieval does
@@ -951,12 +991,13 @@ absolute desktop rectangles, PIDs and window handles.
 
 ### Privacy and Safety
 
-- Light scanning sends the selected target-window screenshot to the configured
-  endpoint.
+- CLI / MCP visual-first scanning sends the selected target-window screenshot to the
+  configured endpoint. GUI basic learning can run locally; images are sent only when API descriptions are enabled.
 - Effect learning sends target-window before/after images and crops of related
   new windows. Full desktop snapshots remain local in the vault.
-- API keys are read from environment variables and are not written into the
-  knowledge vault.
+- API keys are read from Windows Credential Manager first, with compatibility for legacy
+  environment variables and the application's old MCP configuration. They are not written
+  into the vault. Key fields are masked, and network errors omit provider error bodies.
 - PIDs, native window handles, and absolute desktop coordinates are runtime
   observations only and are not persisted as application knowledge.
 - Inferred control meanings remain separate from locator verification and
@@ -1137,10 +1178,13 @@ easyautomation
 │   └── workflows/
 │       ├── ci.yml
 │       ├── publish.yml
-│       └── release.yml
+│       ├── build-gui.yml
+│       └── build-config-exe.yml
 ├── src/
 │   └── easy_uiauto/
 │       ├── __init__.py
+│       ├── qt_ui/           # Knowledge GUI
+│       ├── knowledge_library.py  # Shared controls and workflows
 │       ├── ctrl.py          # Core controller (mouse/keyboard actions)
 │       ├── draw.py          # Visual feedback (control highlighting)
 │       ├── record.py        # Action recording

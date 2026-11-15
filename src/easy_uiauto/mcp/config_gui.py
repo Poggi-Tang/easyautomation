@@ -50,14 +50,18 @@ class ConfigurationWindow:
                 field = ttk.Combobox(form, textvariable=self.values[name], state="normal")
                 self.model_box = field
             else:
-                # The local API Key field is deliberately readable, as requested.
-                field = ttk.Entry(form, textvariable=self.values[name])
+                field = ttk.Entry(form, textvariable=self.values[name], show="*" if name == "api_key" else "")
+                if name == "api_key":
+                    self.key_field = field
             field.configure(font=("Microsoft YaHei UI", 10))
             field.grid(row=row, column=1, sticky="ew", pady=9, ipady=3)
             if name == "knowledge_dir":
                 self.directory_field = field
-            if row in (1, 2):
+            if row == 1:
                 ttk.Label(form, style="Config.TLabel", text="", width=8).grid(row=row, column=2, padx=(14, 0))
+
+        self.key_toggle = ttk.Button(form, style="Config.TButton", text="显示", width=12, command=self.toggle_key)
+        self.key_toggle.grid(row=2, column=2, padx=(14, 0), sticky="ew")
 
         ttk.Button(form, style="Config.TButton", text="浏览", width=12, command=self.browse).grid(
             row=0, column=2, padx=(14, 0), sticky="ew")
@@ -86,6 +90,11 @@ class ConfigurationWindow:
 
     def current_values(self) -> dict[str, str]:
         return {name: value.get() for name, value in self.values.items()}
+
+    def toggle_key(self):
+        show = bool(self.key_field.cget("show"))
+        self.key_field.configure(show="" if show else "*")
+        self.key_toggle.configure(text="隐藏" if show else "显示")
 
     def browse(self):
         directory = Path(self.values["knowledge_dir"].get()).expanduser()
@@ -120,7 +129,7 @@ class ConfigurationWindow:
             result = configuration.fetch_models(api_url, api_key)
             self.results.put((api_url, api_key, result, None))
         except (ValueError, RuntimeError) as error:
-            self.results.put((api_url, api_key, None, str(error)))
+            self.results.put((api_url, api_key, None, configuration.redact_secret(str(error), api_key)))
         except Exception:
             self.results.put((api_url, api_key, None, "获取失败，请检查网络或手动填写 API Model"))
 
@@ -158,12 +167,13 @@ class ConfigurationWindow:
             saved = configuration.save_gui_configuration(**values)
         except (ValueError, RuntimeError, OSError) as error:
             detail = str(error) if isinstance(error, (ValueError, RuntimeError)) else "目录或用户配置无法写入，请检查路径与权限。"
-            messagebox.showerror("保存失败", detail, parent=self.root)
+            messagebox.showerror("保存失败", configuration.redact_secret(detail, values["api_key"], self.initial.get("api_key", "")), parent=self.root)
             return False
         self.values["knowledge_dir"].set(saved["knowledge_dir"])
         self.values["api_url"].set(saved["api_url"])
         self.initial = self.current_values()
-        self.status.set("配置已保存，后续读取配置的任务使用新设置。")
+        self.key_field.configure(show="*"); self.key_toggle.configure(text="显示")
+        self.status.set("配置已保存，API Key 保存在 Windows 凭据管理器中。后续任务使用新设置。")
         if self.on_saved is not None:
             try:
                 message = self.on_saved(saved)

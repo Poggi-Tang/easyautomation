@@ -473,13 +473,14 @@ def _test_remote_vision(api_url: str, api_key: str, model: str, version: str) ->
         with urlrequest.urlopen(request, timeout=45) as response:
             body = json.loads(response.read().decode("utf-8"))
     except urlerror.HTTPError as error:
-        raise RuntimeError(f"Remote vision request failed with HTTP {error.code}") from error
-    except urlerror.URLError as error:
-        raise RuntimeError(f"Remote vision request failed: {error.reason}") from error
+        error.close()
+        raise RuntimeError(f"Remote vision request failed with HTTP {error.code}") from None
+    except (OSError, ValueError):
+        raise RuntimeError("Remote vision request failed: connection or response error") from None
     try:
         content = body["choices"][0]["message"]["content"]
     except (KeyError, IndexError, TypeError) as error:
-        raise RuntimeError("Remote vision response did not contain a chat completion") from error
+        raise RuntimeError("Remote vision response did not contain a chat completion") from None
     if isinstance(content, list):
         content = "".join(item.get("text", "") for item in content if isinstance(item, dict))
     result = _json_content(str(content))

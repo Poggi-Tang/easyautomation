@@ -340,19 +340,15 @@ def _find_control_by_vision(
         with urlrequest.urlopen(request, timeout=45) as response:
             body = json.loads(response.read().decode("utf-8"))
     except urlerror.HTTPError as error:
-        try:
-            detail = json.loads(error.read().decode("utf-8")).get("error", {}).get("message", "")
-        except Exception:
-            detail = ""
-        suffix = f": {detail}" if detail else ""
-        raise RuntimeError(f"Vision API request failed with HTTP {error.code}{suffix}") from error
-    except urlerror.URLError as error:
-        raise RuntimeError(f"Vision API request failed: {error.reason}") from error
+        error.close()
+        raise RuntimeError(f"Vision API request failed with HTTP {error.code}") from None
+    except (OSError, ValueError):
+        raise RuntimeError("Vision API request failed: connection or response error") from None
 
     try:
         content = body["choices"][0]["message"]["content"]
     except (KeyError, IndexError, TypeError) as error:
-        raise RuntimeError("Vision API response did not contain a chat completion") from error
+        raise RuntimeError("Vision API response did not contain a chat completion") from None
     if isinstance(content, list):
         content = "".join(item.get("text", "") for item in content if isinstance(item, dict))
     result = _vision_response_json(str(content))
@@ -365,7 +361,7 @@ def _find_control_by_vision(
         box_width = int(result["width"])
         box_height = int(result["height"])
     except (KeyError, TypeError, ValueError) as error:
-        raise RuntimeError("Vision API match must include integer left, top, width, and height") from error
+        raise RuntimeError("Vision API match must include integer left, top, width, and height") from None
     if left < 0 or top < 0 or box_width <= 0 or box_height <= 0 or left + box_width > width or top + box_height > height:
         raise RuntimeError("Vision API returned bounds outside the screenshot")
     offset_x, offset_y = (region[0], region[1]) if region else (0, 0)

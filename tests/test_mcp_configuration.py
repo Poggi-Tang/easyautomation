@@ -65,7 +65,8 @@ def test_runtime_replacement_preserves_only_application_settings(monkeypatch) ->
     }
     saved = {}
     monkeypatch.setattr(configuration, "_existing_vision_value", values.__getitem__)
-    monkeypatch.setattr(configuration, "_write_user_environment", saved.__setitem__)
+    monkeypatch.setattr(configuration, "_persist_settings",
+                        lambda values, *, api_key: saved.update(values, **{configuration.VISION_API_KEY: api_key}))
     monkeypatch.setattr(configuration, "_replace_codex", lambda: "replaced")
     assert configuration.replace_codex_preserving_settings() == "replaced"
     assert saved == values
@@ -100,7 +101,7 @@ def test_install_claude_code_uses_user_scope(monkeypatch) -> None:
 
 
 def test_quick_setup_codex_reuses_existing_key_and_replaces_entry(monkeypatch) -> None:
-    writes: list[tuple[str, str]] = []
+    writes: list[tuple[dict, str]] = []
     actions: list[str] = []
 
     monkeypatch.setattr(
@@ -110,8 +111,8 @@ def test_quick_setup_codex_reuses_existing_key_and_replaces_entry(monkeypatch) -
     )
     monkeypatch.setattr(
         configuration,
-        "_write_user_environment",
-        lambda name, value: writes.append((name, value)),
+        "_persist_settings",
+        lambda values, *, api_key: writes.append((values, api_key)),
     )
     monkeypatch.setattr(configuration, "uninstall_codex", lambda: actions.append("remove"))
     monkeypatch.setattr(configuration, "install_codex", lambda: actions.append("add"))
@@ -128,11 +129,8 @@ def test_quick_setup_codex_reuses_existing_key_and_replaces_entry(monkeypatch) -
         "1.2.3",
     )
 
-    assert writes == [
-        (configuration.VISION_API_URL, "https://api.example/v1/chat/completions"),
-        (configuration.VISION_API_KEY, "secret"),
-        (configuration.VISION_MODEL, "vision-model"),
-    ]
+    assert writes == [({configuration.VISION_API_URL: "https://api.example/v1/chat/completions",
+                       configuration.VISION_MODEL: "vision-model"}, "secret")]
     assert actions == ["remove", "add"]
     assert "easy_uiauto 1.2.3" in output
     assert "secret" not in output
@@ -144,7 +142,7 @@ def test_quick_setup_codex_prompts_once_for_missing_key(monkeypatch) -> None:
     prompts: list[str] = []
 
     monkeypatch.setattr(configuration, "_existing_vision_value", lambda _name: "")
-    monkeypatch.setattr(configuration, "_write_user_environment", lambda _name, _value: None)
+    monkeypatch.setattr(configuration, "_persist_settings", lambda _values, *, api_key: None)
     monkeypatch.setattr(configuration, "uninstall_codex", lambda: "")
     monkeypatch.setattr(configuration, "install_codex", lambda: "")
     monkeypatch.setattr(configuration, "show_codex", lambda: "configured entry")
@@ -167,8 +165,8 @@ def test_quick_setup_codex_prompts_once_for_missing_key(monkeypatch) -> None:
 def test_quick_setup_codex_rejects_invalid_url_before_writing(monkeypatch) -> None:
     monkeypatch.setattr(
         configuration,
-        "_write_user_environment",
-        lambda _name, _value: (_ for _ in ()).throw(AssertionError("write was not expected")),
+        "_persist_settings",
+        lambda _values, **_kwargs: (_ for _ in ()).throw(AssertionError("write was not expected")),
     )
 
     try:

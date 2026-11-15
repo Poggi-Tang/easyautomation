@@ -518,7 +518,7 @@ def _parse_json_object(content: str) -> dict:
     try:
         result = json.loads(content)
     except json.JSONDecodeError as error:
-        raise RuntimeError("Vision response did not contain a valid JSON object") from error
+        raise RuntimeError("Vision response did not contain a valid JSON object") from None
     if not isinstance(result, dict):
         raise RuntimeError("AI segmentation response must be a JSON object")
     return result
@@ -844,10 +844,10 @@ def _segment_image(
         with urlrequest.urlopen(request, timeout=120) as response:
             content = _read_completion_content(response)
     except urlerror.HTTPError as error:
-        raise RuntimeError(f"AI segmentation failed with HTTP {error.code}") from error
-    except (urlerror.URLError, TimeoutError) as error:
-        reason = getattr(error, "reason", str(error))
-        raise RuntimeError(f"AI segmentation failed: {reason}") from error
+        error.close()
+        raise RuntimeError(f"AI segmentation failed with HTTP {error.code}") from None
+    except (OSError, ValueError, TypeError, AttributeError):
+        raise RuntimeError("AI segmentation failed: connection or response error") from None
     result = _parse_json_object(str(content))
     if (not isinstance(result.get("page"), dict)
             or not isinstance(result.get("regions"), list)
@@ -1038,10 +1038,10 @@ def _request_control_semantics(
         with urlrequest.urlopen(request, timeout=90) as response:
             content = _read_completion_content(response)
     except urlerror.HTTPError as error:
-        raise RuntimeError(f"AI control semantics failed with HTTP {error.code}") from error
-    except (urlerror.URLError, TimeoutError) as error:
-        reason = getattr(error, "reason", str(error))
-        raise RuntimeError(f"AI control semantics failed: {reason}") from error
+        error.close()
+        raise RuntimeError(f"AI control semantics failed with HTTP {error.code}") from None
+    except (OSError, ValueError, TypeError, AttributeError):
+        raise RuntimeError("AI control semantics failed: connection or response error") from None
     result = _parse_json_object(str(content))
     expected = {item["id"]: item for item in candidates}
     semantics = {}

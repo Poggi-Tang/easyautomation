@@ -18,6 +18,7 @@ jobs:
           python-version: "3.13"
       - name: Prepare CPU inference and GUI build tools
         run: |
+          python scripts/verify_release_metadata.py
           python -m pip install --upgrade pip
           python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
           python -m pip install -e ".[gui,image]" pyinstaller==6.22.3

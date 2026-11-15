@@ -13,12 +13,26 @@ from urllib import error as urlerror, parse as urlparse, request as urlrequest
 
 import tomllib
 
+if __package__:
+    from . import credentials
+else:  # Standalone configuration EXE.
+    import credentials
+
 SERVER_NAME = "easy_uiauto"
 SERVER_MODULE = "easy_uiauto.mcp.server"
 VISION_API_URL = "EASY_UIAUTO_VISION_API_URL"
 VISION_API_KEY = "EASY_UIAUTO_VISION_API_KEY"
 VISION_MODEL = "EASY_UIAUTO_VISION_MODEL"
 KNOWLEDGE_DIR = "EASY_UIAUTO_KNOWLEDGE_DIR"
+
+
+def redact_secret(message: str, *secrets: str) -> str:
+    """Remove known form secrets before showing errors, including URL-encoded echoes."""
+    for secret in secrets:
+        if secret:
+            for value in (secret, urlparse.quote(secret, safe="")):
+                message = message.replace(value, "[hidden]")
+    return message
 
 
 def _read_user_environment(name: str) -> str:
@@ -36,11 +50,14 @@ def _read_user_environment(name: str) -> str:
 
 
 def _write_user_environment(name: str, value: str) -> None:
-    """Persist one user-scoped environment variable without using setx."""
+    """Persist an app setting; API keys always go to Credential Manager."""
     if not value:
         raise ValueError(f"{name} must not be empty")
     if os.name != "nt":
         raise RuntimeError("Quick Codex setup is supported only on Windows")
+    if name == VISION_API_KEY:
+        _persist_settings({}, api_key=value)
+        return
     import winreg
 
     with winreg.CreateKey(winreg.HKEY_CURRENT_USER, "Environment") as key:
@@ -64,6 +81,10 @@ def _read_existing_codex_environment(name: str) -> str:
 
 def _existing_vision_value(name: str) -> str:
     """Resolve a vision setting without consulting unrelated credentials."""
+    if name == VISION_API_KEY:
+        saved = credentials.read_api_key().strip()
+        if saved:
+            return saved
     return (
         _read_user_environment(name).strip()
         or os.environ.get(name, "").strip()
@@ -151,6 +172,8 @@ def fetch_models(api_url: str, api_key: str, timeout: float = 20) -> list[str]:
         raise RuntimeError(detail + "，请检查 API URL 或稍后重试") from None
     except (UnicodeError, json.JSONDecodeError):
         raise RuntimeError("接口未返回有效 JSON，可手动填写 API Model") from None
+    except OSError:
+        raise RuntimeError("无法连接服务，请检查 API URL 或稍后重试") from None
     if not isinstance(result, dict) or not isinstance(result.get("data"), list):
         raise RuntimeError("接口未返回兼容的模型列表，可手动填写 API Model")
     models = sorted({
@@ -189,34 +212,53 @@ def save_gui_configuration(knowledge_dir: str, api_url: str, api_key: str,
     directory = Path(validated["knowledge_dir"])
     chat_url, api_key, api_model = (validated[k] for k in ("api_url", "api_key", "api_model"))
     directory.mkdir(parents=True, exist_ok=True)
-    values = {
-        KNOWLEDGE_DIR: str(directory), VISION_API_URL: chat_url,
-        VISION_API_KEY: api_key, VISION_MODEL: api_model,
-    }
+    _persist_settings({KNOWLEDGE_DIR: str(directory), VISION_API_URL: chat_url,
+                       VISION_MODEL: api_model}, api_key=api_key)
+    return {"knowledge_dir": str(directory), "api_url": chat_url, "api_model": api_model}
+
+
+def _persist_settings(values: dict[str, str], *, api_key: str) -> None:
+    """Commit the credential last, restoring registry settings if saving fails."""
     import winreg
 
-    # Roll back a partial write. The process environment is updated only on success.
     with winreg.CreateKey(winreg.HKEY_CURRENT_USER, "Environment") as key:
         previous = {}
         written = []
         try:
-            for name, value in values.items():
+            for name in (*values, VISION_API_KEY):
                 try:
                     previous[name] = winreg.QueryValueEx(key, name)
                 except FileNotFoundError:
                     previous[name] = None
-                winreg.SetValueEx(key, name, 0, winreg.REG_SZ, value)
+                if name == VISION_API_KEY:
+                    if previous[name] is not None:
+                        winreg.DeleteValue(key, name)
+                else:
+                    winreg.SetValueEx(key, name, 0, winreg.REG_SZ, values[name])
                 written.append(name)
-        except OSError:
+            # CredWrite is atomic. No further registry writes may follow it.
+            credentials.write_api_key(api_key)
+        except (OSError, ValueError):
             for name in reversed(written):
                 old_value = previous[name]
                 if old_value is None:
-                    winreg.DeleteValue(key, name)
+                    try:
+                        winreg.DeleteValue(key, name)
+                    except FileNotFoundError:
+                        pass
                 else:
                     winreg.SetValueEx(key, name, 0, old_value[1], old_value[0])
             raise
     os.environ.update(values)
-    # Let future processes inherit the changes. A running MCP reads the registry itself.
+    os.environ.pop(VISION_API_KEY, None)
+    try:
+        _broadcast_environment_change()
+    except OSError:
+        pass  # Settings are already committed; readers resolve them dynamically.
+
+
+def _broadcast_environment_change() -> None:
+    # A running MCP reads settings dynamically. Other processes receive a hint.
     import ctypes
     from ctypes import wintypes
 
@@ -226,7 +268,6 @@ def save_gui_configuration(knowledge_dir: str, api_url: str, api_key: str,
                      wintypes.UINT, wintypes.UINT, ctypes.POINTER(ctypes.c_size_t)]
     send.restype = wintypes.LPARAM
     send(0xFFFF, 0x001A, 0, "Environment", 0x0002, 1000, ctypes.byref(result))
-    return {"knowledge_dir": str(directory), "api_url": chat_url, "api_model": api_model}
 
 
 def vision_request_options(model: str) -> dict:
@@ -305,6 +346,7 @@ def _configure_remote_vision(api_url: str, model: str) -> tuple[str, str, str]:
         model = _prompt_required_text("Vision model", "--vision-model MODEL")
     if not api_url.startswith(("https://", "http://")):
         raise RuntimeError("Vision API URL must start with https:// or http://")
+    api_url, _ = api_endpoints(api_url)
     if not model:
         raise RuntimeError("Vision model must not be empty")
 
@@ -314,9 +356,7 @@ def _configure_remote_vision(api_url: str, model: str) -> tuple[str, str, str]:
     if not api_key:
         raise RuntimeError("Vision API key must not be empty")
 
-    _write_user_environment(VISION_API_URL, api_url)
-    _write_user_environment(VISION_API_KEY, api_key)
-    _write_user_environment(VISION_MODEL, model)
+    _persist_settings({VISION_API_URL: api_url, VISION_MODEL: model}, api_key=api_key)
     return api_url, api_key, model
 
 
@@ -332,9 +372,16 @@ def _replace_codex() -> str:
 
 def replace_codex_preserving_settings() -> str:
     """Move the MCP entry to this Python while retaining this app's settings."""
+    settings = {}
     for name in (KNOWLEDGE_DIR, VISION_API_URL, VISION_API_KEY, VISION_MODEL):
         value = _existing_vision_value(name)
         if value:
+            settings[name] = value
+    api_key = settings.pop(VISION_API_KEY, "")
+    if api_key:
+        _persist_settings(settings, api_key=api_key)
+    else:
+        for name, value in settings.items():
             _write_user_environment(name, value)
     return _replace_codex()
 
@@ -348,7 +395,7 @@ def quick_setup_codex(api_url: str, model: str, version: str) -> str:
         f"easy_uiauto {version}\n"
         f"Vision API URL: {api_url}\n"
         f"Vision model: {model}\n"
-        "Vision API key: configured in the Windows user environment (value hidden)\n"
+        "Vision API key: saved in Windows Credential Manager (value hidden)\n"
         f"{configured}\n"
         "Quick setup complete. Vision settings are available to a current easy_uiauto MCP "
         "process immediately. Restart Codex once only if the MCP command or package changed."
@@ -386,7 +433,7 @@ def full_setup_codex(api_url: str, model: str, version: str) -> str:
         f"easy_uiauto {version}\n"
         f"Vision API URL: {api_url}\n"
         f"Vision model: {model}\n"
-        "Vision API key: configured in the Windows user environment (value hidden)\n"
+        "Vision API key: saved in Windows Credential Manager (value hidden)\n"
         f"{report}\n"
         f"{configured}\n"
         f"{skills}\n"

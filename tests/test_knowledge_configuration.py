@@ -99,6 +99,11 @@ try:
     root.deiconify(); root.update()
     config = app.configure()
     root.update()
+    assert config.key_field.cget("show") == "*"
+    config.toggle_key()
+    assert config.key_field.cget("show") == ""
+    config.toggle_key()
+    assert config.key_field.cget("show") == "*"
     assert config.root.winfo_viewable() and root.grab_current() == config.root
     assert app.configure() is config
     # An explicit --vault is authoritative when opening settings.

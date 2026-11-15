@@ -8,6 +8,7 @@ import struct
 import tarfile
 import tomllib
 import zipfile
+from email.parser import BytesParser
 from pathlib import Path
 
 
@@ -16,7 +17,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dist-dir", type=Path, default=root / "dist")
     args = parser.parse_args()
-    version = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
+    project = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))["project"]
+    version = project["version"]
     relative = "easy_uiauto/bin/easy-uiauto-config.exe"
     executable = (root / "src" / relative).read_bytes()
     if executable[:2] != b"MZ":
@@ -29,6 +31,14 @@ def main():
     wheel = args.dist_dir / f"easy_uiauto-{version}-py3-none-win_amd64.whl"
     sdist = args.dist_dir / f"easy_uiauto-{version}.tar.gz"
     with zipfile.ZipFile(wheel) as archive:
+        metadata = BytesParser().parsebytes(archive.read(f"easy_uiauto-{version}.dist-info/METADATA"))
+        if metadata["Version"] != version or metadata["License-Expression"] != project["license"]:
+            raise RuntimeError("Wheel version or license does not match the source")
+        if archive.read(f"easy_uiauto-{version}.dist-info/licenses/LICENSE") != (root / "LICENSE").read_bytes():
+            raise RuntimeError("Wheel license does not match the source")
+        credential_module = "easy_uiauto/mcp/credentials.py"
+        if archive.read(credential_module) != (root / "src" / credential_module).read_bytes():
+            raise RuntimeError("Wheel is missing the current secure credential implementation")
         if archive.read(relative) != executable:
             raise RuntimeError("Wheel does not contain the compiled configuration EXE")
         entries = archive.read(f"easy_uiauto-{version}.dist-info/entry_points.txt").decode("utf-8")
@@ -37,6 +47,9 @@ def main():
         if archive.read("easy_uiauto/resources/IEEE9.png") != (root / "docs/examples/IEEE9/IEEE9.png").read_bytes():
             raise RuntimeError("Wheel is missing the IEEE9 installation self-check image")
     with tarfile.open(sdist) as archive:
+        license_file = archive.extractfile(f"easy_uiauto-{version}/LICENSE")
+        if license_file is None or license_file.read() != (root / "LICENSE").read_bytes():
+            raise RuntimeError("Source package license does not match the repository")
         member = archive.extractfile(f"easy_uiauto-{version}/src/{relative}")
         if member is None or member.read() != executable:
             raise RuntimeError("Source package does not contain the compiled configuration EXE")

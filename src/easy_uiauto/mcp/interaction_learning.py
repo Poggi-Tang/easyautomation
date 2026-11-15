@@ -489,9 +489,9 @@ def _interpret_effects(
         with urlrequest.urlopen(request, timeout=60) as response:
             content = scanner._read_completion_content(response)
         result = scanner._parse_json_object(str(content))
-    except (OSError, KeyError, IndexError, TypeError, ValueError, urlerror.URLError) as error:
+    except (OSError, KeyError, IndexError, TypeError, ValueError, RuntimeError) as error:
         return {
-            "summary": f"Effect interpretation unavailable: {type(error).__name__}: {error}",
+            "summary": f"Effect interpretation unavailable: {type(error).__name__}",
             "effects": [],
             "success_condition": "",
             "confidence": 0.0,
