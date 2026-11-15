@@ -7,6 +7,27 @@ description: Operate scanned Windows desktop applications through verified easy_
 
 Prefer verified application knowledge over rediscovering the interface.
 
+## Shared GUI knowledge and saved workflows
+
+GUI, MCP and Python use one Markdown vault. Establish its absolute path and pass
+the same `vault` to library reads, searches, command execution and workflow tasks;
+the GUI's temporarily selected directory may differ from the configured default.
+Skill instructions do not own a separate database.
+
+For a multi-step request, first inspect relevant saved `workflows` through
+`get_ui_library(app_id=..., vault=..., section="workflows")`. Reuse an applicable
+combination action with `start_ui_library_task(operation="run-workflow", ...)`,
+passing its `workflow_id` and the user's `parameters`. Inspect steps, preconditions
+and readiness before starting. Poll `get_ui_library_task` until `worker_running=false`;
+report the actual result and failed checks. A ready definition is not a successful
+run. Uncertain input must not be repeated merely to obtain a clean result.
+
+When no saved workflow fits, use the single-command workflow below. `run_ui_command`
+does not replay GUI entry steps; inspect `effective_entry_steps` in the saved control
+and ensure its required state is already open, or use an appropriate saved workflow.
+Do not treat a metadata-only imported control as verified. `upsert_control_record`
+now writes the shared vault; it does not release quarantine or validate its locator.
+
 ## Workflow
 
 1. Call `list_ui_knowledge_apps` only when the application ID is not already established in
@@ -46,7 +67,8 @@ Prefer verified application knowledge over rediscovering the interface.
 
 ## Safety Rules
 
-- Execute only commands returned by `list_ui_commands`; those records passed scan-time verification.
+- For individual commands, use verified commands returned by knowledge search or
+  `list_ui_commands`. Saved combination actions use their own readiness and runtime checks.
 - Do not bypass quarantine with raw coordinates unless the user explicitly requests a one-off operation.
 - Do not assume a visual match is correct when identical icons exist. Require the stored LOCATION and image evidence.
 - For destructive or externally visible operations, inspect the semantic command and current page before executing.

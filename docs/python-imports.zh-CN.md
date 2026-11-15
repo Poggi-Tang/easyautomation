@@ -122,15 +122,17 @@ Path("screen.png").write_bytes(image.data)
 ## 完整导入目录
 
 下表中的每一个名称都支持 `from easy_uiauto.mcp import 名称`。额外依赖仍按功能安装；
-图像匹配/OCR 使用 `vision` 扩展，OCR 还需要 Tesseract。向量写入需要另外配置
-`EASY_UIAUTO_CONTROL_VECTOR_DB_DIR` 指向真实的 `control_vector_store.py` 集成目录。
+图像匹配/OCR 使用 `vision` 扩展，OCR 还需要 Tesseract。控件入库直接写入 GUI 的
+Markdown 知识库，不需要外接向量库。`from easy_uiauto import KnowledgeLibrary` 提供
+相同存储的 Python 管理入口。目录选择、迁移与同步示例见 [共享知识库](shared-library.zh-CN.md)。
 
 | 功能 | 可导入函数 |
 | --- | --- |
 | 模式 | `get_mode`, `set_mode` |
 | 窗口 | `list_windows`, `activate_window`, `get_window_state`, `wait_for_window` |
 | 控件与等待 | `get_control_tree`, `find_control`, `get_control_at_position`, `wait_for_control`, `wait_for_text` |
-| 采集与向量记录 | `capture_control_record_at_position`, `capture_control_record_on_ctrl`, `upsert_control_record` |
+| 采集与共享入库 | `capture_control_record_at_position`, `capture_control_record_on_ctrl`, `upsert_control_record`, `import_control_records` |
+| GUI 共享知识库 | `get_ui_library`, `get_ui_library_readiness`, `start_ui_library_task`, `get_ui_library_task`, `stop_ui_library_task`, `save_ui_workflow` |
 | 就绪检查 | `get_capability_readiness`, `get_ui_learning_readiness` |
 | 学习与探索 | `scan_window_knowledge`, `get_ui_learning_status`, `learn_ui_command_effect`, `explore_ui_workflows` |
 | 知识检索 | `list_ui_knowledge_apps`, `search_ui_knowledge`, `search_ui_knowledge_batch`, `list_ui_commands`, `list_ui_interactions`, `show_ui_controls` |

@@ -30,6 +30,27 @@ be possible using existing controls alone, without any new desktop learning.
 
 ## Learn and archive controls
 
+For a single captured control, `capture_control_record_at_position` or
+`capture_control_record_on_ctrl` returns an observation without saving it. Archive
+that record with `upsert_control_record(record_json=..., app_id=..., vault=...,
+page_id=..., region_id=...)`. Use the actual saved app/page/region IDs. This writes
+the GUI's control library; the former external vector-store adapter is no longer
+used. Ambiguous membership requires a specific scope, not a guessed new application.
+Existing manual descriptions, entry paths, images and quarantine are preserved.
+Metadata-only observations remain unverified and must not be described as tested.
+
+For an existing legacy JSON/JSONL export, use `import_control_records` with
+`dry_run=true` to inspect destination IDs and rejected rows, then `dry_run=false`
+within the requested import scope. Originals are retained. Correct rejected rows
+and retry the import; matching controls reuse their IDs. No external Python module
+or vector database configuration is required.
+
+If the user requests learning during ordinary actions, set `mode="mixed"` with
+the intended `vault`, `app_id` and optional page/region in `set_mode`. Inspect the
+action's `learning` result: an input can succeed while archival fails. Do not repeat
+the input to retry archival. Mixed mode records observations, not deep exploration
+or proof that a business action succeeded.
+
 For new region learning, call `get_ui_library_readiness`. It checks the local
 models/runtime; `reference_api_configured` separately reports the optional API for
 reference-assisted descriptions. Missing local models must not trigger a remote
@@ -67,6 +88,16 @@ progress report; reaching a budget is not completion. Do not rerun an uncertain
 business operation to complete coverage. Read `complete`, `unfinished`, `issues`,
 and `workflow_ids` from the task result. The progress report is also saved under
 the app's usage knowledge and `learning/*.json`.
+
+For learning from one saved control, call `operation="deep-learn-control"` with its
+`control_id`, the same `app_id`/`vault`, and the selected main `window_handle`.
+The worker infers the saved parent region, restricts initial interactions to that
+control, and continues through its resulting menus, dialogs and new controls.
+Unrelated entries remain outside the interaction scope. It archives new regions,
+controls and combination actions using the same backend. All four learning modes
+and the same inputs, budgets and commit policy apply. Sessions are separate for each
+entry control and for the whole region; a `session_id` must match that scope.
+Missing or unassigned controls must be corrected in the GUI before starting.
 
 For an unfinished run, use `mode="resume"` and optionally its `session_id`; added
 inputs and reference material do not create a new session. Blocked and failures

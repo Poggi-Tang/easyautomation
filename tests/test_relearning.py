@@ -72,7 +72,7 @@ def test_improve_selected_control_does_not_execute_other_entries(library,region)
     first=Explorer(library,"demo",region,Backend(library));first.run()
     backend=Backend(library)
     Explorer(library,"demo",region,backend,mode="improve",control_ids=["toolbar"]).run()
-    assert backend.executed==["toolbar"]
+    assert backend.executed==["toolbar","fill"]
 
 
 def test_improve_cannot_claim_success_for_unreached_selection(library,region):

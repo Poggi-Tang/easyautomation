@@ -194,6 +194,8 @@ def _write_markdown(path, metadata, body):
     try:
         knowledge.write_markdown(temporary,metadata,body)
         temporary.replace(path)
+        from .vault_changes import notify
+        notify(path)
     finally:
         temporary.unlink(missing_ok=True)
 

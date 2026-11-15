@@ -91,7 +91,12 @@ def write_notices(root: Path, target: Path):
     for license_file in root.glob("LICENSE*"):
         if license_file.is_file():shutil.copy2(license_file,target/license_file.name)
     (target/"THIRD_PARTY_NOTICES.txt").write_text(
-        "easy-uiauto knowledge manager\n\nQt for Python (PySide6 Essentials, Shiboken6)\n"
+        "easy-uiauto knowledge manager\n\n"
+        "easy-uiauto: free for individuals; paid written license required for enterprise use.\n"
+        "See LICENSE for the terms.\n"
+        "Licensing, customization and setup services: 2322806855@qq.com\n"
+        "Third-party components and models retain their own licenses.\n\n"
+        "Qt for Python (PySide6 Essentials, Shiboken6)\n"
         "Qt components retain their original licenses and copyright.\n"
         "License texts: third_party/qt/licenses, plus the distribution metadata under _internal.\n"
         "Qt source and licensing: https://www.qt.io/qt-for-python ; https://code.qt.io/\n"

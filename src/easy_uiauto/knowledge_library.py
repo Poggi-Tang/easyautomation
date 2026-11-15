@@ -24,6 +24,15 @@ class KnowledgeLibrary:
         """A state uses its own existing page namespace; legacy IDs stay intact."""
         return KnowledgeLibrary(self.root, page_id=page_id)
 
+    def upsert_control_record(self, record, *, app_id="", page_id="", region_id=""):
+        """Import a captured or legacy observation into the same records used by the GUI."""
+        from .control_import import upsert
+        return upsert(self, record, app_id=app_id, page_id=page_id, region_id=region_id)
+
+    def import_control_records(self, source_path, *, app_id="", page_id="", region_id="", dry_run=True):
+        from .control_import import import_records
+        return import_records(self, source_path, app_id=app_id, page_id=page_id, region_id=region_id, dry_run=dry_run)
+
     def state(self, app_id: str) -> dict:
         return self.page(app_id).get("region_state", {})
 
@@ -710,8 +719,19 @@ class KnowledgeLibrary:
 
     @staticmethod
     def _refresh(directory: Path):
+        from .vault_changes import notify
+        notify(directory)
         knowledge.rebuild_index(directory)
         knowledge.write_command_catalog(directory)
+
+    def assert_unchanged(self, app_id, kind, original):
+        """Protect unsaved editor input from overwriting another process's changes."""
+        section = {"control":"controls", "region":"regions", "workflow":"workflows",
+                   "usage":"usage", "reference":"references"}.get(kind)
+        if not section or not original.get("id"):return
+        current = next((r for r in self.read(app_id)[section] if r.get("id") == original["id"]), None)
+        if current != original:
+            raise ValueError("此记录已被其他入口修改或删除，未覆盖外部结果。当前输入已保留；请复制修改内容，重新选择记录后合并。")
 
     def update_control(self, app_id: str, control_id: str, *, name: str,
                        description: str, aliases: list[str], location: dict | None = None,

@@ -7,6 +7,8 @@ name = "easy-uiauto"
 version = "1.0.2"
 description = "UI automation toolkit based on pyautogui and uiautomation"
 readme = "README.md"
+license = "LicenseRef-easy-uiauto-Personal-Enterprise"
+license-files = ["LICENSE"]
 requires-python = ">=3.11"
 dependencies = [
     "pyautogui>=0.9.54",
@@ -23,7 +25,6 @@ authors = [
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
     "Operating System :: Microsoft :: Windows",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",

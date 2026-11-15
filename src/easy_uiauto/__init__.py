@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 # Preserve the public objects, but load their backends only when requested.
 # Opening the knowledge manager must not initialize recording, UIA or OpenCV.
 _EXPORT_MODULES = {
+    "KnowledgeLibrary": ".knowledge_library",
     **{name: ".ctrl" for name in (
         "Controller", "left_click", "right_click", "double_click", "centre_click",
         "mouse_left_press", "mouse_left_release", "mouse_right_press", "mouse_right_release",
@@ -25,6 +26,7 @@ _EXPORT_MODULES = {
 }
 
 if TYPE_CHECKING:
+    from .knowledge_library import KnowledgeLibrary
     from .ctrl import (Controller, left_click, right_click, double_click, centre_click,
         mouse_left_press, mouse_left_release, mouse_right_press, mouse_right_release,
         mouse_move_pos, mouse_move_control, drag_control, drag_control_by_control,
@@ -36,6 +38,7 @@ if TYPE_CHECKING:
     from .visual import crop_window_image, segment_image, segment_screen_rect
 
 __all__ = [
+    "KnowledgeLibrary",
     "Controller",
     "ScreenControlOverlay",
     "ScreenLineBox",

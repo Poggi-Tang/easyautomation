@@ -1,8 +1,12 @@
 # Qt for Python
 
 The knowledge manager uses PySide6 Essentials and Shiboken6, linked to Qt's
-shared libraries. Their licenses are separate from easy-uiauto's MIT license.
+shared libraries. Their licenses are separate from easy-uiauto's own license.
 Installed distribution metadata records the versions and license declarations.
+
+easy-uiauto's personal/enterprise licensing terms do not restrict the rights
+granted by these component licenses, including LGPL library replacement and
+reverse engineering needed to debug modifications to the library.
 
 The included license texts were copied without modification from the official
 Qt for Python source tag v6.10.3:

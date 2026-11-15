@@ -10,9 +10,11 @@ import os
 import re
 import subprocess
 import sys
+import threading
 import time
 from datetime import datetime
 from functools import wraps
+from pathlib import Path
 from typing import Literal, Optional
 from urllib import error as urlerror
 from urllib import request as urlrequest
@@ -88,6 +90,8 @@ mcp = FastMCP(
 
 VALID_MODES = {"operate", "learn", "mixed"}
 CURRENT_MODE = "operate"
+LEARNING_CONTEXT = {}
+_AUTO_LEARNING = threading.local()
 LEARNING_LOG_PATH = os.environ.get(
     "EASY_UIAUTO_LEARNING_LOG",
     os.path.join(os.environ.get("TEMP", os.path.expanduser("~")), "easy_uiauto_learning.log"),
@@ -113,12 +117,20 @@ def _action_result(*, observation: bool = False):
     def decorate(function):
         @wraps(function)
         def wrapped(*args, **kwargs):
+            learning = globals().get("_AUTO_LEARNING")
+            previous = getattr(learning, "results", None)
+            if learning is not None:learning.results = []
             try:
                 with strict_control_resolution(activate=not observation):
                     value = function(*args, **kwargs)
             except Exception as error:
                 value = error
-            return json.dumps(normalize_result(value, observation=observation), ensure_ascii=False)
+            result = normalize_result(value, observation=observation)
+            if learning is not None:
+                if learning.results:result["learning"] = learning.results
+                if previous is not None:previous.extend(learning.results)
+                learning.results = previous
+            return json.dumps(result, ensure_ascii=False)
         wrapped.__doc__ = (function.__doc__ or "") + (
             "\n\nReturns JSON: ok, code, message, verified, retryable, data. "
             "ok alone does not verify the application's intended effect. "
@@ -422,7 +434,7 @@ def _auto_learn_location(action_title: str, location: dict, notes: str = "") -> 
             return
         ctrl = _find_control(location, debug=False)
         if not ctrl or ctrl is False:
-            return
+            raise ValueError("操作后未找到原控件，未保存控件知识")
         xpath = location.get("Xpath") or get_control_xpath(ctrl)
         record = _record_from_control(
             ctrl,
@@ -433,16 +445,9 @@ def _auto_learn_location(action_title: str, location: dict, notes: str = "") -> 
             tags="auto_learn,mixed",
             source="mixed_auto_learn",
         )
-        store = _load_control_vector_store()
-        rid = store.upsert_control(record)
-        _learning_log(
-            f"auto-upsert id={rid} alias={record.get('alias')} "
-            f"window={record.get('window_name')} type={record.get('control_type')} "
-            f"name={record.get('name')} class={record.get('class_name')}"
-        )
-    except Exception:
-        # Auto-learning must never make the UI action fail.
-        return
+        _save_auto_observation(record)
+    except Exception as error:
+        _report_auto_learning(dict(ok=False, error=str(error), message="操作后的控件采集未入库，不要重复操作"))
 
 
 def _auto_learn_point(action_title: str, x: int, y: int, notes: str = "") -> None:
@@ -451,7 +456,7 @@ def _auto_learn_point(action_title: str, x: int, y: int, notes: str = "") -> Non
     try:
         xpath_list, ctrl = get_control_info(x, y)
         if not ctrl:
-            return
+            raise ValueError("操作后坐标处没有可采集的控件")
         record = _record_from_control(
             ctrl,
             xpath_list,
@@ -462,15 +467,9 @@ def _auto_learn_point(action_title: str, x: int, y: int, notes: str = "") -> Non
             source="mixed_auto_learn",
         )
         record["capture_point"] = {"x": x, "y": y}
-        store = _load_control_vector_store()
-        rid = store.upsert_control(record)
-        _learning_log(
-            f"auto-upsert-point id={rid} alias={record.get('alias')} "
-            f"point=({x},{y}) window={record.get('window_name')} "
-            f"type={record.get('control_type')} name={record.get('name')}"
-        )
-    except Exception:
-        return
+        _save_auto_observation(record)
+    except Exception as error:
+        _report_auto_learning(dict(ok=False, error=str(error), message="操作后的控件采集未入库，不要重复操作"))
 
 
 def _recorded_action_is_mutating(action: dict) -> bool:
@@ -573,17 +572,18 @@ def _safe_alias_part(text: str) -> str:
     return text.strip("_.") or "Control"
 
 
-def _load_control_vector_store():
-    module_dir = os.environ.get("EASY_UIAUTO_CONTROL_VECTOR_DB_DIR", "")
-    if not module_dir:
-        raise RuntimeError(
-            "Control-vector storage is not configured. Set EASY_UIAUTO_CONTROL_VECTOR_DB_DIR "
-            "to a directory containing control_vector_store.py."
-        )
-    if module_dir not in sys.path:
-        sys.path.insert(0, module_dir)
-    import control_vector_store  # type: ignore
-    return control_vector_store
+def _report_auto_learning(result):
+    if getattr(_AUTO_LEARNING, "results", None) is not None:
+        _AUTO_LEARNING.results.append(result)
+    _learning_log("shared-library " + json.dumps(result, ensure_ascii=False))
+
+
+def _save_auto_observation(record):
+    from ..knowledge_library import KnowledgeLibrary
+    context = dict(LEARNING_CONTEXT)
+    library = KnowledgeLibrary(context.pop("vault", "") or None)
+    result = library.upsert_control_record(record, **context)
+    _report_auto_learning({key: result[key] for key in ("ok", "vault", "app_id", "id", "action", "message")})
 
 
 def _ctrl_pressed() -> bool:
@@ -782,27 +782,48 @@ def wait_for_window(window_name: str, state: str = "exists", baseline: Optional[
 @mcp.tool()
 def get_mode() -> str:
     """Return the current UI automation mode: operate, learn, or mixed."""
-    return json.dumps({"mode": CURRENT_MODE}, ensure_ascii=False)
+    return json.dumps({"mode": CURRENT_MODE, "learning_context": LEARNING_CONTEXT}, ensure_ascii=False)
 
 
 @mcp.tool()
-def set_mode(mode: str) -> str:
+def set_mode(mode: str, vault: str = "", app_id: str = "", page_id: str = "", region_id: str = "") -> str:
     """Set the UI automation mode.
 
     Modes:
       - operate: allow UI operations, no automatic control-library writes.
       - learn: allow observation/capture/upsert only; block mutating UI operations.
-      - mixed: allow UI operations and best-effort auto-learning of successful controls.
+      - mixed: allow UI operations and archive observations in the shared vault.
+
+    Optional vault/app/page/region select the same destination as the GUI.
+    Missing scope is inferred only when unambiguous. Actions return learning results
+    separately from execution; an archive failure is not a reason to repeat input.
     """
-    global CURRENT_MODE
+    global CURRENT_MODE, LEARNING_CONTEXT
     mode = (mode or "").strip().lower()
     if mode not in VALID_MODES:
         return f"Error: mode must be one of {sorted(VALID_MODES)}"
+    from ..knowledge_library import KnowledgeLibrary
+    try:
+        library = KnowledgeLibrary(vault or None)
+        if (page_id or region_id) and not app_id:
+            raise ValueError("page_id / region_id requires app_id")
+        if app_id:
+            snapshot = library.read(app_id)
+            if page_id and not any(p["id"] == page_id for p in snapshot["pages"]):
+                raise ValueError("页面状态不存在")
+            if region_id:
+                region = next((r for r in snapshot["regions"] if r["id"] == region_id), None)
+                if region is None:raise ValueError("区域不存在")
+                if page_id and region["page_id"] != page_id:raise ValueError("区域与页面状态不一致")
+                page_id = region["page_id"]
+    except Exception as error:
+        return json.dumps(dict(ok=False, error=str(error)), ensure_ascii=False)
+    LEARNING_CONTEXT = dict(vault=str(library.root), app_id=app_id, page_id=page_id, region_id=region_id)
     CURRENT_MODE = mode
     _learning_log(f"mode set to {CURRENT_MODE}")
     if CURRENT_MODE in {"learn", "mixed"}:
         _ensure_learning_console()
-    return json.dumps({"ok": True, "mode": CURRENT_MODE}, ensure_ascii=False)
+    return json.dumps({"ok": True, "mode": CURRENT_MODE, "learning_context": LEARNING_CONTEXT}, ensure_ascii=False)
 
 
 @mcp.tool()
@@ -1018,7 +1039,7 @@ def capture_control_record_at_position(
     tags: str = "",
     source: str = "easy_uiauto",
 ) -> str:
-    """Capture a control at screen coordinates as a control-vector-db record.
+    """Capture a control observation for the shared knowledge library.
 
     The returned JSON can be reviewed manually, saved with upsert_control_record,
     or used by an AI workflow to build future easy_uiauto actions.
@@ -1059,7 +1080,7 @@ def capture_control_record_on_ctrl(
     """Wait for Ctrl, then capture the control under the current mouse pointer.
 
     Usage: call this tool, move the mouse over a target control, press Ctrl,
-    then review the returned control-vector-db JSON record.
+    then review the returned observation and save it with upsert_control_record.
 
     Args:
         alias: Stable control alias to store.
@@ -1095,11 +1116,15 @@ def capture_control_record_on_ctrl(
 
 
 @mcp.tool()
-def upsert_control_record(record_json: str) -> str:
-    """Insert or update one control-vector-db record.
+def upsert_control_record(record_json: str, app_id: str = "", vault: str = "",
+                          page_id: str = "", region_id: str = "") -> str:
+    """Archive one observation in the same Markdown knowledge library as the GUI.
 
     The input must match the JSON shape returned by capture_control_record_at_position.
-    It writes both SQLite and ChromaDB through control_vector_store.upsert_control.
+    Legacy records are converted; no external vector-store module is needed.
+    Specify vault and app/page/region to preserve GUI membership. Ambiguous scope
+    is rejected. Existing manual edits and quarantine are preserved. Metadata-only
+    imports do not create verified positioning, screenshots or business evidence.
 
     Args:
         record_json: Control record JSON object.
@@ -1108,18 +1133,30 @@ def upsert_control_record(record_json: str) -> str:
         record = json.loads(record_json)
         if not isinstance(record, dict):
             return "Error: record_json must be a JSON object"
-        if not record.get("alias"):
-            return "Error: record_json must include alias"
-        store = _load_control_vector_store()
-        rid = store.upsert_control(record)
-        _learning_log(
-            f"manual-upsert id={rid} alias={record.get('alias')} "
-            f"window={record.get('window_name')} type={record.get('control_type')} "
-            f"name={record.get('name')} class={record.get('class_name')}"
-        )
-        return json.dumps({"ok": True, "id": rid, "alias": record.get("alias")}, ensure_ascii=False)
+        from ..knowledge_library import KnowledgeLibrary
+        result = KnowledgeLibrary(vault or None).upsert_control_record(
+            record, app_id=app_id, page_id=page_id, region_id=region_id)
+        return json.dumps(result, ensure_ascii=False)
     except Exception as e:
         return f"Error upserting control record: {e}"
+
+
+@mcp.tool()
+def import_control_records(source_path: str, app_id: str = "", vault: str = "",
+                           page_id: str = "", region_id: str = "", dry_run: bool = True) -> str:
+    """Preview or migrate a legacy JSON/JSONL export into the shared GUI vault.
+
+    Accept an array, {records: [...]} or one record per JSONL line. Originals are
+    retained. Results identify every rejected row; successful records can be retried
+    without duplicating controls. Set dry_run=false to apply the import.
+    """
+    from ..knowledge_library import KnowledgeLibrary
+    try:
+        result = KnowledgeLibrary(vault or None).import_control_records(
+            source_path, app_id=app_id, page_id=page_id, region_id=region_id, dry_run=dry_run)
+        return json.dumps(result, ensure_ascii=False)
+    except Exception as error:
+        return json.dumps(dict(ok=False, error=str(error)), ensure_ascii=False)
 
 
 # ---------------------------------------------------------------------------
@@ -1158,6 +1195,7 @@ async def scan_window_knowledge(
     strategy: str = "visual-first",
     show_overlay: bool = True,
     overlay_duration_ms: int = 3000,
+    vault: str = "",
 ) -> str:
     """Scan one application window into an Obsidian-compatible UI knowledge vault.
 
@@ -1182,6 +1220,7 @@ async def scan_window_knowledge(
         strategy: ``visual-first`` (default) or diagnostic ``full-uia``.
         show_overlay: Draw all controls learned by this scan in one click-through overlay.
         overlay_duration_ms: Overlay lifetime from 300 to 30000 milliseconds.
+        vault: Shared knowledge directory; omit to use the configured default.
     """
     try:
         task_id = learning_progress.begin(window_name, strategy)
@@ -1210,6 +1249,7 @@ async def scan_window_knowledge(
                     show_overlay=show_overlay,
                     overlay_duration_ms=overlay_duration_ms,
                     progress=update_progress,
+                    **({"root": Path(vault)} if vault else {}),
                 )
             result["learning_task_id"] = task_id
             learning_progress.complete(task_id, result)
@@ -1312,7 +1352,7 @@ def get_ui_library_readiness() -> str:
 
 @mcp.tool()
 def start_ui_library_task(
-    operation: Literal["learn-region", "deep-learn-region", "expand-control", "run-workflow", "supplement-descriptions"],
+    operation: Literal["learn-region", "deep-learn-region", "deep-learn-control", "expand-control", "run-workflow", "supplement-descriptions"],
     app_id: str, vault: str = "", region_id: str = "", control_id: str = "",
     workflow_id: str = "", window_handle: int = 0, parameters: dict | None = None,
     max_controls: int = 3000,
@@ -1323,9 +1363,13 @@ def start_ui_library_task(
     learn-region scans the already visible confirmed region without executing entry
     steps. Open the intended region state before starting basic learning.
     deep-learn-region explores interaction branches and archives regions, controls,
-    shared workflows and a progress report. learning_options accepts inputs (object),
+    shared workflows and a progress report. deep-learn-control starts from control_id
+    and explores its resulting menus, dialogs and subsequent flows, excluding unrelated
+    entrances. It keeps a separate resumable session for that control. region_id is
+    inferred from the saved control. learning_options accepts inputs (object),
     instructions (text), max_actions (1..2000), max_depth (1..100), resume (legacy bool),
-    mode (resume/improve/update/new), session_id (optional existing regional session),
+    mode (resume/improve/update/new), session_id (existing session with matching scope),
+    entry_control_id (optional fixed entry for deep-learn-region),
     control_ids/workflow_ids (improvement scope), retry_branches (explicitly confirmed
     safe-to-retry uncertain branch IDs, never infer this confirmation),
     allow_commit (bool, default false), reset_workflow_id (explicit recovery workflow).
@@ -1412,12 +1456,13 @@ def save_ui_workflow(app_id: str, workflow: dict, vault: str = "") -> str:
 
 
 @mcp.tool()
-def list_ui_knowledge_apps() -> str:
+def list_ui_knowledge_apps(vault: str = "") -> str:
     """List applications and locator/semantic verification counts."""
     try:
-        return json.dumps(knowledge.list_apps(), ensure_ascii=False, indent=2)
+        return json.dumps((knowledge.list_apps(root=Path(vault)) if vault else knowledge.list_apps()), ensure_ascii=False, indent=2)
     except Exception as error:
         return f"Error listing UI knowledge applications: {error}"
+
 
 
 @mcp.tool()
@@ -1426,6 +1471,7 @@ def search_ui_knowledge(
     query: str = "",
     include_quarantine: bool = False,
     limit: int = 50,
+    vault: str = "",
 ) -> str:
     """Search an application's Markdown control knowledge.
 
@@ -1436,7 +1482,7 @@ def search_ui_knowledge(
         limit: Maximum records returned.
     """
     try:
-        directory = knowledge.app_dir(app_id)
+        directory = (knowledge.app_dir(app_id, root=Path(vault)) if vault else knowledge.app_dir(app_id))
         statuses = None
         if include_quarantine:
             statuses = {"verified", "observed", "suspect", "quarantined"}
@@ -1446,12 +1492,14 @@ def search_ui_knowledge(
         return f"Error searching UI knowledge: {error}"
 
 
+
 @mcp.tool()
 def search_ui_knowledge_batch(
     app_id: str,
     queries: list[str],
     include_quarantine: bool = False,
     limit_per_query: int = 20,
+    vault: str = "",
 ) -> str:
     """Search several UI intents in one MCP call and return results by query.
 
@@ -1470,7 +1518,7 @@ def search_ui_knowledge_batch(
         statuses = None
         if include_quarantine:
             statuses = {"verified", "observed", "suspect", "quarantined"}
-        directory = knowledge.app_dir(app_id)
+        directory = (knowledge.app_dir(app_id, root=Path(vault)) if vault else knowledge.app_dir(app_id))
         controls_by_id = {}
         matches = {}
         for query in normalized_queries:
@@ -1495,14 +1543,16 @@ def search_ui_knowledge_batch(
         return f"Error batch searching UI knowledge: {error}"
 
 
+
 @mcp.tool()
-def list_ui_commands(app_id: str, page_id: str = "") -> str:
+def list_ui_commands(app_id: str, page_id: str = "", vault: str = "") -> str:
     """List the verified semantic UI CLI commands for an application or page."""
     try:
-        commands = knowledge.available_commands(knowledge.app_dir(app_id), page_id)
+        commands = knowledge.available_commands((knowledge.app_dir(app_id, root=Path(vault)) if vault else knowledge.app_dir(app_id)), page_id)
         return json.dumps(commands, ensure_ascii=False, indent=2)
     except Exception as error:
         return f"Error listing UI commands: {error}"
+
 
 
 @mcp.tool()
@@ -1511,6 +1561,7 @@ def show_ui_controls(
     page_id: str = "",
     include: str = "executable",
     duration_ms: int = 5000,
+    vault: str = "",
 ) -> str:
     """Box controls on the current learned page and return their numbered command legend.
 
@@ -1523,7 +1574,7 @@ def show_ui_controls(
     """
     try:
         result = visualization.show_page_controls(
-            knowledge.app_dir(app_id),
+            (knowledge.app_dir(app_id, root=Path(vault)) if vault else knowledge.app_dir(app_id)),
             page_id,
             include,
             duration_ms,
@@ -1531,6 +1582,7 @@ def show_ui_controls(
         return json.dumps(result, ensure_ascii=False, indent=2)
     except Exception as error:
         return f"Error showing UI controls: {error}"
+
 
 
 @mcp.tool()
@@ -1543,6 +1595,7 @@ def run_ui_command(
     allow_vision_fallback: bool = False,
     highlight: bool = True,
     highlight_duration_ms: int = 900,
+    vault: str = "",
 ) -> str:
     """Run one verified application-specific UI command.
 
@@ -1558,7 +1611,7 @@ def run_ui_command(
         if blocked:
             return blocked
         return ui_cli.execute_json(
-            knowledge.app_dir(app_id),
+            (knowledge.app_dir(app_id, root=Path(vault)) if vault else knowledge.app_dir(app_id)),
             command,
             text,
             confirm,
@@ -1571,6 +1624,7 @@ def run_ui_command(
         return json.dumps(normalize_result(error), ensure_ascii=False)
 
 
+
 @mcp.tool()
 @_action_result()
 def run_ui_commands(
@@ -1580,6 +1634,7 @@ def run_ui_commands(
     allow_vision_fallback: bool = False,
     highlight: bool = True,
     highlight_duration_ms: int = 1200,
+    vault: str = "",
 ) -> str:
     """Run a verified same-page UI command sequence with one shared preflight.
 
@@ -1600,7 +1655,7 @@ def run_ui_commands(
         if blocked:
             return blocked
         return ui_cli.execute_many_json(
-            knowledge.app_dir(app_id),
+            (knowledge.app_dir(app_id, root=Path(vault)) if vault else knowledge.app_dir(app_id)),
             steps,
             confirm,
             allow_vision_fallback,
@@ -1612,6 +1667,7 @@ def run_ui_commands(
         return json.dumps(normalize_result(error), ensure_ascii=False)
 
 
+
 @mcp.tool()
 def learn_ui_command_effect(
     app_id: str,
@@ -1621,6 +1677,7 @@ def learn_ui_command_effect(
     recover: bool = False,
     maximum_wait_seconds: float = 3.0,
     highlight: bool = True,
+    vault: str = "",
 ) -> str:
     """Learn one command's before/after visual, window, and local UIA effects.
 
@@ -1636,7 +1693,7 @@ def learn_ui_command_effect(
             return blocked
         api_url, api_key, model = _vision_api_settings("")
         result = interaction_learning.learn_command_effect(
-            knowledge.app_dir(app_id),
+            (knowledge.app_dir(app_id, root=Path(vault)) if vault else knowledge.app_dir(app_id)),
             command,
             api_url,
             api_key,
@@ -1653,6 +1710,7 @@ def learn_ui_command_effect(
         return f"Error learning UI command effect: {error}"
 
 
+
 @mcp.tool()
 async def explore_ui_workflows(
     app_id: str,
@@ -1662,6 +1720,7 @@ async def explore_ui_workflows(
     confirm: bool = False,
     max_depth: int = 3,
     highlight: bool = True,
+    vault: str = "",
 ) -> str:
     """Interact with known reversible controls and learn their direct responses.
 
@@ -1689,7 +1748,7 @@ async def explore_ui_workflows(
             try:
                 with uiautomation.UIAutomationInitializerInThread():
                     value = interaction_learning.explore_application(
-                        knowledge.app_dir(app_id),
+                        (knowledge.app_dir(app_id, root=Path(vault)) if vault else knowledge.app_dir(app_id)),
                         api_url,
                         api_key,
                         model,
@@ -1746,14 +1805,16 @@ async def explore_ui_workflows(
         return f"Error exploring UI workflows: {error}"
 
 
+
 @mcp.tool()
-def list_ui_interactions(app_id: str, command: str = "", limit: int = 50) -> str:
+def list_ui_interactions(app_id: str, command: str = "", limit: int = 50, vault: str = "") -> str:
     """List learned before/after operation-effect records."""
     try:
-        records = knowledge.list_interactions(knowledge.app_dir(app_id), command, limit)
+        records = knowledge.list_interactions((knowledge.app_dir(app_id, root=Path(vault)) if vault else knowledge.app_dir(app_id)), command, limit)
         return json.dumps(records, ensure_ascii=False, indent=2)
     except Exception as error:
         return f"Error listing UI interactions: {error}"
+
 
 
 @mcp.tool()
@@ -1767,6 +1828,7 @@ def teach_ui_control(
     aliases: str = "",
     risk: str = "safe",
     requires_confirmation: bool = False,
+    vault: str = "",
 ) -> str:
     """Teach or correct one control's real function using human-confirmed semantics.
 
@@ -1777,7 +1839,7 @@ def teach_ui_control(
     try:
         selected_actions = [value.strip() for value in actions.split(",") if value.strip()]
         record = knowledge.teach_control(
-            knowledge.app_dir(app_id),
+            (knowledge.app_dir(app_id, root=Path(vault)) if vault else knowledge.app_dir(app_id)),
             control_id,
             semantic_name,
             intent,
@@ -1792,8 +1854,9 @@ def teach_ui_control(
         return f"Error teaching UI control: {error}"
 
 
+
 @mcp.tool()
-def revalidate_ui_control(app_id: str, control_id: str) -> str:
+def revalidate_ui_control(app_id: str, control_id: str, vault: str = "") -> str:
     """Explicitly recheck a quarantined control without executing its action.
 
     Use after repairing its locator or restoring the required visible page.
@@ -1802,17 +1865,18 @@ def revalidate_ui_control(app_id: str, control_id: str) -> str:
     release it. Original failure evidence is retained.
     """
     try:
-        return json.dumps(ui_cli.revalidate_control(knowledge.app_dir(app_id), control_id),
+        return json.dumps(ui_cli.revalidate_control((knowledge.app_dir(app_id, root=Path(vault)) if vault else knowledge.app_dir(app_id)), control_id),
                           ensure_ascii=False, indent=2)
     except Exception as error:
         return json.dumps(normalize_result(error), ensure_ascii=False)
 
 
+
 @mcp.tool()
-def rebuild_ui_knowledge_index(app_id: str) -> str:
+def rebuild_ui_knowledge_index(app_id: str, vault: str = "") -> str:
     """Rebuild the disposable JSON index and UI CLI catalog from Markdown."""
     try:
-        directory = knowledge.app_dir(app_id)
+        directory = (knowledge.app_dir(app_id, root=Path(vault)) if vault else knowledge.app_dir(app_id))
         index = knowledge.rebuild_index(directory)
         catalog = knowledge.write_command_catalog(directory)
         return json.dumps(
@@ -1830,12 +1894,14 @@ def rebuild_ui_knowledge_index(app_id: str) -> str:
         return f"Error rebuilding UI knowledge index: {error}"
 
 
+
 @mcp.tool()
 def cleanup_ui_knowledge_images(
     app_id: str,
     keep_control_variants: int | None = None,
     keep_interaction_images: int | None = None,
     dry_run: bool = True,
+    vault: str = "",
 ) -> str:
     """Preview or remove unreferenced managed images for one learned application.
 
@@ -1846,11 +1912,12 @@ def cleanup_ui_knowledge_images(
     """
     try:
         value = image_storage.cleanup_images(
-            knowledge.app_dir(app_id), keep_control_variants=keep_control_variants,
+            (knowledge.app_dir(app_id, root=Path(vault)) if vault else knowledge.app_dir(app_id)), keep_control_variants=keep_control_variants,
             keep_interaction_images=keep_interaction_images, dry_run=dry_run)
         return json.dumps(value, ensure_ascii=False, indent=2)
     except Exception as error:
         return json.dumps(normalize_result(error), ensure_ascii=False)
+
 
 
 # ---------------------------------------------------------------------------

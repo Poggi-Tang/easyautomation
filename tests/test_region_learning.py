@@ -172,6 +172,86 @@ def test_mcp_prepares_deep_job_with_same_app_and_explicit_options(library,tmp_pa
     assert result["app_id"]=="demo"
 
 
+def test_mcp_single_control_infers_region_and_rejects_wrong_scope(library,tmp_path,monkeypatch):
+    region=library.save_picked_region("demo",picked(tmp_path))
+    control=library.save_captured_control("demo",picked(tmp_path),name="新建",region_id=region)
+    monkeypatch.setattr(library_tools,"_window",lambda *args:dict(handle=123,title="Test"))
+    result=library_tools._request("deep-learn-control","demo",vault=str(library.root),control_id=control["id"],
+                                  learning_options=dict(mode="new",max_actions=20))
+    assert result["operation"]=="deep-learn" and result["region_id"]==region
+    assert result["learning_options"]["entry_control_id"]==control["id"]
+    assert result["learning_options"]["mode"]=="new"
+    for options in (dict(control_id="missing"),dict(control_id=control["id"],region_id="wrong"),
+                    dict(control_id=control["id"],learning_options={"entry_control_id":"other"})):
+        with pytest.raises(ValueError):library_tools._request("deep-learn-control","demo",vault=str(library.root),**options)
+
+
+def test_worker_rejects_control_from_other_region_before_constructing_native_backend(library,tmp_path,monkeypatch):
+    region=library.save_picked_region("demo",picked(tmp_path))
+    record=add_control(library)
+    monkeypatch.setattr(region_learning,"NativeBackend",lambda *a,**k:pytest.fail("constructed backend for wrong region"))
+    with pytest.raises(ValueError,match="所属区域"):
+        region_learning.learn_region(library,"demo",region,{},tmp_path,entry_control_id=record["id"])
+    with pytest.raises(ValueError,match="文本"):
+        region_learning.validate_options(dict(entry_control_id=1))
+
+
+def test_planner_learns_child_semantics_without_changing_unrelated_root_entry(backend,library,monkeypatch):
+    base=add_control(library);records=[]
+    for identifier in ("entry","child","unrelated"):
+        record={**deepcopy(base),"id":identifier,"semantic_name":"旧名称","description":"旧说明"}
+        knowledge.save_control(library.directory("demo"),record);records.append(record)
+    backend.configure_learning(dict(states={},root=""),"improve",["entry"],[])
+    def plan(settings,payload,image):
+        assert payload["selected_control_ids"]==[] and payload["exploration_scope"]["followup"]
+        return dict(branches=[],semantics=[dict(control_id=r["id"],description="后续说明") for r in records])
+    monkeypatch.setattr(region_learning,"_request_plan",plan)
+    backend.plan(dict(controls=records,image=Image.new("RGB",(10,10)),exploration_scope=dict(
+        followup=True,selected_control_ids=["entry"],excluded_entry_control_ids=["unrelated"])),[])
+    current={r["id"]:r for r in library.read("demo")["controls"]}
+    assert current["child"]["description"]=="后续说明" and current["unrelated"]["description"]=="旧说明"
+
+
+@pytest.mark.parametrize("resolved", [True, False])
+def test_manual_entry_omitted_by_scan_requires_fresh_visible_locator(backend,library,monkeypatch,resolved):
+    from easy_uiauto import library_actions,image_models
+    record=add_control(library);record.update(region_id=backend.region["id"],semantic_source="manual")
+    knowledge.save_control(library.directory("demo"),record)
+    backend.configure_learning(dict(states={},root="",entry_control_id=record["id"]),"new",[record["id"]],[])
+    opened=[]
+    def open_entry(lib,app,entry,*a,**k):
+        assert not entry.get("location")  # Entry verification below also supports image locators.
+        opened.append(entry["id"])
+    monkeypatch.setattr(region_actions,"open_region",open_entry)
+    monkeypatch.setattr(image_models,"inspect_models",lambda **k:dict(ok=True))
+    monkeypatch.setattr(library_actions,"bind_window",lambda *a:object())
+    def resolve(*a,**k):
+        if not resolved:raise ValueError("stale locator")
+        return SimpleNamespace(IsEnabled=True)
+    monkeypatch.setattr(library_actions,"resolve_record",resolve)
+    monkeypatch.setattr(scanner,"_window_rect",lambda _:dict(left=10,top=10,width=20,height=20))
+    monkeypatch.setattr(scanner,"scan_window",lambda *a,**k:dict(observed_control_ids=[],truncated=False))
+    frame=dict(state_id="root",image=Image.new("RGB",(400,300)),target=backend.expected,scope={"kind":"main"},
+               bounds=dict(left=0,top=0,width=400,height=300),issues=[])
+    monkeypatch.setattr(backend,"stable_frame",lambda:deepcopy(frame))
+    observed=backend.observe(root=True)
+    assert opened==[record["id"]]
+    assert (record["id"] in [r["id"] for r in observed["controls"]])==resolved
+    if not resolved:assert any("指定入口尚未定位" in reason for reason in observed["issues"])
+
+
+def test_scoped_post_learning_validation_does_not_replay_unrelated_workflow(backend,library,monkeypatch):
+    record=add_control(library)
+    step=workflows.click_step(record,action="inspect")
+    step["checks"]=[dict(id="check",kind="exists",target=dict(control_id=record["id"]))]
+    flow=library.save_workflow("demo",dict(id="unrelated",keyword="其他入口流程",entry_state="root",steps=[step]))
+    backend.configure_learning(dict(states={},root=""),"update",[],[flow["id"]]);backend.revision.summarize()
+    monkeypatch.setattr(workflows,"execute",lambda *a,**k:pytest.fail("executed unrelated workflow"))
+    backend.validate_affected_workflows(dict(entry_control_id=record["id"],run_workflow_ids=[]),10)
+    report=backend.revision.summarize()["workflows"][flow["id"]]
+    assert report["status"]=="pending" and "本次控件学习" in report["reason"]
+
+
 def test_update_reuses_region_and_node_identity_when_interface_changes(backend,library,monkeypatch):
     from easy_uiauto import library_actions, image_models
     record=add_control(library);record.update(region_id=backend.region["id"],semantic_source="manual",semantic_name="人工按钮")

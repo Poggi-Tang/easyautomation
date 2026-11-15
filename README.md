@@ -4,13 +4,18 @@ English | [简体中文](README.zh-CN.md)
 
 [![PyPI](https://img.shields.io/pypi/v/easy_uiauto?cacheSeconds=300)](https://pypi.org/project/easy-uiauto/)
 [![Python](https://img.shields.io/pypi/pyversions/easy-uiauto?cacheSeconds=300)](https://pypi.org/project/easy-uiauto/)
-[![License](https://img.shields.io/github/license/Poggi-Tang/easyautomation)](https://github.com/Poggi-Tang/easyautomation/blob/main/LICENSE)
+[![License](https://img.shields.io/badge/license-Personal_free_%2F_Enterprise_paid-blue)](LICENSE)
 [![CI](https://github.com/Poggi-Tang/easyautomation/actions/workflows/ci.yml/badge.svg)](https://github.com/Poggi-Tang/easyautomation/actions/workflows/ci.yml)
 [![Publish](https://github.com/Poggi-Tang/easyautomation/actions/workflows/publish.yml/badge.svg)](https://github.com/Poggi-Tang/easyautomation/actions/workflows/publish.yml)
 
 ![logo](https://github.com/Poggi-Tang/easyautomation/blob/main/src/image/easy-uiauto.png)
 
 Windows desktop automation with Python, MCP, and a GUI for managing controls and workflows.
+
+**Free for individuals; enterprise use requires a paid license.** The same policy
+covers the GUI, MCP, Python API and bundled tools. Custom development, deployment,
+knowledge and workflow configuration, automation solutions, training and maintenance
+are separately scoped services. See [licensing and commercial services](docs/commercial-services.md).
 
 ## Start the GUI from this repository
 
@@ -75,6 +80,8 @@ images, coordinates, recognition evidence and a local HTML viewer.
   or adapt to software updates while retaining manual edits and reporting validation results.
   Deep learning requires the configured API and test inputs; creating or saving test
   data is an explicit option in its dialog.
+  Select a saved control and use its toolbar or context menu to explore just that
+  entry and its subsequent workflows, with a separate resumable learning record.
 
 - **Desktop automation**: click, double-click, right-click, drag, scroll,
   keyboard input, hotkeys, window activation, and text entry.
@@ -969,9 +976,13 @@ The same workflow is exposed through `get_ui_learning_readiness`,
 `--install-codex-skills` when only the skills need to be refreshed.
 
 For MCP client configuration, start the server with `python -m easy_uiauto.mcp.server`.
-Control-vector persistence is optional. To enable it, set
-`EASY_UIAUTO_CONTROL_VECTOR_DB_DIR` to a directory containing
-`control_vector_store.py`; otherwise capture tools still return records but do not persist them.
+GUI, MCP and Python share one Markdown knowledge vault. Save captured observations
+with `upsert_control_record(..., app_id=..., vault=..., page_id=..., region_id=...)`;
+no external vector-store module is required. Mixed mode writes to the same vault
+and reports archival results in the action's `learning` field. Imports do not grant
+locator or business verification. Use `import_control_records` to preview and migrate
+legacy JSON/JSONL exports while preserving originals. See the
+[shared-library guide](docs/shared-library.zh-CN.md).
 
 Control lookup uses the library's canonical `LOCATION` object rather than a
 flat selector. Obtain it from a recorded action or from
@@ -1167,10 +1178,17 @@ See `demo/` for runnable examples and the source docstrings for API details.
 
 ## License
 
-MIT License. See [LICENSE](https://github.com/Poggi-Tang/easyautomation/blob/main/LICENSE).
+This project uses the [Personal and Enterprise License](LICENSE).
+Individuals may use it free for their own independent projects, including projects
+that earn revenue. Use for or on behalf of an enterprise requires a paid license.
+The GUI, MCP and Python API share this policy. Source visibility does not make
+this an unrestricted open-source license.
+
+Third-party components and models retain their own licenses. See [commercial services](docs/commercial-services.md)
+for enterprise licensing, customization, setup and automation solutions.
 
 ## Contact
 
-Scan the QR code to add me on WeChat:
+Enterprise licensing and services: **2322806855@qq.com**.
 
-![WeChat QR Code](https://github.com/Poggi-Tang/easyautomation/blob/main/src/image/or_code.bmp)
+WeChat ID: **AXMISSZJY**.

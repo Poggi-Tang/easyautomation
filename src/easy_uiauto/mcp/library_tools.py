@@ -13,7 +13,7 @@ from . import dynamic_regions, image_storage, knowledge, native_windows
 
 
 SECTIONS = {"pages", "regions", "controls", "references", "usage", "workflows"}
-OPERATIONS = {"learn-region", "deep-learn-region", "expand-control", "run-workflow", "supplement-descriptions"}
+OPERATIONS = {"learn-region", "deep-learn-region", "deep-learn-control", "expand-control", "run-workflow", "supplement-descriptions"}
 
 
 def get_library(app_id="", *, vault="", section="overview", record_id="", page_id="",
@@ -115,11 +115,19 @@ def _request(operation, app_id, *, vault="", region_id="", control_id="", workfl
         expanded=workflows.expand_calls(flow,{r["id"]:r for r in snapshot["workflows"]},parameters=values)
         workflows.substitute(expanded["steps"], values)
         return {**payload, "operation": "workflow", "flow_id": workflow_id, "parameters": parameters or {}}
-    if operation == "deep-learn-region":
+    if operation in {"deep-learn-region", "deep-learn-control"}:
         from ..region_learning import validate_options
+        from ..relearning import control_region
+        options=validate_options(learning_options or {})
+        if operation == "deep-learn-control":
+            region=control_region(snapshot,control_id)
+            if region_id and region_id!=region["id"]:raise ValueError("控件不属于指定区域")
+            if options.get("entry_control_id",control_id)!=control_id:raise ValueError("控件入口与 control_id 不一致")
+            region_id=region["id"];options["entry_control_id"]=control_id
         region=next((r for r in snapshot["regions"] if r["id"]==region_id),None)
         if region is None:raise ValueError("请选择已保存的区域 ID")
-        options=validate_options(learning_options or {})
+        if options.get("entry_control_id") and control_region(snapshot,options["entry_control_id"])["id"]!=region_id:
+            raise ValueError("控件不属于指定区域")
         return {**payload,"operation":"deep-learn","region_id":region_id,
                 "learning_options":{**options,"max_controls":max_controls}}
     if operation == "learn-region":
@@ -158,7 +166,7 @@ class LibraryJobs:
         with self.lock:
             self.require_idle()
             payload = _request(operation, app_id, **kwargs)
-            worker = LibraryTask(payload, timeout=7200 if operation == "deep-learn-region" else 3600 if operation == "supplement-descriptions" else 600)
+            worker = LibraryTask(payload, timeout=7200 if operation in {"deep-learn-region","deep-learn-control"} else 3600 if operation == "supplement-descriptions" else 600)
             identifier = "library-"+worker.folder.name
             entry = dict(task_id=identifier, operation=operation, app_id=app_id, vault=payload["vault"],
                          state="running", worker_running=True, elapsed_seconds=0, message="任务已启动",

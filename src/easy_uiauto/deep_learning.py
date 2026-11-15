@@ -108,7 +108,7 @@ def validate_plan(plan, controls):
 class Explorer:
     def __init__(self, library, app_id, region, backend, *, max_actions=100, max_depth=24,
                  inputs=None, instructions="", resume=True, mode=None, session_id="", control_ids=(),
-                 workflow_ids=(), retry_branches=(), progress=lambda _:None):
+                 workflow_ids=(), retry_branches=(), entry_control_id="", progress=lambda _:None):
         if isinstance(max_actions, bool) or not isinstance(max_actions, int) or not 1 <= max_actions <= 2000:
             raise ValueError("探索步数应为 1..2000")
         if isinstance(max_depth, bool) or not isinstance(max_depth, int) or not 1 <= max_depth <= 100:
@@ -119,17 +119,20 @@ class Explorer:
         self.mode = mode or ("resume" if resume else "new")
         if self.mode not in relearning.MODES:raise ValueError("未知学习模式")
         self.selected_controls = set(control_ids)
+        self.entry_control_id = entry_control_id
         self.selected_workflows = set(workflow_ids)
         self.retry_branches = set(retry_branches)
         self.replanned = set();self.visited = set();self.reused_branches = set()
         self.actions = 0;self.stop_reason = "";self.active = set()
         self.directory = library.directory(app_id)
-        previous = relearning.select_session(self.directory, region["id"], session_id) if self.mode != "new" else None
+        previous = relearning.select_session(self.directory, region["id"], session_id,
+            entry_control_id=entry_control_id) if self.mode != "new" else None
         from uuid import uuid4
         identity = previous["id"] if previous else "deep-"+uuid4().hex[:12]
         self.path = self.directory / "learning" / (identity+".json")
         if image_storage._safe_path(self.directory, self.path) is None:raise ValueError("学习记录路径无效")
-        self.graph = dict(id=identity, region_id=region["id"], states={}, root="", workflow_ids=[], status="running")
+        self.graph = dict(id=identity, region_id=region["id"], entry_control_id=entry_control_id,
+                          states={}, root="", workflow_ids=[], status="running")
         if previous:
             self.graph = previous
             history = self.directory / "learning" / "history" / (identity+"-"+uuid4().hex[:12]+".json")
@@ -145,9 +148,12 @@ class Explorer:
         if self.retry_branches - known_branches:raise ValueError("待重试分支不属于所选学习记录")
         self.graph.update(mode=self.mode, options=dict(inputs=self.inputs, instructions=instructions,
             **getattr(backend,"policy_identity",{})), scope=dict(control_ids=list(control_ids), workflow_ids=list(workflow_ids)))
+        if entry_control_id:
+            entry=next((r for r in library.read(app_id)["controls"] if r["id"]==entry_control_id),{})
+            self.graph["entry_control_name"]=entry.get("semantic_name") or entry.get("name") or entry_control_id
         self.graph.setdefault("runs", []).append(dict(mode=self.mode, started_at=knowledge.utc_now(), retry_branches=list(retry_branches)))
         if hasattr(backend,"configure_learning"):
-            backend.configure_learning(self.graph, self.mode, control_ids, workflow_ids)
+            backend.configure_learning(self.graph, self.mode, [entry_control_id] if entry_control_id else control_ids, workflow_ids)
             self.selected_controls = set(backend.revision.control_ids)
         else:
             catalog = workflows.load_catalog(self.directory)
@@ -160,28 +166,76 @@ class Explorer:
         return observation.get("node_id", observation["state_id"])
 
     def selected(self, node):
-        return not self.selected_controls or bool(set(node.get("controls", [])) & self.selected_controls)
+        return not self.scope_controls or bool(set(node.get("controls", [])) & self.scope_controls)
+
+    @property
+    def scope_controls(self):
+        return {self.entry_control_id} if self.entry_control_id else self.selected_controls if self.mode == "improve" else set()
+
+    def branch_selected(self, branch):
+        steps = [s for s in branch.get("steps", []) if s.get("action") != "inspect"]
+        # A single-control run must start with that control, even if a planner
+        # includes it later in an unrelated sequence or only in a check.
+        if self.entry_control_id:
+            target = steps[0].get("target", {}).get("control_id") if steps else branch.get("control_id")
+            return target == self.entry_control_id
+        ids = {s.get("target", {}).get("control_id") for s in steps}
+        ids.add(branch.get("control_id"))
+        return bool(ids & self.scope_controls)
+
+    @staticmethod
+    def branch_entry(branch):
+        return next((s.get("target", {}).get("control_id") for s in branch.get("steps", [])
+                     if s.get("action") != "inspect"), branch.get("control_id"))
+
+    def followup_states(self):
+        """Derive scope from saved edges, including after a stop at a child state."""
+        if not self.scope_controls:return set()
+        nodes = self.graph["states"]
+        pending = [b.get("target_state") for n in nodes.values() for b in n["branches"] if self.branch_selected(b)]
+        found = set()
+        while pending:
+            identifier = pending.pop()
+            if identifier in found or identifier == self.graph["root"] or identifier not in nodes:continue
+            found.add(identifier)
+            pending.extend(b.get("target_state") for b in nodes[identifier]["branches"]
+                           if self.branch_entry(b) not in self.excluded_entries())
+        return found
+
+    def follows_entry(self, identifier, route=()):
+        if not self.scope_controls or identifier == self.graph["root"]:return False
+        return (identifier in self.followup_states() or
+                any(s.get("action") != "inspect" and s.get("target", {}).get("control_id") in self.scope_controls for s in route))
+
+    def node_in_scope(self, node):
+        return self.selected(node) or self.follows_entry(node["id"])
+
+    def excluded_entries(self):
+        if not self.scope_controls:return set()
+        root = self.graph["states"].get(self.graph["root"], {})
+        return set(root.get("controls", [])) - self.scope_controls
 
     def scope_reachable(self, identifier, trail=()):
-        if identifier in trail:return False
+        if identifier in trail or identifier == self.graph["root"]:return False
         node=self.graph["states"].get(identifier)
         if not node:return False
         return self.selected(node) or any(self.scope_reachable(b.get("target_state"),(*trail,identifier)) for b in node["branches"])
 
-    def branch_in_scope(self, branch):
-        if self.mode!="improve" or not self.selected_controls:return True
-        ids={t.get("control_id") for _,t in workflows.targets(dict(steps=branch.get("steps",[])))}
-        ids.add(branch.get("control_id"))
-        return bool(ids & self.selected_controls) or self.scope_reachable(branch.get("target_state"))
+    def branch_in_scope(self, branch, node=None, route=()):
+        if not self.scope_controls:return True
+        if node and self.follows_entry(node["id"], route):
+            return self.branch_entry(branch) not in self.excluded_entries()
+        return (self.branch_selected(branch) or
+                not self.entry_control_id and self.scope_reachable(branch.get("target_state")))
 
     def needs_work(self, identifier, trail=()):
         if identifier in trail:return False
         node=self.graph["states"].get(identifier)
         if not node:return True
-        if self.mode in {"improve", "update"} and identifier not in self.visited and self.selected(node):return True
-        if node["issues"] or node["terminal"] and not node["verified_terminal"]:return True
+        if self.mode in {"improve", "update"} and identifier not in self.visited and self.node_in_scope(node):return True
+        if self.node_in_scope(node) and (node["issues"] or node["terminal"] and not node["verified_terminal"]):return True
         return any(b["status"] not in {"done","cycle"} or b.get("target_state") and
-                   self.needs_work(b["target_state"], (*trail,identifier)) for b in node["branches"])
+                   self.needs_work(b["target_state"], (*trail,identifier)) for b in node["branches"] if self.branch_in_scope(b,node))
 
     def persist(self):
         from .library_tasks import _write
@@ -195,6 +249,7 @@ class Explorer:
         lines=["状态："+statuses.get(self.graph["status"],self.graph["status"]),
                f"已发现 {len(self.graph['states'])} 个状态，归档 {len(self.graph['workflow_ids'])} 个组合动作。",
                "覆盖范围为本次观察到的状态与规划分支，不代表任意输入值的全部组合。",self.stop_reason]
+        if self.entry_control_id:lines.insert(1,"学习入口："+self.graph["entry_control_name"]+"；范围包含该入口触发的后续流程。")
         summary=self.graph.get("changes",{})
         if summary:
             lines.append(f"本次新增 {len(summary['added'])}、更新 {len(summary['updated'])}、复用 {len(summary['reused'])} 个控件；"
@@ -208,20 +263,24 @@ class Explorer:
                              for n,s in enumerate(conflict.get("proposed_steps",[]),1))
         for node in self.graph["states"].values():
             for branch in node["branches"]:
-                if branch["status"] not in {"done","cycle"}:
+                if branch["status"] not in {"done","cycle"} and self.branch_in_scope(branch,node):
                     lines.append(f"- {node['name']} / {branch['name']}：{branch.get('reason') or branch['status']}")
-            lines.extend(f"- {node['name']}：{reason}" for reason in node["issues"])
-        self.library.save_usage(self.app_id,self.region.get("name","区域")+" · 深度学习进度","\n\n".join(lines),
+            if self.node_in_scope(node):lines.extend(f"- {node['name']}：{reason}" for reason in node["issues"])
+        self.library.save_usage(self.app_id,(self.graph.get("entry_control_name") or self.region.get("name","区域"))+" · 深度学习进度","\n\n".join(lines),
                                 document_id=self.graph["id"],workflow_ids=self.graph["workflow_ids"])
 
     def node(self, observation, route):
         identifier = self.identifier(observation)
         previous = self.graph["states"].get(identifier)
+        followup = self.follows_entry(identifier, route)
         if identifier in self.replanned:return previous
-        if previous and self.mode == "improve" and not self.selected(previous):return previous
+        if previous and self.mode == "improve" and not self.selected(previous) and not followup:return previous
         if previous and self.mode == "resume" and not self.needs_work(identifier):return previous
         self.progress("分析当前状态及可交互分支")
         observation["previous_learning"] = deepcopy(previous or {})
+        observation["exploration_scope"] = dict(entry_control_id=self.entry_control_id,
+            selected_control_ids=sorted(self.scope_controls), followup=followup,
+            excluded_entry_control_ids=sorted(self.excluded_entries()) if followup else [])
         plan = validate_plan(self.backend.plan(observation, route), observation["controls"])
         branches = [];remaining = list((previous or {}).get("branches", []))
         for item in plan["branches"]:
@@ -230,10 +289,10 @@ class Explorer:
             key = old["id"] if old else knowledge.stable_id("branch", relearning.steps_key(item.get("steps", [])), item["name"])
             if any(b["id"] == key for b in branches):continue
             branch = {**item, "id":key, "status":"blocked" if item.get("blocked") else "pending", "reason":item.get("blocked", "")}
-            targeted = not self.selected_controls or bool({t.get("control_id") for _,t in workflows.targets(
-                dict(steps=item.get("steps", [])))} & self.selected_controls)
-            if self.mode=="improve" and not targeted and not old:continue
-            if self.mode == "improve" and not targeted and old:
+            targeted = self.branch_in_scope({**branch, "target_state":(old or {}).get("target_state")},
+                                             {"id":identifier}, route)
+            if not targeted and not old:continue
+            if not targeted and old:
                 branch = deepcopy(old)
             elif old:
                 same = relearning.steps_key(old.get("steps", [])) == relearning.steps_key(item.get("steps", []))
@@ -253,6 +312,8 @@ class Explorer:
                         branch={**old,"status":"uncertain","reason":"该分支包含已执行的业务操作；重新验证前请确认测试数据已恢复"}
             branches.append(branch)
         for old in remaining:
+            if not self.branch_in_scope(old,{"id":identifier},route):
+                branches.append(deepcopy(old));continue
             # A provider omitting a known entry is not evidence that it disappeared.
             branches.append({**old, "status":"uncertain" if old["status"]=="uncertain" else "blocked",
                              "reason":"本次未规划旧入口，请补充说明或确认该入口是否仍存在"})
@@ -262,7 +323,10 @@ class Explorer:
                     completion_checks=plan.get("completion_checks", []), terminal=bool(plan.get("terminal")),
                     verified_terminal=False, issues=list(observation.get("issues", []))+list(plan.get("unresolved", [])),
                     route=deepcopy(route), region_ids=observation.get("region_ids", []), fingerprint=observation["state_id"])
-        if previous and self.mode == "resume" and previous.get("verified_terminal") and previous.get("completion_checks")==node["completion_checks"]:
+        if self.scope_controls and not followup and node["terminal"]:
+            node["terminal"] = False
+            node["issues"].append("尚未从指定控件进入后续流程，不能仅凭起点界面确认学习完成")
+        if previous and self.mode == "resume" and node["terminal"] and previous.get("verified_terminal") and previous.get("completion_checks")==node["completion_checks"]:
             node.update(verified_terminal=True, terminal_evidence=previous.get("terminal_evidence"))
         # Every observed interactive control must be accounted for, even when it
         # requires inputs or an unsupported gesture. Omission is not coverage.
@@ -270,7 +334,8 @@ class Explorer:
         covered.update(b.get("control_id") for b in branches if b.get("blocked"))
         if not node["terminal"]:
             for control in observation["controls"]:
-                if self.mode=="improve" and self.selected_controls and control["id"] not in self.selected_controls:continue
+                if self.scope_controls and not followup and control["id"] not in self.scope_controls:continue
+                if followup and control["id"] in self.excluded_entries():continue
                 if control.get("actions") and control.get("is_enabled_at_scan") is not False and control["id"] not in covered:
                     node["issues"].append("未规划交互："+(control.get("semantic_name") or control["id"]))
             if not branches:node["issues"].append("尚无可执行分支，也未确认业务结果")
@@ -291,7 +356,7 @@ class Explorer:
         try:
             for branch in node["branches"]:
                 if self.stop_reason:return
-                if not self.branch_in_scope(branch):continue
+                if not self.branch_in_scope(branch,node,route):continue
                 if branch["status"] in {"blocked", "failed", "uncertain", "cycle"}:continue
                 if branch["status"] == "done":
                     if not branch.get("target_state") or not self.needs_work(branch["target_state"]):continue
@@ -348,6 +413,7 @@ class Explorer:
                 steps = [dict(action="inspect", target=checks[0]["target"], checks=checks, description="确认业务结果")]
                 result.append(save(identifier, "result", node["name"], steps, verified=node.get("verified_run")==len(self.graph["runs"])))
             for branch in node["branches"]:
+                if not self.branch_in_scope(branch,node):continue
                 target = branch.get("target_state")
                 if branch["status"] not in {"done", "observed"} or target not in self.graph["states"]:continue
                 for child in suffixes(target, [*trail, identifier]):
@@ -409,6 +475,7 @@ class Explorer:
                        [*entries,dict(action="call",workflow_id=flow,description="执行已学习流程",parameters={})]) for flow in roots]
             self.graph["entry_workflow_ids"]=roots
         self.graph["workflow_ids"] = sorted(set(self.graph.get("workflow_ids", [])) | set(created))
+        self.graph["run_workflow_ids"] = sorted(set(created))
 
     def run(self):
         error=None
@@ -444,12 +511,14 @@ class Explorer:
                     self.stop_reason="；".join(s for s in (self.stop_reason,"知识变化检查未完成："+str(failure)) if s)
             unfinished=[dict(state=n["name"], branch=b["name"], branch_id=b["id"], state_id=n["id"],status=b["status"], reason=b.get("reason", ""))
                         for n in self.graph["states"].values() for b in n["branches"]
-                        if b["status"] not in {"done", "cycle"} and self.branch_in_scope(b)]
+                        if b["status"] not in {"done", "cycle"} and self.branch_in_scope(b,n)]
             issues=[dict(state=n["name"],reason=str(reason)) for n in self.graph["states"].values() for reason in n["issues"]
-                    if self.mode!="improve" or self.selected(n)]
-            if self.mode=="improve" and self.selected_controls:
+                    if self.node_in_scope(n)]
+            if self.scope_controls:
                 observed={i for key in self.visited for i in self.graph["states"][key].get("controls",[])}
-                missing=self.selected_controls-observed
+                # Resuming at an observed child need not click the entry again.
+                if self.entry_control_id and any(self.follows_entry(key) for key in self.visited):observed.add(self.entry_control_id)
+                missing=self.scope_controls-observed
                 if missing:issues.append(dict(state="指定内容",reason="以下控件尚未到达或已变化，请打开对应状态后继续："+"、".join(sorted(missing))))
             for flow in self.graph.get("changes",{}).get("workflows",{}).values():
                 if flow["status"]!="passed":issues.append(dict(state=flow["name"],reason=flow["reason"]))

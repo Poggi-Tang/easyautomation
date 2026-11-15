@@ -7,6 +7,12 @@ description: Learn Windows applications into an easy_uiauto knowledge vault, usi
 
 Build reusable UI knowledge through the `easy_uiauto` MCP tools.
 
+GUI, MCP and Python share one vault. Preserve the same explicit `vault` across
+reads, searches, learning, imports and execution. For individual captured observations
+or legacy JSON/JSONL exports, see the shared-library import guidance in
+[GUI regions and workflows](references/library-workflows.md). These imports preserve
+evidence gaps and do not substitute for learning or verification.
+
 ## Choose the learning mode
 
 When the user has divided regions in the knowledge GUI, provided saved instructions,
@@ -19,7 +25,9 @@ the remote whole-window readiness check below does not apply.
 For these saved regions, basic learning (`learn-region`) observes the current visible
 state without replaying entry steps or sending input. Deep learning
 (`deep-learn-region`) uses the configured API to explore branches, archive new
-regions/controls/workflows and share common suffixes by workflow reference. Supply
+regions/controls/workflows and share common suffixes by workflow reference. Use
+`deep-learn-control` with a saved `control_id` to restrict the entry while exploring
+its subsequent menus/dialogs and workflows, with a separate resumable session. Supply
 the user's test inputs and scope in `learning_options`; report partial coverage and
 blocked branches instead of presenting budget exhaustion as completed learning.
 

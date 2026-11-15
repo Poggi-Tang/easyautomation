@@ -32,6 +32,62 @@ def test_deep_dialog_and_toolbar_use_separate_job(app,library,window,tmp_path,mo
     assert request["learning_options"]["allow_commit"] and request["learning_options"]["inputs"]=={"工程名称":"测试"}
 
 
+@pytest.mark.parametrize("entry", ["toolbar", "context-menu"])
+def test_control_deep_learning_uses_fixed_entry_and_restores_selection(app,library,window,tmp_path,monkeypatch,entry):
+    from PySide6.QtGui import QAction
+    from easy_uiauto.qt_ui import window as window_module
+    region=library.save_picked_region("demo",picked(tmp_path))
+    control=library.save_captured_control("demo",picked(tmp_path),name="新建工程",region_id=region)
+    library.confirm_layout("demo")
+    key="control:demo:"+control["id"]
+    window.reload(key);settle(app,lambda:not window.jobs)
+    calls=[];reloads=[]
+    monkeypatch.setattr(window,"bound_window",lambda:dict(handle=123))
+    monkeypatch.setattr(window,"start_task",lambda *args,**kwargs:calls.append((args,kwargs)))
+    def choose(dialog):
+        assert "新建工程" in dialog.windowTitle()
+        assert dialog.scope.isHidden()
+        for mode in ("new","resume","improve","update"):
+            dialog.mode.setCurrentIndex(dialog.mode.findData(mode))
+            assert dialog.values()["entry_control_id"]==control["id"]
+        dialog.mode.setCurrentIndex(dialog.mode.findData("new"))
+        return QDialog.DialogCode.Accepted
+    monkeypatch.setattr(DeepLearningDialog,"exec",choose)
+    if entry=="toolbar":
+        value=next(b for b in window.context_buttons if b.text()=="深度学习")
+        assert not value.icon().isNull();value.click()
+    else:
+        class Menu:
+            def __init__(self,parent):self.items=[]
+            def addAction(self,*args):
+                action=QAction(args[-1],window)
+                if len(args)>1:action.setIcon(args[0])
+                self.items.append(action);return action
+            def exec(self,*args):
+                action=next(a for a in self.items if a.text()=="深度学习")
+                assert action.isEnabled() and not action.icon().isNull();action.trigger()
+        monkeypatch.setattr(window_module,"QMenu",Menu)
+        window.tree_menu(window.tree.visualRect(window.tree.currentIndex()).center())
+    settle(app,lambda:bool(calls))
+    args,kwargs=calls[0];request=args[1]
+    assert args[0]=="deep-learn" and kwargs["hide"]
+    assert request["region_id"]==region and request["learning_options"]["entry_control_id"]==control["id"]
+    monkeypatch.setattr(window,"reload",lambda key,**kwargs:reloads.append(key))
+    args[2](dict(message="完成"))
+    assert reloads==[key]
+
+
+def test_control_missing_region_reports_error_without_starting_task(app,library,window,monkeypatch):
+    from test_knowledge_library import add_control
+    control=add_control(library)
+    window.reload("control:demo:"+control["id"]);settle(app,lambda:not window.jobs)
+    errors=[]
+    monkeypatch.setattr(window,"error",lambda title,error:errors.append(str(error)))
+    monkeypatch.setattr(window,"bound_window",lambda:pytest.fail("should fail before desktop binding"))
+    window.deep_learn()
+    assert "所属区域" in errors[0]
+
+
 def test_call_editor_preserves_reference_and_parameter_bindings(app):
     editor=StepEditor(lambda:None,choose_workflow=lambda:dict(id="shared",keyword="公共填写"))
     editor.add_call()

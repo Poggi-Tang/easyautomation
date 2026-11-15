@@ -12,23 +12,33 @@ from .mcp import image_storage, knowledge
 MODES = {"resume": "继续未完成学习", "improve": "改进学习结果", "update": "适配软件更新", "new": "首次学习"}
 
 
-def sessions(directory, region_id):
+def control_region(snapshot, control_id):
+    control = next((r for r in snapshot["controls"] if r["id"] == control_id), None)
+    if control is None:raise ValueError("控件已不存在，请刷新知识库")
+    regions = [r for r in snapshot["regions"] if r.get("page_id") == control.get("page_id")
+               and control.get("region_id") in {r["id"], r["id"].removeprefix(r["page_id"]+".")}]
+    if len(regions) != 1:raise ValueError("控件缺少有效的所属区域，请先在属性中设置区域")
+    return regions[0]
+
+
+def sessions(directory, region_id, *, entry_control_id=""):
     result = []
     for path in (directory / "learning").glob("deep-*.json"):
         if image_storage._safe_path(directory, path) is None:continue
         try:
             graph = json.loads(path.read_text(encoding="utf-8"))
-            if graph.get("id")==path.stem and graph.get("region_id") == region_id and isinstance(graph.get("states"), dict):
+            if (graph.get("id")==path.stem and graph.get("region_id") == region_id
+                    and graph.get("entry_control_id", "") == entry_control_id and isinstance(graph.get("states"), dict)):
                 result.append((path.stat().st_mtime_ns,graph))
         except (ValueError, OSError):continue
     return [graph for _,graph in sorted(result,key=lambda row:(row[1].get("updated_at",""),row[0]),reverse=True)]
 
 
-def select_session(directory, region_id, session_id=""):
-    available = sessions(directory, region_id)
+def select_session(directory, region_id, session_id="", *, entry_control_id=""):
+    available = sessions(directory, region_id, entry_control_id=entry_control_id)
     if session_id:
         selected = next((r for r in available if r["id"] == session_id), None)
-        if selected is None:raise ValueError("学习记录不存在或不属于当前区域")
+        if selected is None:raise ValueError("学习记录不存在或不属于当前区域及控件入口")
         return deepcopy(selected)
     return deepcopy(available[0]) if available else None
 

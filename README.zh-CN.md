@@ -3,13 +3,17 @@
 
 [![PyPI](https://img.shields.io/pypi/v/easy_uiauto?cacheSeconds=300)](https://pypi.org/project/easy-uiauto/)
 [![Python](https://img.shields.io/pypi/pyversions/easy-uiauto?cacheSeconds=300)](https://pypi.org/project/easy-uiauto/)
-[![License](https://img.shields.io/github/license/Poggi-Tang/easyautomation)](https://github.com/Poggi-Tang/easyautomation/blob/main/LICENSE)
+[![License](https://img.shields.io/badge/license-Personal_free_%2F_Enterprise_paid-blue)](LICENSE)
 [![CI](https://github.com/Poggi-Tang/easyautomation/actions/workflows/ci.yml/badge.svg)](https://github.com/Poggi-Tang/easyautomation/actions/workflows/ci.yml)
 [![Publish](https://github.com/Poggi-Tang/easyautomation/actions/workflows/publish.yml/badge.svg)](https://github.com/Poggi-Tang/easyautomation/actions/workflows/publish.yml)
 
 ![logo](https://github.com/Poggi-Tang/easyautomation/blob/main/src/image/easy-uiauto.png)
 
 Windows 桌面自动化工具，提供 Python API、MCP 服务，以及管理控件和流程的 GUI。
+
+**个人免费，企业使用需付费授权。** GUI、MCP、Python API 和配套工具遵循同一政策。
+提供定制开发、安装部署、知识库与流程代配置、自动化使用方案和培训维护服务，
+费用与软件授权分别约定。详见[授权与商业服务](docs/commercial-services.zh-CN.md)。
 
 ## 拉取仓库，一键使用 GUI
 
@@ -62,6 +66,7 @@ GUI 源码维护在 `uiauto-gui` 分支，默认 `main` 分支尚未包含这些
   自动归档新区域、控件和组合动作。多个入口到达同一状态时，共用后续组合动作。
   未完成分支保留原因和进度。深度学习需要配置 API、填写测试输入；新建或保存测试数据需在学习窗口勾选允许提交。
   再次学习可选择继续未完成、改进指定内容或适配软件更新；保留人工修改，显示控件变化和受影响流程的验证结果。
+  选中单个控件也可通过工具栏或右键菜单深度学习，只探索该入口及其后续流程，并独立保存进度。
 
 - **桌面自动化**：点击、双击、右键、拖拽、滚动、键盘输入、组合键、
   窗口激活和文本填写。
@@ -826,8 +831,11 @@ GUI 通过 UIA 拾取的区域还保存原生 `LOCATION`，图片目标使用保
 `--install-codex-skills`。
 
 MCP 客户端配置可使用 `python -m easy_uiauto.mcp.server` 启动服务。
-控制向量持久化是可选能力：将 `EASY_UIAUTO_CONTROL_VECTOR_DB_DIR` 指向包含
-`control_vector_store.py` 的目录即可启用；未配置时，采集工具仍会返回记录，但不会持久化。
+GUI、MCP 和 Python 共用同一套 Markdown 知识库。采集工具返回的记录可通过
+`upsert_control_record(..., app_id=..., vault=..., page_id=..., region_id=...)` 入库，
+无需外接向量数据库。`mixed` 模式也写入这套知识库，并在动作返回的 `learning` 中报告
+入库结果；采集不会自动获得定位或业务验证状态。旧 JSON/JSONL 导出可用
+`import_control_records` 预览并迁移，原文件保留。详见 [共享知识库](docs/shared-library.zh-CN.md)。
 
 控件查找使用库原生的完整 `LOCATION` 结构，而不是扁平选择器。该结构可从录制动作中
 取得，也可调用 `get_control_at_position` 通过坐标生成；随后将返回的 `LOCATION` 对象
@@ -1016,10 +1024,15 @@ ruff check .
 
 ## 许可证
 
-MIT License，详见 [LICENSE](https://github.com/Poggi-Tang/easyautomation/blob/main/LICENSE)。
+本项目采用[个人免费与企业商业许可协议](LICENSE)。个人免费包含独立开发者
+为自己开发的商业项目；受企业委托或用于企业业务时需要企业授权。源码可见不代表
+不受限制的开源许可。GUI、MCP、Python API 使用同一套规则。
+
+第三方组件和模型继续适用各自的许可。企业授权、定制开发、代配置和使用方案请查看
+[商业服务说明](docs/commercial-services.zh-CN.md)。
 
 ## 联系方式
 
-扫描以下二维码添加我的微信：
+企业授权与服务咨询：**2322806855@qq.com**。
 
-![微信二维码](https://github.com/Poggi-Tang/easyautomation/blob/main/src/image/or_code.bmp)
+微信号：**AXMISSZJY**。

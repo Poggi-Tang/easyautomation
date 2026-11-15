@@ -91,6 +91,9 @@ def package_directory(source: Path, output: Path, *, vc_installer: Path | None =
     (target / "gui-distribution.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     (target / "使用说明.txt").write_text(
         "easy-uiauto 知识库 GUI（Windows x64）\n\n"
+        "个人免费，企业使用需付费授权，具体条款见 LICENSE。\n"
+        "第三方组件和模型适用各自许可。\n"
+        "企业授权、定制开发、代配置及使用方案：2322806855@qq.com。\n\n"
         "1. 把 ZIP 完整解压到固定目录，不要在压缩包内直接运行。\n"
         "2. 双击 setup.bat，按 Windows 提示授权；将创建桌面快捷方式并打开 GUI。\n"
         "3. 以后双击桌面的 easy-uiauto GUI，或目录内的 EXE 即可。\n\n"

@@ -2287,6 +2287,15 @@ def scan_window(
             semantic = semantics.get(index, {})
             previous = previous_by_id.get(control_id, {})
             if not previous:
+                from ..knowledge_library import KnowledgeLibrary
+                # Picked/imported records can have a different ID generation history.
+                # Reuse the GUI's exact path + state + entrance matching before IDs.
+                previous = KnowledgeLibrary.matching_captured_control(
+                    previous_page_records,
+                    {"location":location,"window_scope":control_scopes.get(id(control),(None,{"kind":"main"}))[1]},
+                    page_id, (navigation_context or {}).get("path", []))
+                if previous:control_id = previous["id"]
+            if not previous:
                 previous = _previous_control_by_unique_automation_id(
                     previous_page_records,
                     str(getattr(control, "AutomationId", "") or ""),

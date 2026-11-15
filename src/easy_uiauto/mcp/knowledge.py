@@ -210,6 +210,8 @@ def write_markdown(path: Path, metadata: dict, body: str) -> None:
     temporary = path.with_suffix(path.suffix + ".tmp")
     temporary.write_text("\n".join(lines), encoding="utf-8")
     temporary.replace(path)
+    from ..vault_changes import notify
+    if path.suffix == ".md":notify(path)
 
 
 def read_markdown(path: Path) -> tuple[dict, str]:
@@ -346,6 +348,7 @@ def save_control(directory: Path, record: dict, *, release_runtime_quarantine=Fa
     return path
 
 
+@image_storage.serialized_learning
 def teach_control(
     directory: Path,
     control_id: str,
@@ -593,7 +596,9 @@ def migrate_legacy_volatile_geometry(directory: Path) -> int:
     return changed
 
 
+@image_storage.serialized_learning
 def rebuild_index(directory: Path) -> dict:
+    from ..vault_changes import revision
     migrate_legacy_volatile_geometry(directory)
     app_record = {}
     app_path = directory / "app.md"
@@ -604,6 +609,7 @@ def rebuild_index(directory: Path) -> dict:
     controls = [record for _path, record in iter_records(directory, "control")]
     interactions = [record for _path, record in iter_records(directory, "interaction")]
     index = {
+        "source_revision": revision(directory),
         "schema_version": INDEX_VERSION,
         "generated_at": utc_now(),
         "application": app_record,
@@ -614,16 +620,20 @@ def rebuild_index(directory: Path) -> dict:
     }
     index_path = directory / ".easy_uiauto" / "index.json"
     index_path.parent.mkdir(parents=True, exist_ok=True)
-    index_path.write_text(json.dumps(index, ensure_ascii=False, indent=2), encoding="utf-8")
+    temporary = index_path.with_suffix(".tmp")
+    temporary.write_text(json.dumps(index, ensure_ascii=False, indent=2), encoding="utf-8")
+    temporary.replace(index_path)
     return index
 
 
+@image_storage.serialized_learning
 def load_index(directory: Path, rebuild: bool = False) -> dict:
+    from ..vault_changes import revision
     path = directory / ".easy_uiauto" / "index.json"
     if not rebuild and path.is_file():
         try:
             index = json.loads(path.read_text(encoding="utf-8"))
-            if index.get("schema_version") == INDEX_VERSION:
+            if index.get("schema_version") == INDEX_VERSION and index.get("source_revision", "") == revision(directory):
                 return index
         except (OSError, json.JSONDecodeError):
             pass

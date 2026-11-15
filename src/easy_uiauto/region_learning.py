@@ -44,19 +44,25 @@ previous_learning contains historical branches and outcomes. Reconsider blocked/
 the latest references and test inputs. Keep recognizable entry names and observed target IDs so results
 can be merged. Do not drop old entries without accounting for them as blocked/unresolved. For improve,
 focus on selected_control_ids when supplied; retain other known navigation needed to reach them.
+exploration_scope defines the entry restriction. When entry_control_id is set and followup=false,
+only plan branches whose first interaction targets that control (including its right-click alternatives).
+When followup=true, explore all meaningful interactions in the resulting menus/dialogs and subsequent
+states; newly discovered controls do not need to be among selected_control_ids. Do not navigate to
+unrelated main-window business entrances listed in excluded_entry_control_ids, even if still visible.
+Return navigation belongs in return_steps, not a branch.
 Return only JSON. Never claim complete coverage when controls, references or observation are incomplete.
 """
 
 
 def validate_options(options):
     allowed={"inputs","instructions","allow_commit","reset_workflow_id","max_actions","max_depth","resume","max_controls",
-             "mode","session_id","control_ids","workflow_ids","retry_branches"}
+             "mode","session_id","control_ids","workflow_ids","retry_branches","entry_control_id"}
     if not isinstance(options,dict) or set(options)-allowed:raise ValueError("深度学习配置含未知字段")
     for key,maximum in (("max_actions",2000),("max_depth",100),("max_controls",20000)):
         if key in options and (type(options[key]) is not int or not 1<=options[key]<=maximum):raise ValueError(key+" 超出范围")
     for key in ("allow_commit","resume"):
         if key in options and type(options[key]) is not bool:raise ValueError(key+" 必须为布尔值")
-    for key in ("instructions","reset_workflow_id"):
+    for key in ("instructions","reset_workflow_id","entry_control_id"):
         if key in options and not isinstance(options[key],str):raise ValueError(key+" 必须为文本")
     if "inputs" in options and not isinstance(options["inputs"],dict):raise ValueError("测试输入必须为对象")
     if "mode" in options and (not isinstance(options["mode"],str) or options["mode"] not in relearning.MODES):
@@ -105,6 +111,7 @@ class NativeBackend:
         configuration.api_endpoints(self.settings["api_url"])
         self.directory=library.directory(app_id);self.cache={};self.last_step=[]
         self.mode="resume";self.previous_graph={};self.revision=None
+        self.start_record=region
         self.root_entry=library.entry_steps(app_id,region)
         if reset_workflow_id:
             catalog=workflows.load_catalog(self.directory)
@@ -116,6 +123,9 @@ class NativeBackend:
         self.mode=mode;self.previous_graph=deepcopy(graph)
         self.revision=relearning.KnowledgeRevision(self.library,self.app_id,self.region["id"],mode,
                                                    control_ids=control_ids,workflow_ids=workflow_ids)
+        if graph.get("entry_control_id"):
+            self.start_record=self.revision.before[graph["entry_control_id"]]
+            self.root_entry=self.library.entry_steps(self.app_id,self.start_record)
 
     def previous_node(self, frame, route, root):
         nodes=self.previous_graph.get("states",{})
@@ -197,7 +207,11 @@ class NativeBackend:
                 # must not run before update discovery or repeat a committed action.
                 from .library_actions import activate_application
                 activate_application(self.expected)
-            else:open_region(self.library,self.app_id,self.region,self.expected,progress=self.progress,checkpoint=self.checkpoint)
+            else:
+                # Replay only the saved prerequisites here. The observation below
+                # verifies the entry, including controls that use image locators.
+                start={**self.start_record,"location":{}} if self.previous_graph.get("entry_control_id") else self.start_record
+                open_region(self.library,self.app_id,start,self.expected,progress=self.progress,checkpoint=self.checkpoint)
         frame=self.stable_frame();identifier=frame["state_id"]
         if identifier in self.cache:return self.cache[identifier]
         previous=self.previous_node(frame,route,root)
@@ -231,6 +245,23 @@ class NativeBackend:
         snapshot=self.library.read(self.app_id)
         observed=set(result.get("observed_control_ids",[]))
         controls=[r for r in snapshot["controls"] if r["id"] in observed]
+        entry_id=self.previous_graph.get("entry_control_id")
+        if is_origin and entry_id and entry_id not in observed:
+            # A manually added entry can be omitted by visual detection. Include
+            # it only after resolving it again inside this observed window.
+            from .library_actions import bind_window, resolve_record
+            entry=next((r for r in snapshot["controls"] if r["id"]==entry_id),None)
+            if entry:
+                try:
+                    control=resolve_record(entry,self.expected,bind_window(self.expected),directory=self.directory)
+                    rect=scanner._window_rect(control);bounds=frame["bounds"]
+                    if (rect["width"]<=0 or rect["height"]<=0 or rect["left"]<bounds["left"] or rect["top"]<bounds["top"]
+                            or rect["left"]+rect["width"]>bounds["left"]+bounds["width"]
+                            or rect["top"]+rect["height"]>bounds["top"]+bounds["height"]):
+                        raise ValueError("指定控件不在本次观察窗口内")
+                    controls.append({**entry,"is_enabled_at_scan":bool(control.IsEnabled)})
+                except Exception as error:
+                    frame["issues"].append("指定入口尚未定位："+str(error))
         # A selected container is itself a meaningful context-menu entry even
         # though the visual scanner deliberately omits layout containers.
         region_entry_valid=True
@@ -272,7 +303,11 @@ class NativeBackend:
                      instructions=self.instructions, test_inputs=self.inputs,allow_commit=self.allow_commit,
                      controls=controls,route=route,last_steps=self.last_step,
                      references=references,usage=usage,context_issues=context_issues,
-                     learning_mode=self.mode,selected_control_ids=sorted(self.revision.control_ids) if self.revision else [],
+                     learning_mode=self.mode,
+                     exploration_scope=observation.get("exploration_scope",{}),
+                     selected_control_ids=([] if observation.get("exploration_scope",{}).get("followup") else
+                         observation.get("exploration_scope",{}).get("selected_control_ids",
+                             sorted(self.revision.control_ids) if self.revision else [])),
                      previous_learning=observation.get("previous_learning",{}))
         if len(json.dumps(payload,ensure_ascii=False))>160000:
             raise ValueError("本状态的规划资料超过容量，请细分区域或缩减测试输入后继续；未跳过控件")
@@ -305,7 +340,9 @@ class NativeBackend:
         with image_storage._vault_lock(self.library.root):
             for semantic in plan.get("semantics",[]):
                 record=records.get(semantic.get("control_id"))
-                if self.mode=="improve" and self.revision and self.revision.control_ids and semantic.get("control_id") not in self.revision.control_ids:continue
+                selected=payload["selected_control_ids"]
+                if selected and semantic.get("control_id") not in selected:continue
+                if semantic.get("control_id") in payload["exploration_scope"].get("excluded_entry_control_ids",[]):continue
                 if record is None or record.get("semantic_source")=="manual":continue
                 if record.get("description_source")=="interaction-observation":continue
                 record.update(semantic_name=str(semantic.get("name") or record.get("semantic_name") or record["name"]),
@@ -375,6 +412,10 @@ class NativeBackend:
                     raise ValueError("存在人工修改与新规划的冲突，请核对建议步骤后单独运行验证")
                 expanded=workflows.expand_calls(flow,catalog,parameters=self.inputs)
                 steps=expanded["steps"]
+                scoped = graph.get("entry_control_id") or graph.get("mode")=="improve" and graph.get("scope",{}).get("control_ids")
+                allowed = set(graph.get("run_workflow_ids",[])) | set(graph.get("scope",{}).get("workflow_ids",[]))
+                if scoped and identifier not in allowed:
+                    raise ValueError("该流程不属于本次控件学习记录，请单独运行验证")
                 if not any(s.get("checks") for s in steps):raise ValueError("流程缺少结果校验，不能确认更新后业务仍正确")
                 if len(steps)>budget:raise ValueError("剩余步数不足，待下一次验证")
                 for step in steps:
@@ -409,12 +450,17 @@ class NativeBackend:
 
 def learn_region(library, app_id, region_id, expected, folder, *, progress=lambda _:None,
                  checkpoint=lambda _:None, max_actions=100, max_depth=24, resume=True,mode=None,session_id="",
-                 control_ids=(),workflow_ids=(),retry_branches=(), **options):
+                 control_ids=(),workflow_ids=(),retry_branches=(),entry_control_id="", **options):
     validate_options(dict(max_actions=max_actions,max_depth=max_depth,resume=resume,**({"mode":mode} if mode else {}),
-                         session_id=session_id,control_ids=list(control_ids),workflow_ids=list(workflow_ids),retry_branches=list(retry_branches),**options))
-    region=next((r for r in library.read(app_id)["regions"] if r["id"]==region_id),None)
+                         session_id=session_id,control_ids=list(control_ids),workflow_ids=list(workflow_ids),
+                         retry_branches=list(retry_branches),entry_control_id=entry_control_id,**options))
+    snapshot=library.read(app_id)
+    region=next((r for r in snapshot["regions"] if r["id"]==region_id),None)
     if region is None:raise ValueError("学习区域不存在")
+    if entry_control_id and relearning.control_region(snapshot,entry_control_id)["id"]!=region_id:
+        raise ValueError("控件不属于当前学习区域")
     backend=NativeBackend(library,app_id,region,expected,folder,progress=progress,checkpoint=checkpoint,**options)
     return Explorer(library,app_id,region,backend,max_actions=max_actions,max_depth=max_depth,
                     inputs=options.get("inputs"),instructions=options.get("instructions",""),resume=resume,mode=mode,session_id=session_id,
-                    control_ids=control_ids,workflow_ids=workflow_ids,retry_branches=retry_branches,progress=progress).run()
+                    control_ids=control_ids,workflow_ids=workflow_ids,retry_branches=retry_branches,
+                    entry_control_id=entry_control_id,progress=progress).run()

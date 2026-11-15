@@ -1,21 +1,89 @@
-MIT License
+easy-uiauto 个人免费与企业商业许可协议
+easy-uiauto Personal and Enterprise License, version 1.0
 
 Copyright (c) 2026 Poggi-Tang
+许可与服务联系：2322806855@qq.com
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+1. 适用范围
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+本协议适用于明确随附本协议提供、且许可方有权按本协议授权的 easy-uiauto
+代码、文档及分发文件，覆盖 GUI、MCP、Python API、命令行和随附 Skill。
+公开源码不代表授予不受限制的开源许可。
+本协议不改变使用者依据其他有效许可已经合法取得的权利。
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+2. 个人免费授权
+
+自然人以个人身份，为自己的学习、研究、日常使用及独立开发项目使用本软件，
+可免费取得非独占许可，复制、安装、运行、研究和修改本软件。
+个人独立开发项目可以产生收入；是否营利本身不取消个人免费资格。
+
+个人免费授权不涵盖代表企业、受企业委托，或用于企业业务、内部系统及项目
+交付的使用。员工、外包人员或顾问使用个人账号、个人电脑，不改变使用性质。
+公司、合伙企业、个人独资企业及其他以企业组织身份开展的业务，不属于
+个人免费范围。
+
+个人可以在保留本协议、版权及第三方声明的前提下，免费分享本软件及修改版；
+修改版须说明修改事实，不得冒充官方版本。接收者的使用仍受本协议约束。
+个人免费授权不授予出售、转授权本软件，或将本软件作为托管自动化服务向
+企业提供的权利；此类用途须另行取得书面授权。第 1、5 条保留的权利除外。
+
+3. 企业及其他组织授权
+
+企业在业务中使用本软件前，须取得许可方书面商业授权并按约定支付授权费用。
+授权主体、使用场景、期限、设备或执行节点范围、版本升级及支持范围，
+以双方确认的授权文件或合同为准，不因下载、安装或付款咨询自动成立。
+企业评估及试用的范围和期限须另行书面约定。
+
+其他组织的使用不自动归入个人免费范围，可联系许可方另行约定授权及费用。
+未经书面约定，企业授权不包含向关联公司、客户或其他主体转授权的权利。
+
+4. 商业服务
+
+可另行委托软件适配和定制开发、环境安装与部署、知识库及流程代配置、
+具体业务的自动化使用方案、培训及维护支持。
+服务费用与软件授权费用分别约定；购买其中一项不自动包含另一项。
+服务内容、交付物、工期、验收、费用、维护期限及定制成果的权利归属，
+以双方确认的服务文件或合同为准。软件授权不承诺无限定制或无限期支持。
+
+5. 第三方组件、数据及输出
+
+PySide6/Qt、Python、其他依赖、模型权重及其他第三方内容，继续适用各自的
+许可证和版权声明。本协议不对这些内容施加额外限制，也不授予许可方没有的权利。
+若本协议与第三方许可冲突，就该第三方内容适用其原许可。
+不得以本协议限制 LGPL 等许可保障的库修改、替换、重新链接及运行权利，
+或为调试修改后的库而进行必要的逆向工程。
+
+本协议不要求用户上传知识库、业务数据或生成的流程，也不因使用本软件
+取得这些数据或输出的所有权。输出中如包含本软件代码或第三方受保护内容，
+相应内容仍按其适用许可处理。
+
+6. 声明、责任和终止
+
+除双方书面合同另有承诺或适用法律另有规定外，软件按现状提供，不作适销性、
+特定用途适用性或不侵权保证。在适用法律允许的范围内，许可方不对使用软件
+导致的损失承担责任。书面商业合同中明确约定的责任和服务承诺不受本条免除。
+
+违反本协议后，许可方可书面通知要求停止超出授权范围的使用；持续使用须
+取得有效授权。终止或修订本协议不影响第 1、5 条保留的既有许可权利。
+后续许可政策的调整不追溯改变已取得版本的许可，商业合同变更按合同办理。
+
+English summary (the Chinese terms above govern)
+
+Individuals may use, copy and modify the Software free of charge for their own
+personal activities and independently developed projects, including projects
+that earn revenue. Work for or on behalf of an enterprise requires a paid
+written enterprise license, regardless of the account or device used.
+Other organizations must arrange permission separately. Free redistribution
+must retain this license and notices, identify changes and preserve these terms;
+resale, sublicensing and hosted automation services for enterprises require
+separate written permission, except where prior or third-party rights allow them.
+
+GUI, MCP, Python API, CLI and bundled Skills follow the same policy. Deployment,
+configuration, customization, workflow solutions, training and maintenance are
+separately scoped and priced services. No license fee implies unlimited support.
+
+Third-party components and models retain their own licenses, including LGPL rights to
+replace libraries and reverse engineer for debugging library modifications.
+This license does not claim ownership of user data or outputs. Source visibility
+does not make this an OSI open-source license. No warranty is provided except
+as required by law or expressly promised in a written agreement.

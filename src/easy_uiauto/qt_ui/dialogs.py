@@ -121,12 +121,16 @@ class CapturedControlDialog(QDialog):
 
 
 class DeepLearningDialog(QDialog):
-    def __init__(self, region, flows, parent=None, *, sessions=(), controls=(), mode=None):
+    def __init__(self, region, flows, parent=None, *, sessions=(), controls=(), mode=None, entry_control=None):
         from ..relearning import MODES
-        super().__init__(parent);self.setWindowTitle("深度学习 · "+region.get("name","区域"));self.resize(760,790)
+        self.entry_control=entry_control or {}
+        title=(self.entry_control.get("semantic_name") or self.entry_control.get("name") or region.get("name","区域"))
+        super().__init__(parent);self.setWindowTitle("深度学习 · "+title);self.resize(760,790)
         self.sessions=list(sessions)
         layout=QVBoxLayout(self)
-        hint=QLabel("从当前区域探索交互分支，自动保存新区域、控件和组合动作。请使用测试工程；未完成的分支会保留在学习进度中。")
+        hint=QLabel((f"从控件“{title}”开始，探索它打开的菜单、弹窗及后续流程；同区域其他入口不参与。" if entry_control else
+                     "从当前区域探索交互分支，自动保存新区域、控件和组合动作。")+
+                    "请使用测试工程；未完成的分支会保留在学习进度中。")
         hint.setWordWrap(True);layout.addWidget(hint);form=QFormLayout();layout.addLayout(form)
         self.mode=QComboBox()
         for value in ("resume","improve","update","new"):self.mode.addItem(MODES[value],value)
@@ -162,6 +166,7 @@ class DeepLearningDialog(QDialog):
         self.scope.header().setSectionResizeMode(0,QHeaderView.ResizeMode.Stretch)
         self.scope.header().setSectionResizeMode(1,QHeaderView.ResizeMode.ResizeToContents)
         layout.addWidget(self.scope)
+        self.scope.setVisible(not bool(entry_control))
         self.pending=QTreeWidget();self.pending.setHeaderLabels(["未完成分支","原因"]);self.pending.setMaximumHeight(150)
         self.pending.setColumnWidth(0,280)
         layout.addWidget(self.pending)
@@ -181,7 +186,7 @@ class DeepLearningDialog(QDialog):
         inputs=json.loads(self.inputs.toPlainText())
         if not isinstance(inputs,dict):raise ValueError("测试输入必须为 JSON 对象")
         selected={"control":[],"workflow":[]}
-        if self.mode.currentData()=="improve":
+        if self.mode.currentData()=="improve" and not self.entry_control:
             for n in range(self.scope.topLevelItemCount()):
                 item=self.scope.topLevelItem(n)
                 if item.checkState(0)==Qt.CheckState.Checked:
@@ -191,6 +196,7 @@ class DeepLearningDialog(QDialog):
         return dict(inputs=inputs,instructions=self.instructions.toPlainText().strip(),max_actions=self.actions.value(),
                     max_depth=self.depth.value(),allow_commit=self.commit.isChecked(),mode=self.mode.currentData(),
                     session_id=self.session.currentData() if self.mode.currentData()!="new" else "",
+                    entry_control_id=self.entry_control.get("id",""),
                     control_ids=selected["control"],workflow_ids=selected["workflow"],
                     retry_branches=retry if self.mode.currentData()!="new" else [],reset_workflow_id=self.reset.currentData())
 
