@@ -5,6 +5,7 @@ UIA ancestors describe locations; they are not additional detected controls.
 from __future__ import annotations
 
 import math
+import time
 from pathlib import Path
 import shutil
 from tempfile import TemporaryDirectory
@@ -70,6 +71,10 @@ def resolve(window, bounds, targets, limit, progress):
     from .. import utils
     from . import scanner
     from .diagram_geometry import is_text
+
+    menu = resolve_menu(window, bounds, limit, progress)
+    if menu is not None:
+        return menu
 
     controls, semantics, failures, paths, seen = [], {}, [], {}, {}
     for number, target in enumerate(targets[:limit], start=1):
@@ -156,7 +161,87 @@ def resolve(window, bounds, targets, limit, progress):
     return controls, semantics, failures, paths
 
 
-def expanded_regions(directory, controls, context, bounds, frame, app_id, page_id):
+def _menu_window(window):
+    kind = getattr(window, "ControlTypeName", "")
+    class_name = getattr(window, "ClassName", "") or ""
+    return (kind == "MenuControl" or class_name == "#32768"
+            or class_name.startswith("Qt") and "Popup" in class_name)
+
+
+def resolve_menu(window, bounds, limit, progress):
+    """Read the live menu subtree when point hit-testing only returns its popup.
+
+    The caller has already bound and checked this native window. Do not search
+    the desktop or the application's full tree, or import historical controls.
+    """
+    from . import scanner
+
+    if not _menu_window(window):
+        return None
+
+    def step(control, depth, ordinal=None):
+        value = dict(ControlType=control.ControlTypeName, searchDepth=depth, match_mode="identity")
+        for key in ("Name", "ClassName", "AutomationId"):
+            if getattr(control, key, ""):
+                value[key] = getattr(control, key)
+        if ordinal is not None:
+            value["foundIndex"] = ordinal
+        return value
+
+    controls, semantics, failures, paths = [], {}, [], {}
+    pending = [(window, [step(window, 1)])]
+    seen = set()
+    deadline = time.monotonic() + 3
+    process_id = getattr(window, "ProcessId", 0)
+    while pending:
+        if len(seen) >= 2000 or time.monotonic() >= deadline or len(controls) >= limit:
+            failures.append(dict(reason="menu_scan_truncated", error="当前菜单读取达到上限，未确认完整覆盖"))
+            break
+        control, path = pending.pop()
+        key = scanner._control_key(control)
+        if key in seen:
+            continue
+        seen.add(key)
+        if bool(getattr(control, "IsOffscreen", False)):
+            continue
+        if process_id and getattr(control, "ProcessId", process_id) != process_id:
+            continue
+        kind = getattr(control, "ControlTypeName", "")
+        if kind == "MenuItemControl":
+            rect = scanner._rect(control)
+            if rect["width"] <= 1 or rect["height"] <= 1 or scanner._clip_rect(rect, bounds) != rect:
+                continue
+            progress(f"读取当前菜单项：{getattr(control, 'Name', '')}")
+            relative = {**rect, "left": rect["left"]-bounds["left"], "right": rect["right"]-bounds["left"],
+                        "top": rect["top"]-bounds["top"], "bottom": rect["bottom"]-bounds["top"]}
+            native = manual_layout.native_semantics(dict(
+                uia_name=getattr(control, "Name", ""), automation_id=getattr(control, "AutomationId", ""),
+                control_type=kind, help_text=getattr(control, "HelpText", ""),
+                supported_actions=scanner._control_actions(kind, bool(getattr(control, "IsEnabled", True)))))
+            controls.append((control, len(path)-1))
+            semantics[len(controls)] = {**native, "relative_rect": relative, "region_id": "unassigned",
+                "observed_value": getattr(control, "Name", ""), "visual_components": [],
+                "detection_method": "popup-menu-uia"}
+            paths[id(control)] = path
+            # A submenu is observed separately after opening it; hidden children
+            # of its entry must not be presented as current executable controls.
+            continue
+        if kind not in {"MenuControl", "WindowControl", "PaneControl", "GroupControl", "CustomControl"}:
+            continue
+        children = control.GetChildren()
+        if len(path) >= 8 and children:
+            failures.append(dict(reason="menu_scan_truncated", error="当前菜单层级超限，未确认完整覆盖"))
+            continue
+        counts, descendants = {}, []
+        for child in children:
+            child_kind = child.ControlTypeName
+            counts[child_kind] = counts.get(child_kind, 0) + 1
+            descendants.append((child, [*path, step(child, len(path)+1, counts[child_kind])]))
+        pending.extend(reversed(descendants))
+    return (controls, semantics, failures, paths) if controls or failures else None
+
+
+def expanded_regions(directory, controls, context, bounds, frame, app_id, page_id, *, paths=None, scopes=None):
     """Retain detected menu ancestors as regions, never extra control records."""
     from ..utils import get_control_xpath
     from . import scanner, control_observation
@@ -167,8 +252,11 @@ def expanded_regions(directory, controls, context, bounds, frame, app_id, page_i
         current = control.GetParentControl()
         for _ in range(64):
             if current is None: break
-            if getattr(current,"ControlTypeName","") == "MenuControl":
-                xpath=get_control_xpath(current)
+            if _menu_window(current):
+                path=(paths or {}).get(id(control), [])
+                matches=[i for i, item in enumerate(path) if item.get("ControlType")==current.ControlTypeName
+                         and scanner._matches_step(current,item)]
+                xpath=path[:matches[-1]+1] if matches else get_control_xpath(current)
                 identifier=knowledge.stable_id("menu-region",app_id,page_id,context["path"],xpath)
                 if identifier in seen:break
                 seen.add(identifier)
@@ -183,7 +271,8 @@ def expanded_regions(directory, controls, context, bounds, frame, app_id, page_i
                     "name":old.get("name") or (getattr(current,"Name","") or "展开菜单"),
                     "source":"local-visual-container","coordinate_space":"observation",
                     "parent_control_id":context["path"][-1],"navigation_path":context["path"],
-                    "location":location_from_xpath(xpath),"window_scope":context.get("scope",{"kind":"main"}),
+                    "location":location_from_xpath(xpath),
+                    "window_scope":(scopes or {}).get(id(control),(None,context.get("scope",{"kind":"main"})))[1],
                     "geometry_role":"visual-hint-only","normalized_rect":knowledge.normalized_rect(rectangle,capture_bounds),
                     "visual_observation":control_observation.describe(reference,capture_bounds,rectangle,bounds,phase="located"),
                     "image":str(destination.relative_to(directory)).replace("\\","/")})

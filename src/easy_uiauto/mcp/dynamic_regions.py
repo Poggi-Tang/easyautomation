@@ -242,8 +242,20 @@ def build_tree(controls: list[dict], regions: list[dict]) -> dict:
                 and region.get("page_id") == record.get("page_id")):
             parents["control:"+identifier] = "region:"+region["id"]
 
+    # Deep learning captures an owned popup as a separate observation page, but
+    # its regions still belong under the control that opened that surface.
+    attached = set()
+    for region in regions:
+        opener = region.get("parent_control_id")
+        if (region.get("learning_source") == "deep-learning" and not is_dynamic(region)
+                and region.get("window_scope", {}).get("kind") == "owned"
+                and isinstance(opener, str) and opener in records):
+            node = "region:"+region["id"]
+            parents[node] = control_node(opener)
+            attached.add(node)
+
     # Corrupt metadata must not create a recursive GUI or discard learned controls.
-    roots = {"region:"+r["id"] for r in regions if not is_dynamic(r)}
+    roots = {"region:"+r["id"] for r in regions if not is_dynamic(r)} - attached
     for node in list(parents):
         trail, current = set(), node
         while current in parents and current not in trail:

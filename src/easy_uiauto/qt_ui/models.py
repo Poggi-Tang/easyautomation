@@ -69,8 +69,9 @@ class KnowledgeModel(QStandardItemModel):
                 add(usage, f"usage:{app_id}:{r['document_path']}", r["name"], app_id, "usage", r)
             controls_root = add(app, "controls-root:"+app_id, "控件库", app_id, "controls-root", {})
             pages = {p["id"]:p for p in index["pages"]}
+            graph = dynamic_regions.build_tree(index["controls"], index["regions"])
             region_items = {}
-            static = [r for r in index["regions"] if not dynamic_regions.is_dynamic(r)]
+            static = [r for r in index["regions"] if "region:"+r["id"] in graph["static_roots"]]
             groups = {}
             for r in static:
                 state = pages.get(r.get("page_id"), {}).get("region_state", {})
@@ -86,10 +87,9 @@ class KnowledgeModel(QStandardItemModel):
                     label = (r.get("state_name") or state.get("name") or "默认") if len(regions)>1 else r.get("name",r["id"])
                     region_items[r["id"]] = add(parent, f"region:{app_id}:{r['id']}", label, app_id, "region", r,
                         "待确认" if not page.get("layout_confirmed") else "有前置" if r.get("entry_steps") or state.get("steps") else "")
-            graph = dynamic_regions.build_tree(index["controls"], index["regions"])
             pending = {}
             for r in index["regions"]:
-                if dynamic_regions.is_dynamic(r):
+                if r["id"] not in region_items:
                     pending["region:"+r["id"]] = ("region", r)
             for r in index["controls"]:
                 if r["id"] not in graph.get("containers", {}): pending["control:"+r["id"]] = ("control", r)

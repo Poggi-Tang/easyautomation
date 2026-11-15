@@ -4,7 +4,7 @@
 
 YOLO 支持 CPU 和 NVIDIA CUDA；OCR 仍使用 CPU。需要兼容的 NVIDIA 显卡和驱动，
 无需单独安装 CUDA Toolkit。Intel / AMD 显卡暂不支持 GPU 推理。
-本功能位于当前源码中，已发布的 1.1.0 安装包尚未包含；使用新源码安装，或等待后续版本。
+本功能从 1.1.1 起提供；使用 1.1.1 或更新版本的源码、GUI 包或 Python 包。
 
 ## 安装
 
@@ -20,7 +20,7 @@ setup.bat -Gpu
 安装期间不替换原 CPU 包，CUDA 初始化和一次真实 YOLO 推理成功后才启用。
 失败不会启用新环境，修复驱动后可重试。安装后重启 GUI / MCP。
 
-后续发布的完整 GUI ZIP 也使用相同命令。默认双击 `setup.bat` 仍安装 CPU 环境。
+1.1.1 起的完整 GUI ZIP 也使用相同命令。默认双击 `setup.bat` 仍安装 CPU 环境。
 通过 `install-full.cmd` 或 pip 安装的用户，在当前源码仓库中用**运行 MCP 的 Python**执行：
 
 ```bat

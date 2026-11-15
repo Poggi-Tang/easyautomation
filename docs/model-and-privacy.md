@@ -53,7 +53,7 @@ restore the previous settings and never fall back to plaintext storage. A normal
 not rewrite existing client configuration files or erase historical plaintext copies. Re-registering
 the Codex MCP server migrates this application's settings and replaces its old entry.
 
-Upgrade the GUI, MCP and Python together to 1.1.0 before saving settings: older versions cannot
+Upgrade the GUI, MCP and Python together to the current version before saving settings: versions before 1.1.0 cannot
 read Credential Manager. Updated processes under the same user read changes dynamically.
 Another user or machine needs its own key configuration. Restart older clients after upgrading
 to discard inherited environment values.

@@ -237,6 +237,10 @@ class NativeBackend:
                 for region in scope.regions(self.app_id):
                     region.update(learning_source="deep-learning",learning_origin_region=self.region["id"],window_scope=frame["scope"])
                     if "entry_steps" not in region:region["entry_steps"]=step_ids([*self.root_entry,*route],"entry")
+                    if frame["scope"].get("kind") == "owned" and route:
+                        opener = route[-1].get("target", {}).get("control_id")
+                        if opener and "parent_control_id" not in region:
+                            region["parent_control_id"] = opener
                     knowledge.save_region(self.directory,region)
         result=scanner.scan_window(frame["target"]["title"],"","","",__version__,root=self.library.root,
             max_controls=self.max_controls,strategy="local-visual",manual_layout=layout,semantic_mode="native",

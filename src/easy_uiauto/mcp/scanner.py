@@ -2066,6 +2066,10 @@ def scan_window(
                 for target in targets:
                     r = target["relative_rect"]
                     r.update(left=r["left"]+dx, right=r["right"]+dx, top=r["top"]+dy, bottom=r["bottom"]+dy)
+                for meaning in meanings.values():
+                    if meaning.get("detection_method") == "popup-menu-uia":
+                        r = meaning["relative_rect"]
+                        r.update(left=r["left"]+dx, right=r["right"]+dx, top=r["top"]+dy, bottom=r["bottom"]+dy)
                 metadata = allowed[handle]
                 scope = {"kind":"owned", "class_name":metadata["class_name"], "title":metadata["title"]}
                 for index, (child, depth) in enumerate(found, 1):
@@ -2074,11 +2078,18 @@ def scan_window(
                     controls.append((child,depth))
                 local_paths.update(paths); visual_targets.extend(targets); visual_failures.extend(missing)
                 local_frames.append((bounds,image)); local_reports.extend(reports)
+        if manual_layout.get("restrict_regions") and not navigation_context:
+            retained = [(c, d, semantics[i]) for i, (c, d) in enumerate(controls, 1)
+                        if semantics[i].get("detection_method") != "popup-menu-uia"
+                        or region_of(_rect(c)) != "unassigned"]
+            controls = [(c, d) for c, d, _s in retained]
+            semantics = {i: s for i, (_c, _d, s) in enumerate(retained, 1)}
         if manual_layout.get("window_scope",{}).get("kind") == "owned":
             for control, _depth in controls:
                 control_scopes[id(control)] = (window,manual_layout["window_scope"])
-        segmentation["coverage"].update(detector="YOLO+RapidOCR", point_bindings=len(controls),
-                                          uia_enumerated=0, local_annotations=local_reports)
+        menu_items = sum(s.get("detection_method") == "popup-menu-uia" for s in semantics.values())
+        segmentation["coverage"].update(detector="YOLO+RapidOCR", point_bindings=len(controls)-menu_items,
+                                          uia_enumerated=menu_items, local_annotations=local_reports)
     elif strategy == "visual-first":
         if visual_targets:
             progress(f"Resolving {len(visual_targets)} visual targets through local UIA")
@@ -2527,6 +2538,7 @@ def scan_window(
                 "normalized_rect": knowledge.normalized_rect(control_rect, window_rect),
                 "geometry_role": "visual-hint-only",
                 "location": location,
+                "window_scope": control_scopes.get(id(control), (None, {"kind": "main"}))[1],
                 "actions": actions,
                 "supported_actions": supported_actions,
                 "is_key": is_key,
@@ -2571,11 +2583,12 @@ def scan_window(
                     observed_reference, observed_bounds, control_rect, window_rect, phase="located")
                 record["visual_observation"]["purpose"] = "learning-reference"
                 if strategy == "local-visual":
-                    record["detection"] = {"method":"local-yolo-rapidocr+get_control_info",
+                    record["detection"] = {"method":semantics[index].get("detection_method", "local-yolo-rapidocr+get_control_info"),
                         "analysis_result":semantics[index].get("analysis_result", ""),
                         "normalized_rect":knowledge.normalized_rect(semantics[index]["relative_rect"],window_rect,relative=True)}
-            if navigation_context and (_control_key(control) not in navigation_context.get("before_keys", set())
-                    and control_id not in navigation_context.get("before_ids", set())):
+            if navigation_context and (scoped_popup or (
+                    _control_key(control) not in navigation_context.get("before_keys", set())
+                    and control_id not in navigation_context.get("before_ids", set()))):
                 path = navigation_context["path"]
                 if control_id not in path:
                     record.update(navigation_path=list(path), navigation_source="expanded-learning",
@@ -2722,7 +2735,7 @@ def scan_window(
             {r["id"] for r in manual_layout["regions"]},scan_id)
         if navigation_context:
             local_learning.expanded_regions(directory,controls,navigation_context,window_rect,
-                                            observation_frame,app_id,page_id)
+                                            observation_frame,app_id,page_id,paths=local_paths,scopes=control_scopes)
     for previous in previous_page_records:
         if previous.get("id") in observed_ids:
             continue
@@ -2851,6 +2864,7 @@ def scan_window(
         ),
         "failures": failures[:50],
         "truncated": (len(controls) >= max_controls or len(visual_targets) > max_controls
+                      or any(f.get("reason") == "menu_scan_truncated" for f in visual_failures)
                       or any(report.get("truncated") for report in local_reports)
                       or segmentation.get("coverage", {}).get("uia_enumerated", 0) >= max_controls
                       or segmentation.get("coverage", {}).get("desktop_limit_reached", False)),

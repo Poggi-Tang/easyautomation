@@ -4,9 +4,26 @@ Release notes and upgrade instructions.
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-11-15
+
+### Qt 菜单学习修复
+
+- 修复 Qt 独立菜单弹窗在 `expand-control` 和 `deep-learn-control` 中遗漏菜单项的问题。打开菜单后，读取已绑定弹窗中的可见 UIA 菜单项，将它们纳入当前观察，供后续交互使用。
+- 保留弹窗定位路径与窗口上下文，将菜单子区域挂在打开它的控件下；GUI 控件树不再把这些子区域重复显示在根部。
+- 重新观察只提供当前可见的菜单项；不把历史记录或未展开的子菜单当作当前可执行控件。读取达到数量、层级或时间上限时报告未完整覆盖。
+
+### YOLO GPU 支持
+
 - YOLO 支持自动选择 CPU / NVIDIA CUDA，以及指定 GPU 编号；GUI、MCP、CLI 和 Python 共用设备配置。自动模式在 CUDA 不可用或推理失败时回退 CPU 并记录原因，明确指定 GPU 时返回错误。OCR 仍使用 CPU。
 - 新增 `setup.bat -Gpu` 可选安装：独立保存 CUDA 依赖，通过真实 YOLO 推理后才启用，失败保留原环境；支持恢复 CPU 和移动完整 GUI 目录。
 - 将中英文文档与配置提示中的模型名称统一为“多模态模型 / multimodal model”。
+
+### 安装与升级
+
+- GUI 用户下载 `easy-uiauto-gui-win-x64.zip`，完整解压后双击 `setup.bat`；源码用户拉取 `main` 后重新运行 `setup.bat`。
+- Python / MCP 用户运行 `python -m pip install -U "easy-uiauto[full]==1.1.1"`。完整离线安装使用 `easy-uiauto-offline-win-x64.zip`；升级后重启 GUI 和 MCP 服务。
+- 已有知识库可以继续使用。此前菜单学习受阻的任务，恢复到原起点后选择“继续学习”；需重新分析已有结果时选择“改进”，或重新运行该控件的展开学习。新菜单项会在重新观察后写入知识库。
+- 默认安装仍使用 CPU；NVIDIA 用户可运行 `setup.bat -Gpu` 下载 CUDA 依赖。GPU 使用条件和设备选择见 [GPU 使用说明](docs/yolo-gpu.zh-CN.md)。
 
 ## [1.1.0] - 2026-11-15
 

@@ -4,8 +4,8 @@ English | [简体中文](yolo-gpu.zh-CN.md)
 
 YOLO supports CPU and NVIDIA CUDA. OCR stays on CPU. A compatible NVIDIA GPU and
 driver are required; a separate CUDA Toolkit is unnecessary. Intel / AMD GPU inference
-is not supported. This feature is in the current source; published 1.1.0 bundles
-predate it. Install from the updated source or use a subsequent release.
+is not supported. This feature is available from 1.1.1. Use source, GUI bundles or
+Python packages at version 1.1.1 or later.
 
 ## Install
 
@@ -17,7 +17,7 @@ wheel for your Python / Windows version and support your GPU and driver.
 
 CUDA packages live in a separate directory. They become active only after CUDA
 initialization and real YOLO inference succeed. Failure preserves the previous
-runtime. Restart GUI / MCP after installation. Future complete GUI ZIPs support
+runtime. Restart GUI / MCP after installation. Complete GUI ZIPs from 1.1.1 support
 the same command. Ordinary `setup.bat` installations continue to include CPU packages.
 
 For installations made with `install-full.cmd` or pip, run from the updated checkout:
