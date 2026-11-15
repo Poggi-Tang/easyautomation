@@ -701,7 +701,7 @@ class KnowledgeLibrary:
         for _path, record in knowledge.iter_records(directory, "control"):
             if record.get("page_id") != self.page_id or not record.get("normalized_rect"):
                 continue
-            if record.get("region_source") == "manual-selection":continue
+            if record.get("region_source") in {"manual-selection", "expanded-popup"}:continue
             original = dict(record)
             previous = record.get("region_id", "unassigned").removeprefix(self.page_id + ".")
             identifier, reason = manual_layout.assign_region(record["normalized_rect"], regions)

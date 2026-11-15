@@ -230,7 +230,7 @@ def test_manual_entry_omitted_by_scan_requires_fresh_visible_locator(backend,lib
         return SimpleNamespace(IsEnabled=True)
     monkeypatch.setattr(library_actions,"resolve_record",resolve)
     monkeypatch.setattr(scanner,"_window_rect",lambda _:dict(left=10,top=10,width=20,height=20))
-    monkeypatch.setattr(scanner,"scan_window",lambda *a,**k:dict(observed_control_ids=[],truncated=False))
+    monkeypatch.setattr(scanner,"scan_window",lambda *a,**k:pytest.fail("single-entry origin must not rescan the region"))
     frame=dict(state_id="root",image=Image.new("RGB",(400,300)),target=backend.expected,scope={"kind":"main"},
                bounds=dict(left=0,top=0,width=400,height=300),issues=[])
     monkeypatch.setattr(backend,"stable_frame",lambda:deepcopy(frame))

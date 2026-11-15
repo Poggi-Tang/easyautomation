@@ -174,7 +174,7 @@ def resolve_record(record: dict, expected: dict, main_window, *, require_visible
         # XPath. Rebase only at an exact, unique ancestor matching this root.
         normalized = normalize_location(location)
         path = normalized["Xpath"]
-        matches = [i for i, step in enumerate(path) if step.get("ControlType") in {"WindowControl", "MenuControl"}
+        matches = [i for i, step in enumerate(path) if step.get("ControlType") in {"WindowControl", "MenuControl", "PaneControl", "ListControl"}
                    and scanner._matches_step(root, step)]
         if len(matches) != 1 and not visual_only:
             # The native window can close after enumeration; only a fresh

@@ -1,7 +1,4 @@
-"""Local annotations followed by the recorder's point-to-UIA binding.
-
-UIA ancestors describe locations; they are not additional detected controls.
-"""
+"""Bind local annotations, or enumerate visible items inside a bound popup."""
 from __future__ import annotations
 
 import math
@@ -67,7 +64,7 @@ def detect(image, bounds, segmentation, directory, progress, *, expanded=False):
 
 
 def resolve(window, bounds, targets, limit, progress):
-    """Bind only annotated positions, using exactly the recording point method."""
+    """Read native popup items, otherwise bind the annotated recorder positions."""
     from .. import utils
     from . import scanner
     from .diagram_geometry import is_text
@@ -164,7 +161,7 @@ def resolve(window, bounds, targets, limit, progress):
 def _menu_window(window):
     kind = getattr(window, "ControlTypeName", "")
     class_name = getattr(window, "ClassName", "") or ""
-    return (kind == "MenuControl" or class_name == "#32768"
+    return (kind == "MenuControl" or class_name in {"#32768", "KMenu", "QMenu", "QComboBoxPrivateContainer"}
             or class_name.startswith("Qt") and "Popup" in class_name)
 
 
@@ -207,7 +204,7 @@ def resolve_menu(window, bounds, limit, progress):
         if process_id and getattr(control, "ProcessId", process_id) != process_id:
             continue
         kind = getattr(control, "ControlTypeName", "")
-        if kind == "MenuItemControl":
+        if kind in {"MenuItemControl", "ListItemControl"}:
             rect = scanner._rect(control)
             if rect["width"] <= 1 or rect["height"] <= 1 or scanner._clip_rect(rect, bounds) != rect:
                 continue
@@ -226,7 +223,7 @@ def resolve_menu(window, bounds, limit, progress):
             # A submenu is observed separately after opening it; hidden children
             # of its entry must not be presented as current executable controls.
             continue
-        if kind not in {"MenuControl", "WindowControl", "PaneControl", "GroupControl", "CustomControl"}:
+        if kind not in {"MenuControl", "WindowControl", "PaneControl", "GroupControl", "CustomControl", "ListControl"}:
             continue
         children = control.GetChildren()
         if len(path) >= 8 and children:
@@ -247,7 +244,7 @@ def expanded_regions(directory, controls, context, bounds, frame, app_id, page_i
     from . import scanner, control_observation
     from .protocol import location_from_xpath
 
-    seen = set()
+    seen, assignments = set(), {}
     for control, _depth in controls:
         current = control.GetParentControl()
         for _ in range(64):
@@ -258,6 +255,7 @@ def expanded_regions(directory, controls, context, bounds, frame, app_id, page_i
                          and scanner._matches_step(current,item)]
                 xpath=path[:matches[-1]+1] if matches else get_control_xpath(current)
                 identifier=knowledge.stable_id("menu-region",app_id,page_id,context["path"],xpath)
+                assignments[id(control)] = identifier
                 if identifier in seen:break
                 seen.add(identifier)
                 rectangle=scanner._rect(current)
@@ -269,15 +267,46 @@ def expanded_regions(directory, controls, context, bounds, frame, app_id, page_i
                 old=next((r for _p,r in knowledge.iter_records(directory,"region") if r["id"]==identifier),{})
                 knowledge.save_region(directory,{**old,"id":identifier,"app_id":app_id,"page_id":page_id,
                     "name":old.get("name") or (getattr(current,"Name","") or "展开菜单"),
-                    "source":"local-visual-container","coordinate_space":"observation",
+                    "source":"local-visual-container","coordinate_space":"main-window",
                     "parent_control_id":context["path"][-1],"navigation_path":context["path"],
                     "location":location_from_xpath(xpath),
                     "window_scope":(scopes or {}).get(id(control),(None,context.get("scope",{"kind":"main"})))[1],
-                    "geometry_role":"visual-hint-only","normalized_rect":knowledge.normalized_rect(rectangle,capture_bounds),
+                    "geometry_role":"visual-hint-only","normalized_rect":knowledge.normalized_rect(rectangle,bounds),
                     "visual_observation":control_observation.describe(reference,capture_bounds,rectangle,bounds,phase="located"),
-                    "image":str(destination.relative_to(directory)).replace("\\","/")})
+                    "image":str(destination.relative_to(directory)).replace("\\","/"),
+                    **({"entry_steps":context["entry_steps"]} if "entry_steps" in context else {})})
                 break
             current=current.GetParentControl()
+    return assignments
+
+
+def matching_popup_record(records, location, scope, navigation):
+    """Reuse a uniquely identified popup item, including a former standalone page.
+
+    QAction names/IDs alone are not an identity: a toolbar can expose the same
+    action. Require the owned window and the entire path within that popup.
+    """
+    from .control_hierarchy import _path
+    wanted = _path({"location": location})
+    matches = []
+    for record in records:
+        old_scope = record.get("window_scope", {})
+        path = _path(record)
+        tail=path[-len(wanted):] if wanted and len(path)>=len(wanted) else ()
+        # The old path may include main-window ancestors. Its popup-root ordinal
+        # is relative to those ancestors, not part of the standalone popup path.
+        same_path=bool(tail and tail[0][:4]==wanted[0][:4] and tail[1:]==wanted[1:])
+        legacy_popup = bool(same_path and (tail[0][0] == "MenuControl" or tail[0][3] in {
+            "KMenu", "QMenu", "QComboBoxPrivateContainer", scope.get("class_name")}))
+        if old_scope != scope and not (old_scope.get("kind", "main") == "main" and legacy_popup):continue
+        old_navigation = record.get("navigation_path", [])
+        if old_navigation and old_navigation != navigation:
+            continue
+        if same_path:
+            matches.append(record)
+    if len(matches) > 1:
+        raise ValueError("菜单项有多个相同弹窗定位的历史记录，未创建或覆盖控件")
+    return matches[0] if matches else {}
 
 
 def archive_layout_records(directory, previous, observed, region_ids, scan_id):

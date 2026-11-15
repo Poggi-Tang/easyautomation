@@ -690,6 +690,9 @@ def execute_many(
     app_names = {item["record"].get("app_name", "") for item in prepared}
     if len(app_names) != 1:
         raise ValueError("batch commands must belong to one application window")
+    scopes = {json.dumps(item["record"].get("window_scope", {"kind":"main"}), sort_keys=True) for item in prepared}
+    if len(scopes) != 1:
+        raise ValueError("batch commands must belong to one visible window; split popup navigation into separate batches")
 
     window = _find_window(prepared[0]["record"])
     window_rect = _window_rect(window, _rect(window))

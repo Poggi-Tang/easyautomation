@@ -14,7 +14,7 @@ from test_mcp_scanner import FakeControl
 NAMES = ["新建项目", "打开项目", "最近打开项目", "导入", "系统设置"]
 
 
-@pytest.fixture(params=["MenuControl", "WindowControl"])
+@pytest.fixture(params=["MenuControl", "WindowControl", "PaneControl"])
 def popup(setup, monkeypatch, request):
     layout, native, root = setup
     main = scanner.uiautomation.ControlFromHandle(1)
@@ -147,22 +147,27 @@ def test_expanded_popup_items_attach_under_opener_and_keep_popup_relative_coordi
     assert {r["name"] for r in records} == set(NAMES)
     for record in records:
         assert record["window_scope"] == scope and record["navigation_path"] == [opener["id"]]
+        assert record["region_id"] == region["id"]
+        assert record["command"].startswith(layout["page_id"]+"."+region["id"]+".")
         assert tree["parents"]["control:"+record["id"]] == "region:"+region["id"]
         assert record["detection"]["normalized_rect"]["left"] == pytest.approx(355/400)
 
 
 def test_deep_observation_planner_and_tree_receive_current_popup_items(popup, monkeypatch, tmp_path):
     layout, native, root, _main, menu, _items, popup_native, scope = popup
-    # Seed the entry in its main-page region; the menu is a separate state page.
-    scan_menu(popup)
+    # A popup observation must use the original page without replacing its layout.
+    scanner.scan_window("Example", "", "", "", "test", root=root, manual_layout=layout, semantic_mode="native")
     library = KnowledgeLibrary(root, page_id=layout["page_id"])
+    knowledge.save_page(library.directory("chosen-app"), {**library.page("chosen-app"), "layout_confirmed":True})
     origin = library.regions("chosen-app")[0]
-    entry = {**library.read("chosen-app")["controls"][0], "id": "file-entry", "name": "文件",
+    entry = {"id": "file-entry", "name": "文件", "app_id":"chosen-app", "page_id":layout["page_id"],
+             "control_type":"MenuItemControl", "status":"observed",
              "window_scope": {"kind": "main"}, "region_id": origin["id"]}
     knowledge.save_control(library.directory("chosen-app"), entry)
     monkeypatch.setattr(region_learning.configuration, "load_gui_configuration",
                         lambda: dict(api_url="https://example.invalid/v1", api_key="test", api_model="test"))
     backend = region_learning.NativeBackend(library, "chosen-app", origin, native, tmp_path)
+    backend.configure_learning(dict(states={},root="",entry_control_id=entry["id"]),"new",[entry["id"]],[])
     frame = dict(state_id="file-menu", image=Image.new("RGB", (220,160), "white"), target=popup_native,
                  scope=scope, bounds=scanner._rect(menu), root=menu, issues=[])
     monkeypatch.setattr(backend, "stable_frame", lambda: frame)
@@ -171,6 +176,7 @@ def test_deep_observation_planner_and_tree_receive_current_popup_items(popup, mo
     assert all(r["window_scope"] == scope for r in observation["controls"])
     def plan(_settings, payload, _image):
         assert {r["name"] for r in payload["controls"]} == set(NAMES)
+        assert all(r["normalized_rect"]["left"]==pytest.approx(5/220,abs=1e-6) for r in payload["controls"])
         return dict(branches=[dict(name=r["name"], effect="navigation", replayable=True,
                                   steps=[workflows.click_step(r)]) for r in payload["controls"]])
     monkeypatch.setattr(region_learning, "_request_plan", plan)
@@ -178,11 +184,129 @@ def test_deep_observation_planner_and_tree_receive_current_popup_items(popup, mo
     assert len(planned["branches"]) == 5
     assert not any(b.get("blocked") for b in planned["branches"])
     snapshot = library.read("chosen-app")
+    assert len(snapshot["pages"]) == 1
+    assert len(snapshot["controls"]) == 6
     tree = dynamic_regions.build_tree(snapshot["controls"], snapshot["regions"])
     for record in observation["controls"]:
         parent = tree["parents"]["control:"+record["id"]]
         assert tree["parents"][parent] == "control:file-entry"
         assert library.entry_steps("chosen-app", record)[0]["target"]["control_id"] == entry["id"]
+        assert record["page_id"] == layout["page_id"]
+        region = next(r for r in snapshot["regions"] if r["id"] == record["region_id"])
+        assert region["parent_control_id"] == entry["id"]
+        saved=next(r for r in snapshot["controls"] if r["id"]==record["id"])
+        assert saved["normalized_rect"]["left"]==pytest.approx(355/400)
+        assert record["normalized_rect"]["left"]==pytest.approx(355/400)
+    repeat = scanner.scan_window("Example", "", "", "", "test", root=root, manual_layout=layout,
+        semantic_mode="native", navigation_context=dict(path=[entry["id"]], popup_handles=[2]))
+    assert set(repeat["observed_control_ids"]) == {r["id"] for r in observation["controls"]}
+    assert len(library.read("chosen-app")["controls"]) == 6
+
+
+def seed_main(popup):
+    layout, _native, root, _main, _menu, _items, _popup_native, _scope = popup
+    directory=knowledge.initialize_app("chosen-app", "Example", root)
+    knowledge.save_page(directory, dict(id=layout["page_id"], app_id="chosen-app", name="人工区域布局",
+        layout_confirmed=True, observed_window_size=layout["image_size"]))
+    for region in layout["regions"]:
+        knowledge.save_region(directory, {**region,"id":layout["page_id"]+"."+region["id"],
+            "page_id":layout["page_id"],"app_id":"chosen-app","source":"manual"})
+    entry=dict(id="file-entry",name="文件",app_id="chosen-app",page_id=layout["page_id"],
+        region_id="toolbar",status="observed",control_type="MenuItemControl")
+    knowledge.save_control(directory,entry)
+    return KnowledgeLibrary(root,page_id=layout["page_id"]),entry
+
+
+def expand(popup, entry):
+    return scanner.scan_window("Example", "", "", "", "test", root=popup[2], manual_layout=popup[0],
+        semantic_mode="native", navigation_context=dict(path=[entry["id"]], popup_handles=[2]))
+
+
+def test_popup_scan_never_detects_main_or_merges_toolbar_qaction(popup, monkeypatch):
+    library,entry=seed_main(popup)
+    item=popup[5][0];item.AutomationId="shared-action"
+    twin={**entry,"id":"toolbar-twin","name":item.Name,"automation_id":item.AutomationId,
+          "location":{"Xpath":[{"ControlType":"WindowControl","Name":"Example"},
+                               {"ControlType":"MenuItemControl","Name":item.Name}]}}
+    knowledge.save_control(library.directory("chosen-app"),twin)
+    original=knowledge.find_control_record(library.directory("chosen-app"),twin["id"])[1]
+    monkeypatch.setattr(local_learning,"detect",lambda *a,**kw:pytest.fail("native popup must not rescan main or run detector"))
+    first=expand(popup,entry);second=expand(popup,entry)
+    snapshot=library.read("chosen-app")
+    assert first["observed_control_ids"]==second["observed_control_ids"]
+    assert len(snapshot["controls"])==7
+    assert next(r for r in snapshot["controls"] if r["id"]==twin["id"])==original
+    assert not any(r.get("region_id")=="unassigned" for r in snapshot["controls"])
+    assert len(snapshot["pages"])==1
+
+
+@pytest.mark.parametrize("legacy_scope", [False,True])
+def test_standalone_popup_records_move_to_entry_without_new_ids(popup,legacy_scope):
+    old=scan_menu(popup,layout_overrides={"page_id":"old-menu-page"})
+    library,entry=seed_main(popup)
+    if legacy_scope:
+        for record in current_records(popup[2],old):
+            record["window_scope"]={"kind":"main"}
+            record["location"]["Xpath"][0]["foundIndex"]=1
+            record["location"]["Xpath"].insert(0,{"ControlType":"WindowControl","Name":"Example"})
+            knowledge.save_control(library.directory("chosen-app"),record)
+    result=expand(popup,entry)
+    assert result["observed_control_ids"]==old["observed_control_ids"]
+    assert len(library.read("chosen-app")["controls"])==6
+    assert all(r["page_id"]==popup[0]["page_id"] for r in current_records(popup[2],result))
+
+
+def test_popup_commands_execute_through_saved_location(popup,monkeypatch):
+    from easy_uiauto.mcp import ui_cli
+    library,entry=seed_main(popup)
+    result=expand(popup,entry)
+    monkeypatch.setattr(scanner.native_windows,"enumerate_windows",lambda **kw:[popup[1],popup[6]])
+    monkeypatch.setattr(ui_cli,"_window_rect",lambda w,*a:scanner._rect(w))
+    monkeypatch.setattr(ui_cli,"_screenshot_window",scanner._screenshot_window)
+    monkeypatch.setattr(ui_cli,"_trim_window_capture",lambda image,bounds,w:(image,bounds))
+    executed=[]
+    monkeypatch.setattr(ui_cli,"_perform_action",lambda action,text,control,rectangle,**kw:executed.append(control.Name))
+    for record in current_records(popup[2],result):
+        response=ui_cli.execute(library.directory("chosen-app"),record["command"]+".click",confirm=True)
+        assert response["resolved_by"]=="location" and response["action_executed"]
+    assert set(executed)==set(NAMES)
+
+
+def test_qt_combo_popup_list_items_are_current_and_attached(popup):
+    library,entry=seed_main(popup)
+    popup[4].ClassName="QComboBoxPrivateContainer"
+    for item in popup[5]:item.ControlTypeName="ListItemControl"
+    result=expand(popup,entry)
+    records=current_records(popup[2],result)
+    assert len(records)==5 and all(r["control_type"]=="ListItemControl" for r in records)
+    assert all(r["region_id"].startswith("menu-region-") for r in records)
+
+
+def test_five_menus_thirty_items_keep_distinct_regions_and_repeat_without_duplicates(popup):
+    library,entry=seed_main(popup)
+    all_ids=set()
+    menu=popup[4]
+    for number,(label,count) in enumerate((("文件",5),("视图",8),("仿真",13),("辅助应用",1),("帮助",3))):
+        opener={**entry,"id":entry["id"] if number==0 else f"entry-{number}","name":label}
+        knowledge.save_control(library.directory("chosen-app"),opener)
+        menu.Name="menu_"+label
+        menu._children=[FakeControl(f"{label}项{i}","MenuItemControl",(355,55+i*10,565,64+i*10),parent=menu)
+                        for i in range(count)]
+        for item in menu._children:item.NativeWindowHandle=0
+        first=expand(popup,opener);second=expand(popup,opener)
+        assert first["observed_control_ids"]==second["observed_control_ids"]
+        records=current_records(popup[2],first)
+        assert len(records)==count
+        all_ids.update(first["observed_control_ids"])
+        regions={r["id"]:r for r in library.read("chosen-app")["regions"]}
+        for record in records:
+            assert regions[record["region_id"]]["parent_control_id"]==opener["id"]
+            assert "click" in record["actions"]
+            assert record["command"].startswith("manual-main."+record["region_id"]+".")
+    assert len(all_ids)==30
+    snapshot=library.read("chosen-app")
+    assert len(snapshot["controls"])==35 and len(snapshot["pages"])==1
+    assert len([r for r in snapshot["regions"] if r.get("parent_control_id")])==5
 
 
 def test_qt_tree_places_deep_popup_region_under_entry_without_duplicate_root():

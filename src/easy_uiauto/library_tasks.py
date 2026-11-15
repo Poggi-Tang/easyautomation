@@ -405,7 +405,9 @@ def _run_worker(folder: Path):
                     if operation == "expand":
                         progress("等待展开的控件出现")
                         time.sleep(.2)
-                        popups = [w for w in owned_windows(request["window"]) if w["handle"] not in before_popups]
+                        from .mcp.local_learning import _menu_window
+                        popups = [w for w in owned_windows(request["window"]) if w["handle"] not in before_popups
+                                  or _menu_window(uiautomation.ControlFromHandle(w["handle"]))]
                         context = {"path": [r["id"] for r in plan], "before_ids": before_ids,
                                    "popup_handles": [w["handle"] for w in popups]}
                 if operation == "click":

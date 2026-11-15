@@ -31,6 +31,26 @@ def resolve(target):
     from ..utils import _native_window_scope
 
     if isinstance(target, dict):
+        scope = target.get("window_scope", {})
+        owner = target.get("owner_window_identity")
+        if scope.get("kind") == "owned" and owner:
+            from ..library_actions import owned_windows
+            from .scanner import _matches_step
+            main = _native_window_scope(owner.get("title", ""), {
+                key: value for key, value in dict(Name=owner.get("uia_name"),
+                    ClassName=owner.get("uia_class"), AutomationId=owner.get("automation_id")).items() if value})
+            expected = dict(handle=int(main.NativeWindowHandle), process_id=int(main.ProcessId))
+            candidates = [w for w in owned_windows(expected) if w["class_name"] == scope.get("class_name")
+                          and (not scope.get("title") or w["title"] == scope["title"])]
+            if not candidates:
+                raise ActionError("control_not_found", "The learned popup is not open", retryable=True)
+            path = target.get("location", {}).get("Xpath", [])
+            bound = [uiautomation.ControlFromHandle(w["handle"]) for w in candidates]
+            matches = [w for w in bound if w is not None and path and _matches_step(w, path[0])]
+            if len(matches) != 1:
+                raise ActionError("ambiguous_match" if len(matches)>1 else "window_invalid",
+                                  "The owned popup does not uniquely match its recorded UIA identity")
+            return matches[0]
         handle = int(target.get("target_handle", 0) or 0)
         if handle:
             matches = native_windows.matching_windows("", handle=handle)
@@ -48,7 +68,8 @@ def resolve(target):
             return control
         location = target.get("location") or {}
         xpath = location.get("Xpath") or []
-        first = xpath[0] if xpath and xpath[0].get("ControlType") == "WindowControl" else {}
+        first = xpath[0] if xpath and xpath[0].get("ControlType") in {
+            "WindowControl", "MenuControl", "PaneControl", "ListControl"} else {}
         name = location.get("WindowName") or first.get("Name")
         if first:
             # A native caption narrows candidates without replacing the recorded UIA Name.

@@ -425,7 +425,10 @@ class UIAutomationService:
 
     def _handle_activate_window(self, params: dict, req_id: str) -> str:
         [title] = parse_params(params, "window_name")
-        self._ensure_window(title)
+        from ..utils import _native_window_scope
+        if not title:raise ValueError("window_name is required")
+        window = _native_window_scope(title, {}, native_title=True)
+        Controller.activate_window_handle(window.NativeWindowHandle, control=window)
         return f"Activated: {title}"
 
     # ---- handler: click ---------------------------------------------------

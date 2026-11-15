@@ -100,6 +100,15 @@ def test_native_title_activation_keeps_its_explicit_caption_semantics(app, monke
     assert ctrl.Controller.activate_window("") is False
 
 
+def test_mcp_activation_uses_native_caption_without_requiring_same_uia_name(app,monkeypatch):
+    from easy_uiauto.mcp.service import UIAutomationService
+    window,_button,_entries,_bind,_location=app
+    activate=Mock();monkeypatch.setattr(ctrl.Controller,"activate_window_handle",activate)
+    service=object.__new__(UIAutomationService)
+    assert service._handle_activate_window({"window_name":"SimuNPS-EMT"},"test")=="Activated: SimuNPS-EMT"
+    activate.assert_called_once_with(window.NativeWindowHandle,control=window)
+
+
 def test_missing_handle_is_reported_instead_of_silently_skipping_activation():
     with pytest.raises(ActionError, match="window_invalid"):
         ctrl.Controller._activate_target(SimpleNamespace(NativeWindowHandle=0))

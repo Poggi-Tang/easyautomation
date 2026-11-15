@@ -193,7 +193,7 @@ class NativeBackend:
 
     def observe(self, *, root=False, route=()):
         from . import __version__
-        from .mcp import scanner, automatic_layout
+        from .mcp import scanner, automatic_layout, local_learning
         from .mcp import dynamic_regions
         if root:
             from .region_actions import open_region
@@ -218,7 +218,24 @@ class NativeBackend:
         if root and self.mode=="resume" and self.previous_graph.get("states") and not previous:
             raise ValueError("当前界面不在已有学习记录中；请恢复已知状态，软件已更新时选择“适配软件更新”")
         is_origin=root and (not previous or previous["id"]==self.previous_graph.get("root"))
-        if is_origin and not dynamic_regions.is_dynamic(self.region):
+        entry_id=self.previous_graph.get("entry_control_id")
+        entry_only=bool(is_origin and entry_id and self.mode!="update")
+        observed_route=list(route or (previous or {}).get("route", []))
+        popup_learning=bool(frame["scope"].get("kind")=="owned" and observed_route
+                            and local_learning._menu_window(frame["root"]))
+        navigation_context=None
+        scan_target=frame["target"]
+        if popup_learning:
+            opener_id=observed_route[-1].get("target",{}).get("control_id")
+            opener=next((r for r in self.library.read(self.app_id)["controls"] if r["id"]==opener_id),None)
+            if opener is None:raise ValueError("弹窗入口已不存在，未创建无归属菜单项")
+            scope=self.library.scoped(opener["page_id"])
+            layout=scope.learning_layout(self.app_id,self.expected)
+            navigation_context=dict(path=[*opener.get("navigation_path",[]),opener_id],
+                popup_handles=[frame["target"]["handle"]],
+                entry_steps=step_ids([*self.root_entry,*observed_route],"entry"))
+            scan_target=self.expected
+        elif is_origin and not dynamic_regions.is_dynamic(self.region):
             scope=self.library.scoped(self.region["page_id"])
             layout=scope.learning_layout(self.app_id,frame["target"],region_id=self.region["id"])
         else:
@@ -242,14 +259,15 @@ class NativeBackend:
                         if opener and "parent_control_id" not in region:
                             region["parent_control_id"] = opener
                     knowledge.save_region(self.directory,region)
-        result=scanner.scan_window(frame["target"]["title"],"","","",__version__,root=self.library.root,
-            max_controls=self.max_controls,strategy="local-visual",manual_layout=layout,semantic_mode="native",
-            progress=self.progress,show_overlay=False,observation_owner=self.expected)
+        result=(dict(observed_control_ids=[],truncated=False) if entry_only else
+            scanner.scan_window(scan_target["title"],"","","",__version__,root=self.library.root,
+                max_controls=self.max_controls,strategy="local-visual",manual_layout=layout,semantic_mode="native",
+                progress=self.progress,show_overlay=False,observation_owner=self.expected,
+                navigation_context=navigation_context))
         if self.stable_frame()["state_id"]!=identifier:raise ValueError("扫描期间界面改变，未根据过时结果操作")
         snapshot=self.library.read(self.app_id)
         observed=set(result.get("observed_control_ids",[]))
         controls=[r for r in snapshot["controls"] if r["id"] in observed]
-        entry_id=self.previous_graph.get("entry_control_id")
         if is_origin and entry_id and entry_id not in observed:
             # A manually added entry can be omitted by visual detection. Include
             # it only after resolving it again inside this observed window.
@@ -275,7 +293,7 @@ class NativeBackend:
             except Exception:
                 region_entry_valid=False
                 frame["issues"].append("区域本身的定位已变化，右键入口尚未验证；请使用修改边界重新拾取该区域后继续适配")
-        if is_origin and self.region.get("location",{}).get("Xpath") and region_entry_valid:
+        if is_origin and not entry_id and self.region.get("location",{}).get("Xpath") and region_entry_valid:
             source={**self.region,"id":knowledge.stable_id("region-entry",self.region["id"]),"kind":"control",
                     "semantic_name":self.region["name"],"region_id":self.region["id"],"status":"observed",
                     "window_scope":frame["scope"],"actions":["right-click"],"entry_steps":self.root_entry}
@@ -283,9 +301,24 @@ class NativeBackend:
             knowledge.save_control(self.directory,source);controls.append(source)
         region_ids=([self.region["id"]] if is_origin and not dynamic_regions.is_dynamic(self.region) else
                     [r["id"] for r in snapshot["regions"] if r.get("page_id")==scope.page_id])
+        if popup_learning:
+            region_ids=list(dict.fromkeys(r["region_id"] for r in controls))
         if self.revision:controls=self.revision.reconcile(controls,region_ids,complete=not result.get("truncated"))
+        planning_rects={}
+        if popup_learning:
+            # Knowledge uses the main-window coordinate frame; the planner sees
+            # the popup crop, so its hints must use that crop's frame.
+            from .library_actions import bind_window
+            main_bounds=scanner._window_rect(bind_window(self.expected))
+            for control in controls:
+                n=control["normalized_rect"]
+                rectangle={k:main_bounds["left" if k in {"left","right"} else "top"]
+                    +n[k]*main_bounds["width" if k in {"left","right"} else "height"]
+                    for k in ("left","top","right","bottom")}
+                planning_rects[control["id"]]=knowledge.normalized_rect(rectangle,frame["bounds"])
         observation=dict(state_id=identifier,node_id=previous["id"] if previous else identifier,
             name=frame["target"]["title"],controls=controls,region_ids=region_ids,
+            planning_rects=planning_rects,
             image=frame["image"],issues=[*frame["issues"],*(["本次控件扫描被截断"] if result.get("truncated") else [])])
         self.cache[identifier]=observation
         return observation
@@ -294,6 +327,9 @@ class NativeBackend:
         from . import reference_library
         fields=("id","semantic_name","name","description","control_type","actions","is_enabled_at_scan","normalized_rect")
         controls=[{k:r.get(k) for k in fields} for r in observation["controls"]]
+        for control in controls:
+            if control["id"] in observation.get("planning_rects",{}):
+                control["normalized_rect"]=observation["planning_rects"][control["id"]]
         documents=[r for r in self.library.usage_documents(self.app_id)
                    if r["document_path"].startswith("usage/") and not r.get("id","").startswith("deep-")]
         usage=[dict(name=r["name"],body=r["body"][:4000]) for r in documents[:12]]

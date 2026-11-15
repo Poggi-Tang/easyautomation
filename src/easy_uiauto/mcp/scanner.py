@@ -1907,6 +1907,7 @@ def scan_window(
         window = _find_window(window_name)
     progress("Reading target window through UI Automation")
     identity = window_identity.describe(window, window_name)
+    owner_identity = dict(identity)
     actual_name = (identity["title"] or identity["uia_name"] or window_name).strip()
     access = native_windows.check_uia_access(int(getattr(window, "ProcessId", 0) or 0))
     if observation_owner is not None:
@@ -1941,15 +1942,20 @@ def scan_window(
         screenshot, window_rect = _trim_window_capture(screenshot, window_rect, window)
     page_image = directory / "images" / "pages" / "latest.png"
     local_reports, local_paths, local_frames = [], {}, []
+    local_native_menu = None
+    popup_only = bool(navigation_context and navigation_context.get("popup_handles"))
     if manual_layout is not None:
         progress("Using human-defined regions")
         segmentation = manual_segmentation
         if strategy == "local-visual":
             from . import local_learning
 
-            segmentation["controls"], local_reports = local_learning.detect(
-                screenshot, window_rect, segmentation, directory, progress,
-                expanded=bool(navigation_context))
+            if not popup_only:
+                local_native_menu = local_learning.resolve_menu(window, window_rect, max_controls, progress)
+            if not popup_only and local_native_menu is None:
+                segmentation["controls"], local_reports = local_learning.detect(
+                    screenshot, window_rect, segmentation, directory, progress,
+                    expanded=bool(navigation_context))
     elif strategy == "visual-first" and _is_desktop_window(window):
         progress("Resolving native desktop items")
         segmentation = _segment_desktop(
@@ -2046,8 +2052,11 @@ def scan_window(
         return _region_for_control(rectangle, window_rect, segmentation["regions"])
 
     if strategy == "local-visual":
-        controls, semantics, visual_failures, local_paths = local_learning.resolve(
-            window, window_rect, visual_targets, max_controls, progress)
+        if popup_only:
+            controls, semantics = [], {}
+        else:
+            controls, semantics, visual_failures, local_paths = (local_native_menu or local_learning.resolve(
+                window, window_rect, visual_targets, max_controls, progress))
         if navigation_context:
             from ..library_actions import owned_windows
 
@@ -2059,9 +2068,14 @@ def scan_window(
                 if popup is None: continue
                 bounds = _window_rect(popup)
                 image = _screenshot_window(bounds)
-                targets, reports = local_learning.detect(image, bounds, segmentation, directory, progress, expanded=True)
-                found, meanings, missing, paths = local_learning.resolve(
-                    popup, bounds, targets, max(0,max_controls-len(controls)), progress)
+                native_menu = local_learning.resolve_menu(popup, bounds, max(0,max_controls-len(controls)), progress)
+                targets, reports = [], []
+                if native_menu is not None:
+                    found, meanings, missing, paths = native_menu
+                else:
+                    targets, reports = local_learning.detect(image, bounds, segmentation, directory, progress, expanded=True)
+                    found, meanings, missing, paths = local_learning.resolve(
+                        popup, bounds, targets, max(0,max_controls-len(controls)), progress)
                 dx, dy = bounds["left"]-window_rect["left"], bounds["top"]-window_rect["top"]
                 for target in targets:
                     r = target["relative_rect"]
@@ -2255,6 +2269,12 @@ def scan_window(
             reference = image_storage.save_interaction_image(directory, image)
             observation_frames[key] = (frame, image, reference)
         return observation_frames[key]
+    popup_regions = {}
+    if strategy == "local-visual" and navigation_context:
+        popup_regions = local_learning.expanded_regions(directory,controls,navigation_context,window_rect,
+            observation_frame,app_id,page_id,paths=local_paths,scopes=control_scopes)
+    popup_history = ([r for _p, r in knowledge.iter_records(directory, "control")]
+                     if popup_regions else [])
     for index, (control, depth) in enumerate(controls, start=1):
         if index == 1 or index == len(controls) or index % verification_interval == 0:
             progress(f"Verifying controls {index}/{len(controls)}")
@@ -2274,6 +2294,7 @@ def scan_window(
             region_id = (semantics.get(index,{}).get("region_id") if strategy == "local-visual" else None)
             if not region_id or region_id == "unassigned":
                 region_id = region_of(control_rect)
+            region_id = popup_regions.get(id(control), region_id)
             supported_actions = _control_actions(
                 control_type,
                 bool(getattr(control, "IsEnabled", True)),
@@ -2291,12 +2312,18 @@ def scan_window(
                 getattr(control, "AutomationId", ""),
                 "" if getattr(control, "AutomationId", "") else getattr(control, "Name", ""),
             )
+            if id(control) in popup_regions:
+                identity=(*identity,control_scopes.get(id(control),(None,{"kind":"main"}))[1],navigation_context["path"])
             control_id = knowledge.stable_id("control", *identity)
             identity_counts[control_id] = identity_counts.get(control_id, 0) + 1
             if identity_counts[control_id] > 1:
                 control_id = knowledge.stable_id("control", *identity, identity_counts[control_id])
             semantic = semantics.get(index, {})
             previous = previous_by_id.get(control_id, {})
+            if id(control) in popup_regions:
+                previous = local_learning.matching_popup_record(popup_history, location,
+                    control_scopes.get(id(control), (None, {"kind":"main"}))[1], navigation_context["path"])
+                if previous:control_id = previous["id"]
             if not previous:
                 from ..knowledge_library import KnowledgeLibrary
                 # Picked/imported records can have a different ID generation history.
@@ -2306,9 +2333,9 @@ def scan_window(
                     {"location":location,"window_scope":control_scopes.get(id(control),(None,{"kind":"main"}))[1]},
                     page_id, (navigation_context or {}).get("path", []))
                 if previous:control_id = previous["id"]
-            if not previous:
+            if not previous and not scoped_popup:
                 previous = _previous_control_by_unique_automation_id(
-                    previous_page_records,
+                    [r for r in previous_page_records if r.get("window_scope", {"kind":"main"}) == {"kind":"main"}],
                     str(getattr(control, "AutomationId", "") or ""),
                     control_type,
                 )
@@ -2586,6 +2613,10 @@ def scan_window(
                     record["detection"] = {"method":semantics[index].get("detection_method", "local-yolo-rapidocr+get_control_info"),
                         "analysis_result":semantics[index].get("analysis_result", ""),
                         "normalized_rect":knowledge.normalized_rect(semantics[index]["relative_rect"],window_rect,relative=True)}
+            if id(control) in popup_regions:
+                record.update(region_source="expanded-popup", region_assignment="popup-ancestry")
+                record["owner_window_identity"] = owner_identity
+                if "entry_steps" in navigation_context:record["entry_steps"]=navigation_context["entry_steps"]
             if navigation_context and (scoped_popup or (
                     _control_key(control) not in navigation_context.get("before_keys", set())
                     and control_id not in navigation_context.get("before_ids", set()))):
@@ -2597,7 +2628,7 @@ def scan_window(
                 if key in semantic: record[key]=semantic[key]
             record = knowledge.merge_control_state(previous, record)
             blocker = runtime_blockers.get(knowledge.control_anchor(record))
-            if blocker:
+            if blocker and blocker.get("window_scope", {"kind":"main"}) == record.get("window_scope", {"kind":"main"}):
                 record = knowledge.merge_control_state(blocker, record)
             status = record["status"]
             knowledge.save_control(directory, record)
@@ -2731,11 +2762,9 @@ def scan_window(
     retained_unobserved = 0
     archived_layout_records = 0
     if strategy == "local-visual" and saved_current:
-        archived_layout_records = local_learning.archive_layout_records(directory,previous_page_records,observed_ids,
-            {r["id"] for r in manual_layout["regions"]},scan_id)
-        if navigation_context:
-            local_learning.expanded_regions(directory,controls,navigation_context,window_rect,
-                                            observation_frame,app_id,page_id,paths=local_paths,scopes=control_scopes)
+        if not navigation_context:
+            archived_layout_records = local_learning.archive_layout_records(directory,previous_page_records,observed_ids,
+                {r["id"] for r in manual_layout["regions"]},scan_id)
     for previous in previous_page_records:
         if previous.get("id") in observed_ids:
             continue
