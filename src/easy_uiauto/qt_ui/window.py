@@ -661,9 +661,7 @@ class KnowledgeWindow(QMainWindow):
 
     @staticmethod
     def deletable_nodes(nodes):
-        return [node for node in nodes if node["kind"] in {"control","reference"} or node["kind"]=="region" and (
-            dynamic_regions.is_dynamic(node["record"]) or node["record"].get("source")=="manual"
-            and not node["record"].get("classification_only"))]
+        return [node for node in nodes if not KnowledgeLibrary.archive_block_reason(node["kind"],node["record"])]
 
     def clear_multiselection(self):
         index=self.tree.currentIndex()
@@ -685,7 +683,13 @@ class KnowledgeWindow(QMainWindow):
             add.setEnabled(not (self.task or self.deleting or self.saving))
         action=menu.addAction(f"删除所选（{count}）")
         action.setIcon(icon("trash"))
-        action.setEnabled(bool(count) and not self.task and not self.deleting);action.triggered.connect(self.remove)
+        busy=bool(self.task or self.deleting or self.saving)
+        action.setEnabled(bool(count) and not busy);action.triggered.connect(self.remove)
+        if not count or busy:
+            reason=("任务或保存进行中，请结束后再删除。" if busy else
+                    KnowledgeLibrary.archive_block_reason(self.current.get("kind"),self.record))
+            action.setToolTip(reason)
+            hint=menu.addAction(reason);hint.setEnabled(False)
         menu.exec(self.tree.viewport().mapToGlobal(position))
 
     def adapt_details(self):
@@ -1234,8 +1238,8 @@ class KnowledgeWindow(QMainWindow):
                +(n['record'].get('semantic_name') or n['record'].get('name') or n['record']['id']) for n in nodes]
         prompt=f"删除选中的 {len(nodes)} 项记录？\n\n"+"\n".join(lines[:12])
         if len(lines)>12:prompt+=f"\n……另有 {len(lines)-12} 项"
-        prompt+="\n\n记录移入归档。未选中的子项保留，相关前置步骤和组合动作可能需要重新配置。"
-        if len(selected)>len(nodes):prompt+=f"\n另有 {len(selected)-len(nodes)} 项软件、分类或只读区域节点保留。"
+        prompt+="\n\n记录移入归档。未选中的子项保留；直属控件解除区域归属，相关前置步骤和组合动作可能需要重新配置。"
+        if len(selected)>len(nodes):prompt+=f"\n另有 {len(selected)-len(nodes)} 项软件、分类或区域状态分组节点保留。"
         if QMessageBox.question(self,"删除所选",prompt,QMessageBox.StandardButton.Yes|QMessageBox.StandardButton.No,
                                 QMessageBox.StandardButton.No)!=QMessageBox.StandardButton.Yes:return
         library=self.library;app_id=self.app_id or nodes[0]["app_id"]

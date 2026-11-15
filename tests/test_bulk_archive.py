@@ -50,14 +50,41 @@ def test_selected_parent_and_child_do_not_delete_unselected_descendants(library)
 
 
 @pytest.mark.parametrize("invalid",[dict(kind="control",id="missing"),dict(kind="application",id="demo"),
-    dict(kind="region",id="old-region")])
+    dict(kind="region",id="classification"),dict(kind="region",id="old-region",page_id="wrong-page")])
 def test_entire_batch_is_validated_before_archiving(library,invalid):
     first=add_control(library)
     knowledge.save_region(library.directory("demo"),dict(id="old-region",page_id=PAGE_ID,app_id="demo",source="ai"))
+    knowledge.save_region(library.directory("demo"),dict(id="classification",page_id=PAGE_ID,app_id="demo",classification_only=True))
     before=active_files(library)
     with pytest.raises(ValueError):library.archive_many([item(first),dict(app_id="demo",**invalid)])
     assert active_files(library)==before
     assert not list((library.directory("demo")/".easy_uiauto/archive").glob("**/*.md"))
+
+
+@pytest.mark.parametrize("source",["ai","visual-first","","manual","local-visual-container"])
+@pytest.mark.parametrize("assignment",["manual-selection","expanded-popup","automatic"])
+def test_archive_real_regions_preserves_other_regions_and_detaches_retained_controls(library,source,assignment):
+    first=add_control(library)
+    directory=library.directory("demo")
+    region=dict(id=PAGE_ID+".old-region",page_id=PAGE_ID,app_id="demo",source=source,name="旧区域")
+    other={**region,"id":PAGE_ID+".keep-region", "name":"保留区域"}
+    knowledge.save_region(directory,region);knowledge.save_region(directory,other)
+    first.update(region_id=region["id"],region_source=assignment,command=PAGE_ID+".old-region.open")
+    second={**first,"id":"keep-control","region_id":"keep-region","command":PAGE_ID+".keep-region.open"}
+    collision={**first,"id":"unassigned-control","region_id":"unassigned","command":PAGE_ID+".unassigned.open"}
+    for control in (first,second,collision):knowledge.save_control(directory,control)
+    before={r["id"]:r for r in library.read("demo")["controls"]}
+    archived=library.archive("demo","region",region["id"])
+    library.sync_dynamic_regions("demo")
+    snapshot=library.read("demo");after={r["id"]:r for r in snapshot["controls"]}
+    assert archived.is_file() and [r["id"] for r in snapshot["regions"]]==[other["id"]]
+    assert after[second["id"]]==before[second["id"]] and after[collision["id"]]==before[collision["id"]]
+    retained=after[first["id"]]
+    assert retained["region_id"]=="unassigned" and retained["command"].startswith(PAGE_ID+".unassigned.")
+    assert len({r["command"] for r in after.values()})==3
+    for key in ("location","status","region_source","normalized_rect"):
+        assert retained[key]==before[first["id"]][key]
+    assert not any(r["id"]==region["id"] for r in knowledge.load_index(directory)["regions"])
 
 
 @pytest.mark.parametrize("fail_at",["move","refresh"])

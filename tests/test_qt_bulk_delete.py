@@ -70,6 +70,47 @@ def test_batch_delete_confirms_once_and_preserves_unselected_control(app,window,
     assert window.centralWidget().isEnabled() and "已删除 2 项" in window.status_label.text()
 
 
+@pytest.mark.parametrize("source",["ai","visual-first",""])
+def test_legacy_region_can_be_deleted_from_toolbar_without_deleting_its_controls(app,window,monkeypatch,source):
+    directory=window.library.directory("demo")
+    region=dict(id="manual-main.old-region",app_id="demo",page_id="manual-main",name="历史区域",source=source)
+    knowledge.save_region(directory,region)
+    record=knowledge.find_control_record(directory,"control-one")[1]
+    record.update(region_id="old-region",command="manual-main.old-region.open")
+    knowledge.save_control(directory,record)
+    key="region:demo:"+region["id"]
+    window.reload(key);settle(app,lambda:key in window.model.nodes and not window.jobs)
+    window.goto(key)
+    delete=next(b for b in window.context_buttons if b.text()=="删除所选")
+    assert delete.isEnabled()
+    questions=[]
+    monkeypatch.setattr(QMessageBox,"question",lambda _p,_t,text,*a:(questions.append(text),QMessageBox.StandardButton.Yes)[1])
+    delete.click();settle(app,lambda:not window.deleting and not window.jobs)
+    assert len(questions)==1 and key not in window.model.nodes
+    assert len(window.library.read("demo")["controls"])==3
+    assert knowledge.find_control_record(directory,"control-one")[1]["region_id"]=="unassigned"
+    window.reload();settle(app,lambda:not window.jobs)
+    assert key not in window.model.nodes
+
+
+def test_classification_menu_explains_why_delete_is_disabled(app,window,monkeypatch):
+    region=dict(id="manual-main.unassigned",app_id="demo",page_id="manual-main",
+                name="待归档",source="manual",classification_only=True)
+    knowledge.save_region(window.library.directory("demo"),region)
+    key="region:demo:"+region["id"]
+    window.reload(key);settle(app,lambda:key in window.model.nodes and not window.jobs)
+    window.goto(key);window.tree.expandAll();app.processEvents()
+    menus=[]
+    class Menu(QMenu):
+        def exec(self,*a):menus.append([(action.text(),action.isEnabled()) for action in self.actions()])
+    monkeypatch.setattr("easy_uiauto.qt_ui.window.QMenu",Menu)
+    index=window.proxy.mapFromSource(window.model.nodes[key].index())
+    window.tree.scrollTo(index);app.processEvents()
+    window.tree_menu(window.tree.visualRect(index).center())
+    assert ("删除所选（0）",False) in menus[0]
+    assert any("待归档是分类节点" in text and not enabled for text,enabled in menus[0])
+
+
 def test_cancellation_does_not_change_records_or_selection(window,monkeypatch):
     select(window,["control:demo:control-one","control:demo:control-second"])
     monkeypatch.setattr(QMessageBox,"question",lambda *a:QMessageBox.StandardButton.No)

@@ -828,6 +828,16 @@ class KnowledgeLibrary:
     def archive(self, app_id: str, kind: str, identifier: str) -> Path:
         return self.archive_many([dict(app_id=app_id,kind=kind,id=identifier,page_id=self.page_id)])[0]
 
+    @staticmethod
+    def archive_block_reason(kind: str, record: dict) -> str:
+        if kind == "region" and record.get("classification_only"):
+            return "待归档是分类节点；请选择其中需要删除的控件。"
+        if kind == "area":
+            return "这是区域状态分组；请展开后选择具体区域状态删除。"
+        if kind not in {"control", "region", "reference"}:
+            return "请选择具体的区域、控件或参考资料。"
+        return "" if record.get("id") else "所选节点没有可删除的记录。"
+
     def archive_many(self, items: list[dict]) -> list[Path]:
         """Archive explicit selections; keep unselected descendants and refresh once per app."""
         if not items:return []
@@ -847,10 +857,10 @@ class KnowledgeLibrary:
                 matches=[(p,r) for p,r in records if r.get("kind")==kind and r.get("id")==identifier]
                 if len(matches)!=1:raise ValueError("所选记录已不存在，请刷新知识库")
                 path,record=matches[0]
-                if kind=="region" and not dynamic_regions.is_dynamic(record) and (
-                        record.get("source")!="manual" or record.get("classification_only")
-                        or record.get("page_id")!=item.get("page_id",record.get("page_id"))):
-                    raise ValueError("历史自动区域和待归档节点仅供查看；可删除其中的控件记录")
+                reason=self.archive_block_reason(kind,record)
+                if reason:raise ValueError(reason)
+                if kind=="region" and record.get("page_id")!=item.get("page_id",record.get("page_id")):
+                    raise ValueError("所选区域的页面已变化，请刷新后重新选择")
                 destination=directory/".easy_uiauto/archive"/batch/path.parent.name/path.name
                 if image_storage._safe_path(directory,path) is None or image_storage._safe_path(directory,destination) is None:
                     raise ValueError("归档路径必须位于当前软件目录内")
@@ -884,9 +894,24 @@ class KnowledgeLibrary:
                             child["parent_control_id"]=record.get("parent_control_id","")
                             parent=child["parent_region_id"]
                         if visited:knowledge.save_region(directory,child)
-                    pages={r["page_id"] for r in removed.values() if not dynamic_regions.is_dynamic(r)}
-                    for page_id in pages:
-                        scoped=self.scoped(page_id);scoped._reassign(directory,scoped.layout_regions(app_id))
+                    # Detach only direct assignments to removed regions. Reassigning
+                    # a whole page would move unrelated legacy/automatic controls,
+                    # and skips explicit manual or popup assignments altogether.
+                    deleted_keys={(r.get("page_id"),r["id"].removeprefix(r.get("page_id","")+"."))
+                                  for r in removed.values()}
+                    controls=[r for _p,r in knowledge.iter_records(directory,"control")]
+                    used_commands={r.get("command") for r in controls if r.get("command")}
+                    for control in controls:
+                        page=control.get("page_id","")
+                        region=str(control.get("region_id") or "unassigned").removeprefix(page+".")
+                        if (page,region) not in deleted_keys:continue
+                        control.update(region_id="unassigned",region_assignment="region-archived")
+                        command=control.get("command","");prefix=f"{page}.{region}."
+                        if command.startswith(prefix):
+                            replacement=f"{page}.unassigned."+command[len(prefix):]
+                            while replacement in used_commands:replacement+="."+control["id"]
+                            used_commands.add(replacement);control["command"]=replacement
+                        knowledge.save_control(directory,control)
                     self._refresh(directory)
             except Exception as error:
                 failures=[]
