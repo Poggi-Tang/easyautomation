@@ -19,8 +19,9 @@ When the user has divided regions in the knowledge GUI, provided saved instructi
 or asks to archive controls and combination actions, read
 [GUI regions and workflows](references/library-workflows.md). Use `get_ui_library`
 with the GUI's vault path, then the shared GUI workers and `save_ui_workflow`.
-Preserve manual regions, names and entry steps. This route uses local YOLO + RapidOCR;
-the remote whole-window readiness check below does not apply.
+Preserve manual regions, names and entry steps. This route uses local YOLO + RapidOCR,
+with bounded native enumeration for the currently open owned menu/dropdown. The
+remote whole-window readiness check below does not apply.
 
 For these saved regions, basic learning (`learn-region`) observes the current visible
 state without replaying entry steps or sending input. Deep learning
@@ -30,6 +31,13 @@ regions/controls/workflows and share common suffixes by workflow reference. Use
 its subsequent menus/dialogs and workflows, with a separate resumable session. Supply
 the user's test inputs and scope in `learning_options`; report partial coverage and
 blocked branches instead of presenting budget exhaustion as completed learning.
+
+For a saved menu/dropdown entry, use `expand-control` to archive its expanded
+contents, or `deep-learn-control` when interactive branch exploration is requested.
+Read [popup ownership and verification](references/library-workflows.md#menus-and-dropdowns).
+The popup belongs in a child region of its opening control on the existing page.
+Use IDs from the current observation for planning; historical IDs and same-name
+toolbar actions do not substitute for the popup's live targets.
 
 For a supplied image, use **Supplied UI Images**. For a new whole-window scan without
 saved GUI regions, use **Live Application Workflow**. If an existing app has manual

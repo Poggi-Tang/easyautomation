@@ -28,6 +28,24 @@ and ensure its required state is already open, or use an appropriate saved workf
 Do not treat a metadata-only imported control as verified. `upsert_control_record`
 now writes the shared vault; it does not release quarantine or validate its locator.
 
+## Menus and owned popups
+
+A learned menu/dropdown can be a child region of its opener on the same page.
+Match its `parent_control_id` / `navigation_path`, `window_scope` and full LOCATION;
+a same-name toolbar action or shared QAction is not the same target. Use actual
+returned command strings, including their child-region prefix.
+
+Open the menu with its verified entry command or saved workflow, then invoke its
+item separately once that popup is visible. LOCATION resolves within the owning
+application's popup; a title match alone is insufficient. Check `resolved_by`
+before claiming LOCATION execution. Do not put the main-window opener and its
+popup item in one `run_ui_commands` call, even if their `page_id` is identical.
+
+If foreground activation is needed, `activate_window(title=...)` takes the native
+title from `list_windows`, which may differ from the Qt/MSAA UIA Name. Report
+same-title ambiguity or ownership failures instead of guessing another window or
+clicking raw coordinates to bypass the gate.
+
 ## Workflow
 
 1. Call `list_ui_knowledge_apps` only when the application ID is not already established in
@@ -43,21 +61,23 @@ now writes the shared vault; it does not release quarantine or validate its loca
 4. Select a command whose intent, aliases, description, page, region, and action match the request.
 5. Inspect `risk`, `requires_confirmation`, semantic confidence/source, and function-verification
    status. Do not claim inferred meanings were function-tested.
-6. For two or more commands on the same stable page, call
+6. For two or more commands on the same stable page and visible window scope, call
    `run_ui_commands(app_id=..., steps=[...], highlight=true)` once. Use command strings for clicks and
    `{ "command": "...set-text", "text": "..." }` for text entry. The batch verifies
    all unique controls, highlights all batch targets in one overlay before the first action,
-   and stops at the first action error.
+   and stops at the first action error. All targets must already be visible in that
+   scope; end the batch at an action that opens, closes or replaces a menu/dialog.
 7. Use `run_ui_command(app_id=..., command=..., text=..., highlight=true)` for one command
-   or when a prior command navigates to another page. The red frame identifies the verified
+   or after a prior command changes the page or visible window scope, including a
+   popup on the same page. The red frame identifies the verified
    runtime target; it is click-through and does not remain in the input path.
    Pass `confirm=true` only after the user explicitly approves an external or destructive effect.
 8. For `set-text`, pass the user text through the `text` field. Never place it inside the command name.
    Continue only when `action_verification.verified=true`; a tool return without verified text
    evidence is not successful input.
 9. After navigation, reuse already returned generic input and action commands when they belong
-   to the same learned page. If recipient or document context must be checked, call `find_control`
-   once with the stored full LOCATION and inspect the live returned properties. Do not guess by
+   to the current learned page and visible window scope. If recipient or document context must be
+   checked, call `find_control` once with the stored full LOCATION and inspect the live returned properties. Do not guess by
    name, dump the UIA tree, or launch multiple low-level discovery calls.
 10. If execution quarantines a control or input verification fails, stop. Report the exact stale
    locator, precondition, or write evidence. Never start `scan_window_knowledge` from an operation
@@ -75,7 +95,8 @@ now writes the shared vault; it does not release quarantine or validate its loca
 - A direct request such as "send X to Y" is explicit confirmation for exactly that recipient,
   content, and one send attempt. Do not ask again, but do not broaden or repeat the action.
 - Never automatically retry an external action when its outcome is uncertain.
-- Never combine commands from different pages in one batch. Treat a page-changing command as the end of a batch.
+- Never combine commands from different pages or window scopes in one batch. Treat
+  a page change or popup opening/closing/replacement as the end of a batch.
 
 ## Fallback Order
 
