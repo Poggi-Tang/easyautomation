@@ -80,8 +80,8 @@ full = [
 Homepage = "https://github.com/Poggi-Tang/easyautomation"
 Repository = "https://github.com/Poggi-Tang/easyautomation.git"
 Issues = "https://github.com/Poggi-Tang/easyautomation/issues"
-Changelog = "https://github.com/Poggi-Tang/easyautomation/blob/uiauto-gui/CHANGELOG.md"
-Documentation = "https://github.com/Poggi-Tang/easyautomation/blob/uiauto-gui/README.md"
+Changelog = "https://github.com/Poggi-Tang/easyautomation/blob/main/CHANGELOG.md"
+Documentation = "https://github.com/Poggi-Tang/easyautomation/blob/main/README.md"
 
 [project.scripts]
 easy_uiauto = "easy_uiauto.mcp.server:main"

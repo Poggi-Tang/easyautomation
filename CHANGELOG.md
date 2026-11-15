@@ -4,6 +4,7 @@ Release notes and upgrade instructions.
 
 ## [Unreleased]
 
+- 将 GUI、共享知识库及授权说明同步到默认 `main` 分支；一键安装示例和项目文档链接统一指向主分支。
 - 采用个人免费、企业付费授权，GUI、MCP、Python API 和配套工具使用同一政策；增加企业授权、定制开发、安装部署、代配置及使用方案服务说明。
 - 更新中英文 README、Python 包许可元数据和 GUI 分发说明；授权费、实施服务费及维护支持费分别约定。
 

@@ -20,15 +20,15 @@ Windows 桌面自动化工具，提供 Python API、MCP 服务，以及管理控
 需要离线使用时，可到[最新发布页](https://github.com/Poggi-Tang/easyautomation/releases/latest)
 下载完整的 `easy-uiauto-gui-win-x64.zip`，解压后双击 `setup.bat`。
 
-Windows x64 用户拉取 **`uiauto-gui` 分支**后，双击根目录的 `setup.bat` 即可：
+Windows x64 用户拉取仓库默认的 **`main` 分支**后，双击根目录的 `setup.bat` 即可：
 
 ```cmd
-git clone --branch uiauto-gui --single-branch https://github.com/Poggi-Tang/easyautomation.git
+git clone https://github.com/Poggi-Tang/easyautomation.git
 cd easyautomation
 setup.bat
 ```
 
-没有 Git 也可以在 GitHub 切换到 `uiauto-gui` 分支，选择 **Code → Download ZIP**，
+没有 Git 也可以在 GitHub 默认的 `main` 分支选择 **Code → Download ZIP**，
 解压后双击 `setup.bat`。无需预装 Python 或开发工具。首次运行需要联网，脚本会安装
 独立 Python、GUI 依赖及本地 OCR/YOLO 模型，创建桌面快捷方式并打开 GUI。
 Windows 可能弹出管理员授权提示。
@@ -37,7 +37,7 @@ Windows 可能弹出管理员授权提示。
 `setup.bat -Target "D:\easy-uiauto-gui"`。以后通过桌面快捷方式启动；
 执行 `git pull` 更新源码后，再运行一次 `setup.bat` 即可更新安装。
 GUI 安装默认不注册 MCP 客户端，也不修改用户 PATH。
-GUI 源码维护在 `uiauto-gui` 分支，默认 `main` 分支尚未包含这些改动；PyPI 从 1.0.0 起包含 GUI。
+默认 `main` 分支包含 GUI、MCP 和 Python API；`uiauto-gui` 用于 GUI 后续开发。PyPI 从 1.0.0 起包含 GUI。
 详见 [GUI 使用与部署说明](docs/knowledge-gui.zh-CN.md)。
 
 ## 项目简介

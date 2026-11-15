@@ -23,15 +23,15 @@ For a ready-to-use offline copy, download the complete GUI ZIP from the
 [latest release](https://github.com/Poggi-Tang/easyautomation/releases/latest),
 extract it and double-click `setup.bat`.
 
-On Windows x64, clone the **`uiauto-gui` branch** and double-click `setup.bat`:
+On Windows x64, clone the repository's default **`main` branch** and double-click `setup.bat`:
 
 ```cmd
-git clone --branch uiauto-gui --single-branch https://github.com/Poggi-Tang/easyautomation.git
+git clone https://github.com/Poggi-Tang/easyautomation.git
 cd easyautomation
 setup.bat
 ```
 
-Alternatively, select `uiauto-gui` on GitHub, choose **Code → Download ZIP**, extract
+Alternatively, choose **Code → Download ZIP** on the default `main` branch, extract
 it, and double-click `setup.bat`. No Python or developer tools need to be installed
 beforehand. The first run needs Internet access to install a dedicated Python,
 the GUI dependencies and local OCR/YOLO models; it then creates a desktop shortcut
@@ -40,8 +40,8 @@ and opens the GUI. Windows may request administrator approval.
 The default installation is `%LOCALAPPDATA%\easy-uiauto\gui`. To choose another
 directory, run `setup.bat -Target "D:\easy-uiauto-gui"`. Later, use the desktop
 shortcut to open the GUI; after `git pull`, run `setup.bat` again to update it.
-The GUI setup does not register MCP clients or change user PATH. GUI source is
-maintained on `uiauto-gui`; the default `main` branch does not include these changes.
+The GUI setup does not register MCP clients or change user PATH. The default
+`main` branch includes the GUI, MCP and Python API; `uiauto-gui` is used for GUI development.
 PyPI releases from 1.0.0 include the GUI. See the [GUI guide](docs/knowledge-gui.zh-CN.md).
 
 ## Overview
