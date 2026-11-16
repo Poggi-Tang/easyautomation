@@ -81,6 +81,18 @@ observes the already visible state and never replays entry steps or explores
 controls. Have the intended state open before starting; a mismatched condition
 stops the scan. It saves controls under that same region.
 
+Treat one native list/tree item as one operation target in a component palette.
+Labels and icons that hit the same native item, or are proven passive descendants
+of it, are saved in its `visual_components` as identification evidence. Use the
+item's full native name and LOCATION; do not create another control for its OCR
+caption. Keep independently interactive children and neighboring items separate.
+Shared text or overlap alone does not prove ownership. This rule concerns saved
+GUI controls; screenshot annotation may still show separate text and graphic boxes.
+On relearning, inspect `component_reconciliation`: `archived` maps unused legacy
+duplicates to their owner, with original records/images retained in the archive;
+`retained` explains protected duplicates. Preserve manual edits, execution history
+and workflow/session references; do not delete or retarget them to force a count.
+
 For requested interactive regional learning, use `operation="deep-learn-region"`
 with `region_id`. It runs the GUI's durable exploration controller and automatically
 archives new regions, controls and shared combination actions. `learning_options`

@@ -10,13 +10,73 @@ from tempfile import TemporaryDirectory
 from . import knowledge, manual_layout
 
 
-# These UIA nodes represent one widget. A canvas/list/custom node can contain
+# These UIA nodes represent one widget. A canvas/list/custom container can contain
 # several independent visual targets, so sharing those nodes is not sufficient.
 _ATOMIC_CONTROLS = {
     "ButtonControl", "SplitButtonControl", "CheckBoxControl", "RadioButtonControl",
     "MenuItemControl", "HyperlinkControl", "EditControl", "ComboBoxControl",
     "SliderControl", "SpinnerControl", "TextControl", "TabItemControl",
+    "ListItemControl", "TreeItemControl",
 }
+
+
+def _contains(outer, inner):
+    return (outer["width"] > 1 and outer["height"] > 1
+            and all(outer[k] <= inner[k] for k in ("left", "top"))
+            and all(outer[k] >= inner[k] for k in ("right", "bottom")))
+
+
+def _fits_atomic_target(control, absolute, window):
+    from . import scanner
+    return (getattr(control, "ControlTypeName", "") in _ATOMIC_CONTROLS - {"TextControl"}
+            and _contains(scanner._rect(control), absolute)
+            and _contains(scanner._rect(window), scanner._rect(control)))
+
+
+def _passive_part(control):
+    """Labels/icons can belong to an item; interactive descendants stay separate."""
+    from . import scanner
+    if getattr(control, "IsKeyboardFocusable", False):
+        return False
+    getter = getattr(control, "GetPattern", None)
+    if getter:
+        patterns = scanner.uiautomation.PatternId
+        for name in ("InvokePattern", "TogglePattern", "SelectionItemPattern", "ValuePattern",
+                     "RangeValuePattern", "ExpandCollapsePattern"):
+            if getter(getattr(patterns, name)) is not None:
+                return False
+        legacy = getter(patterns.LegacyIAccessiblePattern)
+        if legacy is not None and getattr(legacy, "DefaultAction", ""):
+            return False
+    return True
+
+
+def _atomic_owner(control, xpath, absolute, window, passive_cache):
+    """Use only the recorded ancestry, never merge neighboring objects by text."""
+    from . import scanner
+    if getattr(control, "ControlTypeName", "") not in {"TextControl", "ImageControl"}:
+        return control, xpath
+    current = control
+    for offset in range(min(len(xpath), 8)):
+        if current is None or scanner._control_key(current) == scanner._control_key(window):
+            break
+        step = xpath[-1-offset]
+        if not scanner._matches_step(current, step) or getattr(current, "IsOffscreen", False):
+            break
+        kind = getattr(current, "ControlTypeName", "")
+        if offset and kind in _ATOMIC_CONTROLS - {"TextControl"}:
+            if _fits_atomic_target(current, absolute, window):
+                return current, xpath[:-offset]
+            break
+        if kind not in {"TextControl", "ImageControl", "PaneControl", "GroupControl"}:
+            break
+        key = scanner._control_key(current)
+        if key not in passive_cache:
+            passive_cache[key] = _passive_part(current)
+        if not passive_cache[key]:
+            break
+        current = current.GetParentControl()
+    return control, xpath
 
 
 def detect(image, bounds, segmentation, directory, progress, *, expanded=False):
@@ -74,6 +134,7 @@ def resolve(window, bounds, targets, limit, progress):
         return menu
 
     controls, semantics, failures, paths, seen = [], {}, [], {}, {}
+    passive_cache = {}
     for number, target in enumerate(targets[:limit], start=1):
         progress(f"按标注坐标读取控件：{number}/{min(limit,len(targets))}")
         rect = target["relative_rect"]
@@ -112,6 +173,12 @@ def resolve(window, bounds, targets, limit, progress):
                 current = current.GetParentControl()
             absolute = {**rect, "left": bounds["left"]+rect["left"], "right": bounds["left"]+rect["right"],
                         "top": bounds["top"]+rect["top"], "bottom": bounds["top"]+rect["bottom"]}
+            if belongs and not bool(getattr(control, "IsOffscreen", False)):
+                original_xpath = xpath
+                control, xpath = _atomic_owner(control, xpath, absolute, window, passive_cache)
+                if xpath != original_xpath:
+                    target = {**target, "component_binding": "passive-native-child",
+                              "native_location": scanner.location_from_xpath(original_xpath)}
             kind = getattr(control, "ControlTypeName", "")
             if not belongs:
                 reason = "outside_selected_window"
@@ -119,11 +186,13 @@ def resolve(window, bounds, targets, limit, progress):
                 reason = "not_visible"
             elif kind in {"WindowControl", "GroupControl", "PaneControl", "ToolBarControl", "MenuBarControl", "TitleBarControl", "MenuControl"}:
                 reason = "layout_container"
-            elif not scanner._candidate_fits_target(control, absolute, window, details):
+            elif not (scanner._candidate_fits_target(control, absolute, window, details)
+                      or _fits_atomic_target(control, absolute, window)):
                 reason = "geometry_rejected"
         if reason:
             failures.append(dict(error=reason, reason=reason, diagnostics=details, observation=target))
             continue
+        target = {**target, "component_relation": "label-of" if is_text(target) else "part-of"}
         key = scanner._control_key(control)
         if key in seen:
             index = seen[key]
@@ -136,7 +205,7 @@ def resolve(window, bounds, targets, limit, progress):
                 components.append({**target, "native_evidence": True})
                 if is_text(target) and not primary.get("observed_value"):
                     primary["observed_value"] = target.get("observed_value", "")
-                if is_text(primary) and not is_text(target):
+                if not is_text(target) and all(is_text(c) for c in components[:-1]):
                     primary["entity_type"] = target.get("entity_type", "ui-element")
             else:
                 failures.append(dict(error="distinct visual entity shares a UIA control",
@@ -151,8 +220,11 @@ def resolve(window, bounds, targets, limit, progress):
                          supported_actions=scanner._control_actions(getattr(control,"ControlTypeName", ""),
                                                                   bool(getattr(control,"IsEnabled", True))))
         semantic = manual_layout.native_semantics(candidate)
-        semantics[index] = {**target, **semantic, "entity_type": target.get("entity_type", "ui-element"),
-                            "observed_value": target.get("observed_value", ""),
+        semantics[index] = {**target, **semantic,
+                            "entity_type": ("ui-element" if is_text(target) and kind in _ATOMIC_CONTROLS - {"TextControl"}
+                                            else target.get("entity_type", "ui-element")),
+                            "observed_value": (getattr(control,"Name", "") if kind in {"ListItemControl","TreeItemControl"}
+                                               else target.get("observed_value", "")),
                             "visual_components": [{**target, "native_evidence": True}],
                             "analysis_result": target["analysis_result"]}
     return controls, semantics, failures, paths
@@ -328,20 +400,28 @@ def archive_layout_records(directory, previous, observed, region_ids, scan_id):
         if any(identifier in p.read_text(encoding="utf-8") for p in directory.rglob("*.md")
                if p!=path and ".easy_uiauto" not in p.relative_to(directory).parts and p.name not in {"index.md","commands.md"}):
             continue
-        target=directory/".easy_uiauto/archive"/scan_id/"controls"/path.name
-        target.parent.mkdir(parents=True,exist_ok=True)
-        archive=target.parent.parent
-        def preserve(value):
-            if isinstance(value,dict):return {k:preserve(v) for k,v in value.items()}
-            if isinstance(value,list):return [preserve(v) for v in value]
-            if isinstance(value,str) and value.startswith("images/"):
-                source=(directory/value).resolve()
-                if source.is_relative_to(directory.resolve()) and source.is_file():
-                    destination=archive/value;destination.parent.mkdir(parents=True,exist_ok=True)
-                    shutil.copy2(source,destination)
-                    return destination.relative_to(directory).as_posix()
-            return value
-        metadata,body=knowledge.read_markdown(path)
-        knowledge.write_markdown(target,preserve(metadata),body)
-        path.unlink();archived+=1
+        archive_record(directory, path, scan_id)
+        archived+=1
     return archived
+
+
+def archive_record(directory, path, scan_id, *, reason=None):
+    """Keep the original record and its images before removing it from the tree."""
+    target=directory/".easy_uiauto/archive"/scan_id/"controls"/path.name
+    target.parent.mkdir(parents=True,exist_ok=True)
+    archive=target.parent.parent
+    def preserve(value):
+        if isinstance(value,dict):return {k:preserve(v) for k,v in value.items()}
+        if isinstance(value,list):return [preserve(v) for v in value]
+        if isinstance(value,str) and value.startswith("images/"):
+            source=(directory/value).resolve()
+            if source.is_relative_to(directory.resolve()) and source.is_file():
+                destination=archive/value;destination.parent.mkdir(parents=True,exist_ok=True)
+                shutil.copy2(source,destination)
+                return destination.relative_to(directory).as_posix()
+        return value
+    metadata,body=knowledge.read_markdown(path)
+    if reason:
+        metadata["component_archive"] = reason
+    knowledge.write_markdown(target,preserve(metadata),body)
+    path.unlink()

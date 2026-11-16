@@ -442,6 +442,12 @@ def _run_worker(folder: Path):
             elif result.get("reference_descriptions",{}).get("state")=="completed":
                 report=result["reference_descriptions"]
                 result["message"]=f"学习完成；已生成 {report['matched']} 个控件说明，{len(report['unmatched'])} 个需进一步确认"
+            parts = result.get("component_reconciliation", {})
+            if parts.get("archived") or parts.get("retained"):
+                result["message"] = (result.get("message", "学习完成")
+                    + f"；已归档 {len(parts.get('archived', []))} 条重复附属记录"
+                    + (f"，{len(parts['retained'])} 条保留待确认，详见学习结果"
+                       if parts.get("retained") else ""))
         elif operation == "verify":
             import uiautomation
             from .utils import observe_control

@@ -172,6 +172,163 @@ def test_nested_objects_on_custom_canvas_are_not_merged_by_containment_alone(loc
     assert result["failures"][0]["reason"]=="shared_native_control"
 
 
+@pytest.mark.parametrize("kind",["ListItemControl","TreeItemControl"])
+@pytest.mark.parametrize("child_kind",[None,"TextControl","ImageControl"])
+@pytest.mark.parametrize("reverse",[False,True])
+def test_component_item_keeps_its_caption_and_icon_as_evidence(local,monkeypatch,kind,child_kind,reverse):
+    layout,root,window,_button,detections,*_=local
+    caption=FakeControl("Park_Tr","TextControl",(80,45,125,65))
+    caption.ControlTypeName=child_kind or "TextControl"
+    item=FakeControl("Park Transformation v3",kind,(40,30,170,90),[caption])
+    listing=FakeControl("元件库","ListControl",(10,10,380,145),[item]);listing._parent=window
+    item_path=[dict(ControlType="WindowControl",Name="Example"),dict(ControlType="ListControl",Name="元件库"),
+               dict(ControlType=kind,Name=item.Name)]
+    detections[:]=[element(1,"graphic-control",(40,30,170,90)),
+                   element(2,"text-label",(80,45,125,65),"Park_Tr")]
+    if reverse:detections.reverse()
+    def lookup(x,y,**kw):
+        if child_kind and y==55:
+            return [*item_path,dict(ControlType=child_kind,Name=caption.Name)],caption
+        return item_path,item
+    monkeypatch.setattr(utils,"get_control_info",lookup)
+    result=scan(layout,root)
+    saved=records(root)
+    assert len(saved)==1 and result["visual_only_observations"]==0 and not result["failures"]
+    record=saved[0]
+    assert record["name"]==item.Name and record["observed_value"]==item.Name
+    assert record["control_type"]==kind and record["entity_type"]=="graphic-control"
+    assert record["location"]["Xpath"][-1]["ControlType"]==kind and "click" in record["actions"]
+    parts=record["visual_components"]
+    assert len(parts)==2 and any(p["observed_value"]=="Park_Tr" and p["component_relation"]=="label-of" for p in parts)
+    if child_kind:assert any(p.get("native_location",{}).get("ControlType")==child_kind for p in parts)
+    again=scan(layout,root)
+    assert again["observed_control_ids"]==result["observed_control_ids"] and len(records(root))==1
+
+
+@pytest.mark.parametrize("independent",["focusable","invoke","button","edit","standalone"])
+def test_item_does_not_absorb_independent_children_or_neighboring_text(local,monkeypatch,independent):
+    layout,root,window,_button,detections,*_=local
+    kind={"button":"ButtonControl","edit":"EditControl"}.get(independent,"TextControl")
+    child=FakeControl("属性",kind,(80,45,125,65))
+    if independent=="focusable":child.IsKeyboardFocusable=True
+    if independent=="invoke":
+        child.GetPattern=lambda value:object() if value==scanner.uiautomation.PatternId.InvokePattern else None
+    item=FakeControl("元件","ListItemControl",(40,30,170,90),[child]);item._parent=window
+    if independent=="standalone":child._parent=window
+    item_path=[dict(ControlType="WindowControl",Name="Example"),dict(ControlType="ListItemControl",Name=item.Name)]
+    child_path=[*(item_path[:-1] if independent=="standalone" else item_path),dict(ControlType=kind,Name=child.Name)]
+    detections[:]=[element(1,"graphic-control",(40,30,170,90)),element(2,"text-label",(80,45,125,65),"属性")]
+    monkeypatch.setattr(utils,"get_control_info",lambda x,y,**kw:(child_path,child) if y==55 else (item_path,item))
+    result=scan(layout,root)
+    assert len(records(root))==2 and result["visual_only_observations"]==0
+    assert {r["name"] for r in records(root)}=={"元件","属性"}
+
+
+def test_small_text_inside_one_item_does_not_fail_geometry_or_merge_other_items(local,monkeypatch):
+    layout,root,window,_button,detections,*_=local
+    items=[FakeControl("Park Transformation v3","ListItemControl",(20,10,380,65)),
+           FakeControl("Inverse Park Transformation v3","ListItemControl",(20,75,380,140))]
+    listing=FakeControl("元件库","ListControl",(10,5,390,145),items);listing._parent=window
+    detections[:]=[element(1,"text-label",(40,20,65,30),"Park"),element(2,"text-label",(40,90,65,100),"Park")]
+    def lookup(x,y,**kw):
+        item=items[int(y>65)]
+        return [dict(ControlType="WindowControl",Name="Example"),dict(ControlType="ListControl",Name="元件库"),
+                dict(ControlType="ListItemControl",Name=item.Name)],item
+    monkeypatch.setattr(utils,"get_control_info",lookup)
+    result=scan(layout,root)
+    assert len(records(root))==2 and not result["failures"] and result["visual_only_observations"]==0
+    assert {r["name"] for r in records(root)}=={item.Name for item in items}
+    assert all(r["control_type"]=="ListItemControl" and r["entity_type"]=="ui-element" for r in records(root))
+
+
+@pytest.fixture
+def legacy_component(local, monkeypatch, request):
+    from easy_uiauto.mcp import local_learning
+    layout,root,window,_button,detections,*_=local
+    caption=FakeControl("Park_Tr","TextControl",(80,45,125,65))
+    item=FakeControl("Park Transformation v3","ListItemControl",(40,30,170,90),[caption])
+    item._parent=window
+    path=[dict(ControlType="WindowControl",Name="Example"),dict(ControlType="ListItemControl",Name=item.Name)]
+    detections[:]=[element(1,"graphic-control",(40,30,170,90)),element(2,"text-label",(80,45,125,65),"Park_Tr")]
+    native=request.param=="native"
+    monkeypatch.setattr(utils,"get_control_info",lambda x,y,**kw:
+        ([*path,dict(ControlType="TextControl",Name=caption.Name)],caption) if native and y==55 else (path,item))
+    # Reproduce the earlier scanner's behavior, then restore the production fix.
+    with monkeypatch.context() as old:
+        old.setattr(local_learning,"_ATOMIC_CONTROLS",local_learning._ATOMIC_CONTROLS-{"ListItemControl"})
+        old.setattr(local_learning,"_atomic_owner",lambda control,xpath,*a:(control,xpath))
+        scan(layout,root)
+    saved=records(root)
+    assert len(saved)==2
+    duplicate=next(r for r in saved if r["control_type"]!="ListItemControl")
+    owner=next(r for r in saved if r["control_type"]=="ListItemControl")
+    return layout,root,duplicate,owner
+
+
+@pytest.mark.parametrize("legacy_component",["native","visual"],indirect=True)
+def test_relearning_archives_proven_legacy_parts_and_preserves_images(legacy_component):
+    layout,root,duplicate,owner=legacy_component
+    result=scan(layout,root)
+    assert [r["id"] for r in records(root)]==[owner["id"]]
+    assert result["archived_component_records"]==1 and result["controls_retained_unobserved"]==0
+    assert result["component_reconciliation"]["archived"]==[
+        dict(control_id=duplicate["id"],owner_control_id=owner["id"])]
+    directory=knowledge.app_dir("chosen-app",root)
+    archive=directory/".easy_uiauto/archive"/result["scan_id"]/"controls"/(duplicate["id"]+".md")
+    metadata,_=knowledge.read_markdown(archive)
+    assert metadata["component_archive"]["owner_control_id"]==owner["id"]
+    assert metadata["image"].startswith(".easy_uiauto/archive/") and (directory/metadata["image"]).is_file()
+    assert scan(layout,root)["archived_component_records"]==0
+    assert len(records(root))==1 and (directory/metadata["image"]).is_file()
+
+
+@pytest.mark.parametrize("legacy_component",["native","visual"],indirect=True)
+@pytest.mark.parametrize("protection",["manual","assignment","executed","quarantined","workflow","session"])
+def test_relearning_preserves_authored_executed_and_referenced_parts(legacy_component,protection):
+    layout,root,duplicate,_=legacy_component
+    directory=knowledge.app_dir("chosen-app",root)
+    if protection=="manual":duplicate["semantic_source"]="manual"
+    if protection=="assignment":duplicate["region_source"]="manual-selection"
+    if protection=="executed":duplicate["function_verification"]={"executed":True}
+    if protection=="quarantined":duplicate.update(status="quarantined",quarantine={"active":True})
+    knowledge.save_control(directory,duplicate)
+    if protection=="workflow":
+        knowledge.write_markdown(directory/"workflows/use.md",dict(kind="workflow",id="use",control_id=duplicate["id"]),"")
+    if protection=="session":
+        session=directory/"learning/session.json";session.parent.mkdir(exist_ok=True)
+        import json
+        session.write_text(json.dumps(dict(control_ids=[duplicate["id"]])),encoding="utf-8")
+    result=scan(layout,root)
+    assert len(records(root))==2 and result["archived_component_records"]==0
+    assert result["component_reconciliation"]["retained"][0]["control_id"]==duplicate["id"]
+
+
+@pytest.mark.parametrize("legacy_component",["native"],indirect=True)
+def test_reconciliation_requires_successfully_saved_fresh_owner(legacy_component,monkeypatch):
+    layout,root,duplicate,owner=legacy_component
+    save=knowledge.save_control
+    def fail(directory,record,**kw):
+        if record["id"]==owner["id"]:raise OSError("cannot save")
+        return save(directory,record,**kw)
+    monkeypatch.setattr(knowledge,"save_control",fail)
+    with pytest.raises(RuntimeError):scan(layout,root)
+    assert {r["id"] for r in records(root)}=={duplicate["id"],owner["id"]}
+
+
+@pytest.mark.parametrize("legacy_component",["visual"],indirect=True)
+@pytest.mark.parametrize("difference",["region","window","text","geometry","reason"])
+def test_reconciliation_does_not_guess_visual_ownership(legacy_component,difference):
+    layout,root,duplicate,_=legacy_component
+    if difference=="region":duplicate["region_id"]="another-region"
+    if difference=="window":duplicate["window_scope"]={"kind":"owned","title":"Other"}
+    if difference=="text":duplicate["observed_value"]="Another label"
+    if difference=="geometry":duplicate["normalized_rect"]={"left":.7,"top":.1,"right":.8,"bottom":.2}
+    if difference=="reason":duplicate["verification"]["reason"]="point_lookup_failed"
+    knowledge.save_control(knowledge.app_dir("chosen-app",root),duplicate)
+    result=scan(layout,root)
+    assert len(records(root))==2 and result["archived_component_records"]==0
+
+
 def test_missing_uia_text_remains_an_independent_visual_record(local,monkeypatch):
     layout,root,_window,_button,detections,*_=local
     detections[:]=[element(1,"text-label",(20,100,100,125),"Status")]

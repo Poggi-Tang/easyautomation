@@ -923,6 +923,11 @@ def _visual_component(target: dict, window_rect: dict) -> dict:
     }
     if target.get("native_evidence"):
         component["native_evidence"] = True
+    if target.get("component_relation") in {"label-of", "part-of"}:
+        component["component_relation"] = target["component_relation"]
+    if target.get("component_binding") == "passive-native-child":
+        component["component_binding"] = target["component_binding"]
+        component["native_location"] = target["native_location"]
     if isinstance(rectangle, dict):
         component["normalized_rect"] = knowledge.normalized_rect(
             rectangle, window_rect, relative=True
@@ -2761,12 +2766,17 @@ def scan_window(
 
     retained_unobserved = 0
     archived_layout_records = 0
+    component_reconciliation_report = {"archived": [], "retained": []}
     if strategy == "local-visual" and saved_current:
+        from . import component_reconciliation
+        component_reconciliation_report = component_reconciliation.reconcile(
+            directory, previous_page_records, observed_ids, scan_id)
         if not navigation_context:
             archived_layout_records = local_learning.archive_layout_records(directory,previous_page_records,observed_ids,
                 {r["id"] for r in manual_layout["regions"]},scan_id)
+    archived_component_ids = {item["control_id"] for item in component_reconciliation_report["archived"]}
     for previous in previous_page_records:
-        if previous.get("id") in observed_ids:
+        if previous.get("id") in observed_ids or previous.get("id") in archived_component_ids:
             continue
         if effective_strategy in {"visual-first", "local-visual"} or previous.get("navigation_path") or navigation_context:
             retained_unobserved += 1
@@ -2856,6 +2866,8 @@ def scan_window(
         "reference_description_error": reference_description_error,
         "reference_descriptions": reference_description_report,
         "archived_layout_records": archived_layout_records,
+        "archived_component_records": len(archived_component_ids),
+        "component_reconciliation": component_reconciliation_report,
         "visual_targets": len(visual_targets),
         "coverage": segmentation.get("coverage", {}),
         **({"unassigned_controls": sum(r.get("region_id") == "unassigned" for r in scanned_records),
