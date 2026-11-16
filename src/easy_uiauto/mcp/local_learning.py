@@ -115,11 +115,19 @@ def detect(image, bounds, segmentation, directory, progress, *, expanded=False):
                             right=right+rect["left"], bottom=bottom+rect["top"],
                             width=right-left, height=bottom-top)
             text = str(element.get("observed_value") or "").strip()
+            parts = []
+            for part in element.get("visual_components", []):
+                pr = part["rect"]
+                parts.append({**part, "role": "label", "component_relation": "part-of",
+                    "relative_rect": {**pr, "left": pr["left"]+rect["left"],
+                                      "right": pr["right"]+rect["left"],
+                                      "top": pr["top"]+rect["top"], "bottom": pr["bottom"]+rect["top"]},
+                    "analysis_result": reports[-1]["result"]})
             targets.append({**element, "id": len(targets)+1, "relative_rect": relative,
                 "region_id": area["id"], "semantic_name": text or element.get("semantic_name") or "图形控件",
                 "observed_value": text, "role": "label" if is_text(element) else "control",
                 "source": "local-yolo-rapidocr", "evidence": [element.get("source", "local detection")],
-                "analysis_result": reports[-1]["result"], "visual_components": []})
+                "analysis_result": reports[-1]["result"], "visual_components": parts})
     return targets, reports
 
 
@@ -202,10 +210,12 @@ def resolve(window, bounds, targets, limit, progress):
             # proposal (low IoU). Do not apply that shortcut to aggregate nodes.
             if (kind in _ATOMIC_CONTROLS
                     or any(scanner._same_visual_target(component, target) for component in components)):
+                was_text_only = all(is_text(c) for c in components)
                 components.append({**target, "native_evidence": True})
+                components.extend(target.get("visual_components", []))
                 if is_text(target) and not primary.get("observed_value"):
                     primary["observed_value"] = target.get("observed_value", "")
-                if not is_text(target) and all(is_text(c) for c in components[:-1]):
+                if not is_text(target) and was_text_only:
                     primary["entity_type"] = target.get("entity_type", "ui-element")
             else:
                 failures.append(dict(error="distinct visual entity shares a UIA control",
@@ -225,7 +235,8 @@ def resolve(window, bounds, targets, limit, progress):
                                             else target.get("entity_type", "ui-element")),
                             "observed_value": (getattr(control,"Name", "") if kind in {"ListItemControl","TreeItemControl"}
                                                else target.get("observed_value", "")),
-                            "visual_components": [{**target, "native_evidence": True}],
+                            "visual_components": [{**target, "native_evidence": True},
+                                                  *target.get("visual_components", [])],
                             "analysis_result": target["analysis_result"]}
     return controls, semantics, failures, paths
 

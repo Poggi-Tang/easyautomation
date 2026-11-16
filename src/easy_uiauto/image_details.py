@@ -1,4 +1,4 @@
-"""Pack populated screenshot regions at native scale for one extra detector pass."""
+"""Cover populated screenshot regions with overlapping native-scale detail tiles."""
 
 from __future__ import annotations
 
@@ -48,52 +48,68 @@ def plan(image, size=1280):
             else:
                 index+=1
         merged.append(box)
-    # A bounded detail pass: large dense regions retain the whole-image result.
-    # Report every unplaced region instead of pretending this covers the page.
     gutter=16
+    capacity=size-2*gutter
+    # Small controls can be up to 96px. More overlap than that plus the edge
+    # rejection margin ensures a seam-crossing control fits in another tile.
+    overlap=min(112,capacity//2)
+    def starts(start, end):
+        positions=[start]
+        while positions[-1]+capacity<end:
+            positions.append(min(positions[-1]+capacity-overlap,end-capacity))
+        return positions
+    tiles=[]
+    for box in merged:
+        for top in starts(box[1],box[3]):
+            for left in starts(box[0],box[2]):
+                tiles.append([left,top,min(left+capacity,box[2]),min(top+capacity,box[3])])
     x=y=gutter
-    shelf=0
-    for box in sorted(merged,key=lambda b:(-(b[3]-b[1]),b[1],b[0])):
+    shelf=atlas_index=0
+    for box in sorted(tiles,key=lambda b:(-(b[3]-b[1]),b[1],b[0])):
         w,h=box[2]-box[0],box[3]-box[1]
-        if w>size-2*gutter or h>size-2*gutter:
-            report['omitted_regions'].append(dict(source_rect=box,reason='Region exceeds native-scale atlas size'))
-            continue
         if x+w+gutter>size:
             x=gutter
             y+=shelf+gutter
             shelf=0
         if y+h+gutter>size:
-            report['omitted_regions'].append(dict(source_rect=box,reason='One-pass detail budget exhausted'))
-            continue
-        report['regions'].append(dict(id=len(report['regions'])+1,source_rect=box,atlas_rect=[x,y,x+w,y+h]))
+            atlas_index+=1
+            x=y=gutter
+            shelf=0
+        report['regions'].append(dict(id=len(report['regions'])+1,source_rect=box,
+                                      atlas_index=atlas_index,atlas_rect=[x,y,x+w,y+h]))
         x+=w+gutter
         shelf=max(shelf,h)
     report.update(enabled=bool(report['regions']),
-                  reason='Native-scale populated patches; at most one additional detector pass',
+                  reason='All discovered content patches covered at native scale with overlapping tiles',
                   source_size=list(image.size),complete_content_coverage=not report['omitted_regions'],
-                  parameters=dict(edge_low=25,edge_high=70,context=12,gutter=gutter,max_passes=1))
+                  atlas_count=atlas_index+1 if tiles else 0,
+                  parameters=dict(edge_low=25,edge_high=70,context=12,gutter=gutter,
+                                  tile_overlap=overlap,max_passes=None))
     return report
 
 
-def render_atlas(image, report):
+def render_atlas(image, report, atlas_index=0):
     from PIL import Image
 
     atlas=Image.new('RGB',(report['atlas_size'],report['atlas_size']),'white')
     for region in report['regions']:
+        if region.get('atlas_index',0)!=atlas_index:
+            continue
         atlas.paste(image.crop(tuple(region['source_rect'])).convert('RGB'),tuple(region['atlas_rect'][:2]))
     return atlas
 
 
-def merge_predictions(boxes, scores, detail_boxes, detail_scores, report):
+def merge_predictions(boxes, scores, detail_boxes, detail_scores, report, atlas_index=0):
     """Append new observations; retain whole-image IDs and audit every patch box."""
     boxes=[list(b) for b in boxes]
     scores=list(scores)
-    observations=[]
+    observations=list(report.get('observations',[]))
     added=duplicates=0
     for raw, score in zip(detail_boxes,detail_scores,strict=True):
         area=_area(raw)
-        owners=[r for r in report['regions'] if area>0 and _overlap(raw,r['atlas_rect'])/area>=0.95]
-        item=dict(atlas_box=list(raw),confidence=float(score))
+        owners=[r for r in report['regions'] if r.get('atlas_index',0)==atlas_index
+                and area>0 and _overlap(raw,r['atlas_rect'])/area>=0.95]
+        item=dict(atlas_index=atlas_index,atlas_box=list(raw),confidence=float(score))
         if len(owners)!=1:
             observations.append(dict(**item,accepted=False,reason='Prediction crosses patch boundaries or atlas padding'))
             continue
@@ -129,6 +145,7 @@ def merge_predictions(boxes, scores, detail_boxes, detail_scores, report):
             scores.append(float(score))
             observations.append(dict(**item,accepted=True,added_yolo_id=len(boxes)))
             added+=1
-    report.update(observations=observations,added_count=added,duplicate_count=duplicates,
+    report.update(observations=observations,added_count=report.get('added_count',0)+added,
+                  duplicate_count=report.get('duplicate_count',0)+duplicates,
                   rejected_count=sum(not o['accepted'] for o in observations))
     return boxes,scores

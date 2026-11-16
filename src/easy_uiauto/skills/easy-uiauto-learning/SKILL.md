@@ -81,10 +81,19 @@ and geometry_additions for locally separated magnifiers and supported scroll thu
 their semantics remain unverified. Wide light borders protect inputs and buttons.
 Display annotated_preview_image for dense pages: its 2x drawing keeps coordinates
 relative to the original analysis input, with thin strokes and adjacent labels.
-Large UI screenshots can add one native-scale detail pass, packing populated
-regions into one 1280px canvas and reusing loaded weights. Inspect detail-input.png
-and detail-recovery.json for source/atlas mapping, omitted regions and crop-edge
-rejections; whole-image IDs remain available. Disable using detail_recovery=false
+Repeated palette sections with regular pixel gutters and non-text shape evidence
+use one complete, uniform cell per visible item. Internal OCR is retained in
+visual_components rather than emitted as a second control. Inspect palette_layout
+in ui-fusion.json for headers, spacing, pixel bounds and grouped predictions.
+These inferred cells keep their full bounds during rectangle snapping. They are
+unscored layout observations, not verified identities or executable targets.
+Large UI screenshots pack populated regions into as many 1280px detail canvases
+as needed, reusing loaded weights. Oversized regions use overlapping native-scale
+tiles so small controls crossing a tile seam can appear intact in another tile.
+Inspect detail-input.png, detail-input-2.png, etc. and detail-recovery.json for
+source/atlas mapping, inference counts and crop-edge rejections. This may take
+longer; content is not dropped to meet a one-pass budget. Whole-image IDs remain
+available. Disable using detail_recovery=false
 or --no-detail-recovery. Small inputs and block diagrams keep one whole-image pass.
 Prioritize quality: the original 1280x1280 square detector input is the default.
 Reduced stride-aligned padding is experimental and needs explicit opt-in using

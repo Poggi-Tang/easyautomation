@@ -53,6 +53,20 @@ def scan(layout,root):
 def records(root):return knowledge.load_index(knowledge.app_dir("chosen-app",root))["controls"]
 
 
+def test_palette_internal_ocr_is_saved_as_evidence_without_an_extra_point_lookup(local):
+    layout,root,_window,_button,detections,_calls,points=local
+    detections[:]=[element(1,"graphic-control",(40,30,160,90))]
+    detections[0]['visual_components']=[dict(entity_type='text-observation',observed_value='王',
+        rect=dict(left=65,top=45,right=135,bottom=70,width=70,height=25),raw_ocr_id=7)]
+    result=scan(layout,root)
+    saved=records(root)
+    assert len(saved)==1 and len(points)==1 and not result['failures']
+    parts=saved[0]['visual_components']
+    assert len(parts)==2 and parts[1]['observed_value']=='王'
+    assert not parts[1].get('native_evidence')  # OCR is not a separately verified widget
+    assert parts[1]['normalized_rect']==pytest.approx(dict(left=65/400,top=45/300,right=135/400,bottom=70/300),abs=1e-6)
+
+
 def test_deep_content_states_reuse_manual_region_through_real_scanner(local, monkeypatch):
     from easy_uiauto import region_learning, workflows
     from easy_uiauto.knowledge_library import KnowledgeLibrary

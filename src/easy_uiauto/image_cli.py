@@ -137,7 +137,9 @@ def analyze_local_image(image_path, output_dir="", *, weights=None, profile="ui"
         if detail_report.get('enabled'):
             from . import image_details
 
-            image_details.render_atlas(image,detail_report).save(directory/'detail-input.png')
+            for atlas_index in range(detail_report.get('atlas_count',1)):
+                name='detail-input.png' if atlas_index==0 else f'detail-input-{atlas_index+1}.png'
+                image_details.render_atlas(image,detail_report,atlas_index).save(directory/name)
         report(f"[3/6] Saving {len(yolo['boxes'])} YOLO and {len(ocr['texts'])} OCR regions")
         _write_json(directory / "raw-ocr.json", ocr)
         _write_json(directory / "ocr-recovery.json", ocr.get("small_text_recovery", {
@@ -253,7 +255,7 @@ def build_parser():
     parser.add_argument("--no-small-text-recovery", action="store_true",
                         help="Disable automatic recovery of small text inside frames")
     parser.add_argument('--no-detail-recovery',action='store_true',
-                        help='Disable the extra native-scale small-control pass for large UI screenshots')
+                        help='Disable native-scale small-control detail passes for large UI screenshots')
     inference_shape = parser.add_mutually_exclusive_group()
     inference_shape.add_argument('--rectangular-inference', action='store_true',
                                  help='Opt into experimental reduced UI padding; compare annotation quality')

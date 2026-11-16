@@ -803,12 +803,20 @@ locally, with original text and bounds retained in correction evidence. Wide lig
 input borders and button borders protect those controls from text-only filtering.
 Dense small-control pages also receive a separately rendered 2x preview; coordinates
 remain relative to the analysis input and the viewer opens the readable preview.
-For UI inputs larger than 1280 pixels, the detector also packs populated pixel
-regions at native scale into at most one extra YOLO pass, reusing its loaded
-weights. Whole-image detections remain and mapped small-control additions retain
-their patch evidence. Review `detail-input.png` and `detail-recovery.json`, including
-omitted regions and rejected crop-edge predictions. This is a bounded detail pass,
-not a claim of full native-resolution coverage. Disable it with MCP/Python
+Palettes with repeated section headers, regular pixel gutters and non-text shape
+evidence use complete, uniform cells for visible items, including missed symbols.
+Internal OCR stays in `visual_components`; empty slots are not added. Rectangle
+snapping preserves the full cell. Inspect `palette_layout` in `ui-fusion.json` for
+spacing, pixel bounds and grouped predictions. Layout recovery has no YOLO score
+and does not verify control semantics or execution.
+For UI inputs larger than 1280 pixels, the detector packs populated regions at
+native scale into multiple detail canvases, reusing loaded weights. Oversized
+regions use overlapping tiles so small controls crossing a seam can appear intact
+in a neighboring tile. Whole-image detections remain; mapped additions retain
+their patch evidence. Review `detail-input.png`, `detail-input-2.png`, etc. and
+`detail-recovery.json` for mappings, inference counts and crop-edge rejections.
+Additional passes can take longer; discovered content is no longer dropped to fit
+a single canvas. Disable this with MCP/Python
 `detail_recovery=False` or CMD `--no-detail-recovery`. Smaller images and model
 diagrams retain their single whole-image pass.
 The default YOLO input is a 1280x1280 square.

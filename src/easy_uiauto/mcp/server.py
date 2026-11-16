@@ -2583,8 +2583,11 @@ async def analyze_ui_image(
         confidence: Local YOLO threshold, default 0.1.
         rectangle_snap: Local mode fits graphic boxes to nearby closed rectangles
             using IoU >= 0.35 and at most 1.6x growth per dimension; text stays unchanged.
+            Complete palette cells retain their inferred grid bounds.
         detail_recovery: Local UI mode packs populated regions of large screenshots
-            at native resolution for at most one extra YOLO pass. False skips it.
+            into native-resolution atlases. Oversized regions use overlapping tiles;
+            all discovered patches are processed, so multiple extra passes can take
+            longer. False skips detail inference.
         rectangular_inference: Experimental local UI option to remove unused square
             padding. Input shapes can change predictions. Default False preserves
             the original square input to prioritize annotation quality.

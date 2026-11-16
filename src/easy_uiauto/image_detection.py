@@ -252,19 +252,23 @@ def _run_yolo_on_device(image, weights, *, threads, confidence, recover_details,
         detail=image_details.plan(image,MODEL_SIZE)
         detail['planning_seconds']=round(time.perf_counter()-planning,4)
         if detail['enabled']:
-            if progress:
-                progress(f"YOLO detail recovery: {len(detail['regions'])} native-scale content regions in one extra pass")
-            atlas=image_details.render_atlas(image,detail)
-            bottom=max(r['atlas_rect'][3] for r in detail['regions'])+detail.get(
-                'parameters',{}).get('gutter',16)
-            extra=_predict_yolo(atlas,model,confidence,rectangular=rectangular,
-                                content_bottom=bottom,device=device)
-            boxes,scores=image_details.merge_predictions(boxes,scores,extra['boxes'],extra['scores'],detail)
-            detail['inference_seconds']=extra['elapsed_seconds']
-            detail['tensor_shape']=extra.get('tensor_shape')
-            input_shapes.append(extra.get('tensor_shape'))
-            forward+=extra['forward_seconds']
-            passes+=1
+            detail['atlases']=[]
+            for atlas_index in range(detail.get('atlas_count',1)):
+                if progress:
+                    progress(f"YOLO detail recovery: native-scale atlas {atlas_index+1}/{detail.get('atlas_count',1)}")
+                atlas=image_details.render_atlas(image,detail,atlas_index)
+                bottom=max(r['atlas_rect'][3] for r in detail['regions']
+                           if r.get('atlas_index',0)==atlas_index)+detail.get('parameters',{}).get('gutter',16)
+                extra=_predict_yolo(atlas,model,confidence,rectangular=rectangular,
+                                    content_bottom=bottom,device=device)
+                boxes,scores=image_details.merge_predictions(
+                    boxes,scores,extra['boxes'],extra['scores'],detail,atlas_index)
+                detail['atlases'].append(dict(index=atlas_index,inference_seconds=extra['elapsed_seconds'],
+                                             tensor_shape=extra.get('tensor_shape')))
+                input_shapes.append(extra.get('tensor_shape'))
+                forward+=extra['forward_seconds']
+                passes+=1
+            detail['inference_seconds']=sum(a['inference_seconds'] for a in detail['atlases'])
     return dict(model_id=MODEL_ID,architecture='YOLOv9-E',model_sha256=MODEL_SHA256,
                 device=device,threads=threads,input_size=MODEL_SIZE,
                 confidence_threshold=confidence,nms_iou_threshold=0.45,
@@ -582,10 +586,16 @@ def combine_detections(image, yolo, ocr, *, profile="block-diagram"):
         zip(yolo["boxes"], yolo["scores"], strict=True), 1)]
     proposals = [(i, box, score) for i, box, score in proposals if box is not None]
     ui_metadata, recovered_icons, ui_report = {}, [], {"enabled": False}
+    palette_elements = []
     if profile == "ui":
+        from . import ui_palette
         from .ui_image_fusion import prepare_ui
 
+        cells, palette_report = ui_palette.discover(image, proposals, texts)
+        proposals, texts = ui_palette.partition(proposals, texts, cells, palette_report)
+        palette_elements = ui_palette.elements(cells)
         proposals, texts, ui_metadata, recovered_icons, ui_report = prepare_ui(image, proposals, texts)
+        ui_report['palette_layout'] = palette_report
         rejected_text.extend(ui_report["rejected_ocr"])
     geometry = ([] if profile == "ui" else component_geometry.candidates(image, block_diagram=True))
     text_rects = [t["rect"] for t in texts]
@@ -712,6 +722,15 @@ def combine_detections(image, yolo, ocr, *, profile="block-diagram"):
                              ambiguity="Pixel shape observed; control identity needs review",
                              status="observed", uia_verified=False, executable=False, suggested_actions=[]))
     if profile == "ui":
+        # Generic geometry/template recovery may rediscover an inner frame or a
+        # whole section after the initial YOLO partition. Apply the same item
+        # ownership rule to those outputs before assigning final IDs.
+        candidate_outputs = [(i,e['rect'],e['confidence']) for i,e in enumerate(elements)]
+        output_partition = dict(layouts=palette_report['layouts'])
+        retained, _ = ui_palette.partition(candidate_outputs, [], cells, output_partition)
+        elements = [elements[i] for i,_box,_score in retained]
+        palette_report['grouped_fusion_outputs'] = output_partition['grouped_yolo']
+        elements.extend(palette_elements)
         elements.sort(key=lambda e: (e['rect']['top'], e['rect']['left']))
         for index, element in enumerate(elements, 1):
             element['id'] = index

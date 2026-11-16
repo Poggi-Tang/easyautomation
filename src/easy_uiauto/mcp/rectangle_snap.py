@@ -45,6 +45,10 @@ def snap_rectangles(image, elements: list[dict], *, refine_ids=None, box_padding
     for element in result:
         if diagram_geometry.is_text(element) or (selected is not None and element["id"] not in selected):
             continue
+        if element.get('geometry_kind') == 'palette-cell':
+            # An inner symbol/frame is only part of the item. Preserve the full
+            # cell inferred from common gutters instead of shrinking it again.
+            continue
         original = dict(element["rect"])
         original.setdefault("width", original["right"] - original["left"])
         original.setdefault("height", original["bottom"] - original["top"])
