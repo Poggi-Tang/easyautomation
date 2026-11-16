@@ -117,7 +117,11 @@ def test_changed_content_retains_manual_region_and_control_entry_routes(backend,
 
 def test_resume_old_state_uses_valid_manual_region_without_deleting_old_page(backend, library, monkeypatch, content_frame):
     old = {**backend.region, "id":"deep-old.region", "page_id":"deep-old", "learning_source":"deep-learning"}
-    knowledge.save_region(backend.directory, old)
+    monkeypatch.setattr(knowledge, "utc_now", lambda: "2026-01-01T00:00:00+00:00")
+    path = knowledge.save_region(backend.directory, old)
+    old = knowledge.read_markdown(path)[0]
+    saved = path.read_bytes()
+    monkeypatch.setattr(knowledge, "utc_now", lambda: "2026-01-01T00:00:01+00:00")
     backend.previous_graph = dict(states={"old-node":dict(id="old-node", fingerprint=content_frame["state_id"],
                                                         region_ids=[old["id"]], route=[])})
     monkeypatch.setattr(backend, "stable_frame", lambda:content_frame)
@@ -125,6 +129,7 @@ def test_resume_old_state_uses_valid_manual_region_without_deleting_old_page(bac
     result = backend.observe()
     assert result["node_id"] == "old-node" and result["region_ids"] == [backend.region["id"]]
     assert next(r for r in library.read("demo")["regions"] if r["id"] == old["id"]) == old
+    assert path.read_bytes() == saved
 
 
 @pytest.mark.parametrize("change", ["condition", "missing", "moved", "replacement", "owned", "other-window"])
