@@ -14,7 +14,7 @@ Learn Windows applications in a GUI and save their controls and workflows for re
 
 Select a window, mark regions, learn controls, compose workflows, and run them again.
 The GUI, MCP and Python share one local Markdown knowledge vault, including manual edits
-and learned results. Current version: **1.1.1**. Windows only. The GUI is primarily
+and learned results. Current version: **1.1.2**. Windows only. The GUI is primarily
 Chinese; documentation is available in English and Chinese.
 
 **Free for individuals; enterprise use requires a paid license.** The same policy
@@ -93,10 +93,10 @@ and generate commands such as
 `main.keypad.enter-digit-6.click`.
 
 Use it to record desktop operations, write automated tests, or give an agent access
-to saved controls and workflows. Version `1.1.0` unifies the GUI, MCP and Python control
-library, adds deep learning for individual controls, and stores newly saved API keys in
-Windows Credential Manager. Version `1.1.1` fixes learning items in separate Qt menu
-popups and adds optional NVIDIA GPU inference for YOLO. See the [release notes](CHANGELOG.md).
+to saved controls and workflows. Version `1.1.2` improves detection of complete palette
+items and connected model canvases, keeps valid manual regions during deep learning,
+and fixes locator verification status, region deletion and user-installed YOLO
+environment checks. See the [release notes](CHANGELOG.md).
 
 Saved-image annotation uses **YOLO + RapidOCR** by default: provide an image path and
 an output directory to receive separate text, graphic and combined annotation

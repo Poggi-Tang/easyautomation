@@ -64,7 +64,7 @@ python -m easy_uiauto.library_launcher --vault "D:\UI知识库"
 
 路径支持 **选择文件** 或直接输入绝对文件路径。选择后自动保存；手动输入后按回车、移开焦点或关闭窗口时保存，并重新检查。检测、下载与实际标注共用此配置，重启后仍有效。文件尚未下载时，可先输入保存路径，再点击 **下载 / 修复**。清空输入并结束编辑即可恢复默认位置，不会移动或删除模型；默认路径显示在输入框中，悬停可查看完整路径。当前支持的模型版本仍为 OmniParser v2 `icon_detect_v3` 和 PP-OCRv6 small，选择文件后仍会检查对应版本的 SHA256。配置保存在当前用户的 `%LOCALAPPDATA%/easy-uiauto/model-paths.json`。
 
-若三份模型均为“已就绪”，但仍提示“YOLO 设备检查失败”，先检查运行环境，重新下载模型无助于解决该问题。1.1.1 的设备检查曾强制启用 Python 隔离模式，导致 `pip --user` 安装在 `AppData\Roaming\Python\Python3xx\site-packages` 下的包不可见。该兼容问题已在后续源码中修复；源码安装请拉取最新代码，并在运行 GUI 的同一个 Python 环境重新安装后重启。使用一键源码安装的用户重新运行 `setup.bat`。若仍报错，用该 Python 执行 `python -X utf8 -m easy_uiauto.inference_device` 查看具体错误；缺包与 PyTorch DLL 加载失败需分别处理。“自动”模式本就允许使用 CPU，无需为此强行安装 GPU 依赖。
+若三份模型均为“已就绪”，但仍提示“YOLO 设备检查失败”，先检查运行环境，重新下载模型无助于解决该问题。1.1.1 的设备检查曾强制启用 Python 隔离模式，导致 `pip --user` 安装在 `AppData\Roaming\Python\Python3xx\site-packages` 下的包不可见。该兼容问题已在 1.1.2 修复；请升级到 1.1.2 或更新版本。源码安装请拉取最新代码，并在运行 GUI 的同一个 Python 环境重新安装后重启。使用一键源码安装的用户重新运行 `setup.bat`。若仍报错，用该 Python 执行 `python -X utf8 -m easy_uiauto.inference_device` 查看具体错误；缺包与 PyTorch DLL 加载失败需分别处理。“自动”模式本就允许使用 CPU，无需为此强行安装 GPU 依赖。
 
 ## 添加学习参考资料
 
