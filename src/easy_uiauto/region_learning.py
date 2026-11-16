@@ -203,6 +203,51 @@ class NativeBackend:
             previous=current["state_id"];time.sleep(.15)
         raise ValueError("界面状态持续变化，未继续发送输入")
 
+    def existing_region_layout(self, frame):
+        """A new exploration state need not be a new knowledge page."""
+        from .library_actions import resolve_record
+        from .region_actions import condition_matches
+        from .mcp import dynamic_regions, manual_layout, scanner
+        from .mcp.results import ActionError
+
+        if dynamic_regions.is_dynamic(self.region) or frame["scope"].get("kind") != "main":
+            return None
+        if any(frame["target"].get(k) != self.expected.get(k) for k in ("handle", "process_id", "class_name")):
+            return None
+        scope = self.library.scoped(self.region["page_id"])
+        page = scope.page(self.app_id)
+        window_scope = self.region.get("window_scope") or page.get("window_scope", {"kind":"main"})
+        if window_scope.get("kind", "main") != "main":
+            return None
+        condition = self.library.record_state(self.app_id, self.region).get("condition")
+        if condition and not condition_matches(condition, self.expected, frame["root"]):
+            return None
+        layout = scope.learning_layout(self.app_id, frame["target"], region_id=self.region["id"])
+        # Fixed manual rectangles remain authoritative, including regions drawn
+        # without a UIA locator. A resize requires reviewing their boundaries.
+        manual_layout.segmentation(layout, frame["bounds"])
+        if self.region.get("location", {}).get("Xpath"):
+            try:
+                control = resolve_record({**self.region, "window_scope":window_scope}, self.expected, frame["root"])
+            except ActionError as error:
+                if error.code == "control_not_found" and not error.reason:
+                    return None
+                raise
+            # Position-based picker paths can resolve a replacement panel. Verify
+            # its native identity and bounds before carrying over manual ownership.
+            for key, attribute in (("automation_id", "AutomationId"), ("class_name", "ClassName"),
+                                   ("control_type", "ControlTypeName")):
+                if self.region.get(key) and getattr(control, attribute, "") != self.region[key]:
+                    return None
+            current = scanner._rect(control)
+            bounds, rectangle = frame["bounds"], self.region["normalized_rect"]
+            for edge in ("left", "top", "right", "bottom"):
+                horizontal = edge in {"left", "right"}
+                expected = bounds["left" if horizontal else "top"] + rectangle[edge]*bounds["width" if horizontal else "height"]
+                if abs(current[edge]-expected) > 2:
+                    return None
+        return layout
+
     def observe(self, *, root=False, route=()):
         from . import __version__
         from .mcp import scanner, automatic_layout, local_learning
@@ -235,6 +280,8 @@ class NativeBackend:
         observed_route=list(route or (previous or {}).get("route", []))
         popup_learning=bool(frame["scope"].get("kind")=="owned" and observed_route
                             and local_learning._menu_window(frame["root"]))
+        retained_layout = None if popup_learning or is_origin else self.existing_region_layout(frame)
+        retained_region = not dynamic_regions.is_dynamic(self.region) and (is_origin or retained_layout is not None)
         navigation_context=None
         scan_target=frame["target"]
         if popup_learning:
@@ -247,11 +294,12 @@ class NativeBackend:
                 popup_handles=[frame["target"]["handle"]],
                 entry_steps=step_ids([*self.root_entry,*observed_route],"entry"))
             scan_target=self.expected
-        elif is_origin and not dynamic_regions.is_dynamic(self.region):
+        elif retained_region:
             scope=self.library.scoped(self.region["page_id"])
-            layout=scope.learning_layout(self.app_id,frame["target"],region_id=self.region["id"])
+            layout=retained_layout or scope.learning_layout(self.app_id,frame["target"],region_id=self.region["id"])
         else:
-            old_regions=[r for r in self.library.read(self.app_id)["regions"] if previous and r["id"] in previous.get("region_ids",[])]
+            old_regions=[r for r in self.library.read(self.app_id)["regions"] if previous and r["id"] in previous.get("region_ids",[])
+                         and r.get("learning_source")=="deep-learning" and r.get("page_id")!=self.region["page_id"]]
             page_id=old_regions[0]["page_id"] if old_regions else "deep-"+identifier
             scope=self.library.scoped(page_id)
             source=self.folder/"deep-frame.png";frame["image"].save(source)
@@ -271,6 +319,8 @@ class NativeBackend:
                         if opener and "parent_control_id" not in region:
                             region["parent_control_id"] = opener
                     knowledge.save_region(self.directory,region)
+        known_ids = ({r["id"] for r in self.library.read(self.app_id)["controls"]}
+                     if retained_region and not is_origin and observed_route else set())
         result=(dict(observed_control_ids=[],truncated=False) if entry_only else
             scanner.scan_window(scan_target["title"],"","","",__version__,root=self.library.root,
                 max_controls=self.max_controls,strategy="local-visual",manual_layout=layout,semantic_mode="native",
@@ -280,6 +330,15 @@ class NativeBackend:
         snapshot=self.library.read(self.app_id)
         observed=set(result.get("observed_control_ids",[]))
         controls=[r for r in snapshot["controls"] if r["id"] in observed]
+        if retained_region and not is_origin and observed_route:
+            # Only newly discovered controls need this state's entry route.
+            # Existing controls keep their own prerequisites and manual edits;
+            # the shared region must never inherit one branch's navigation.
+            with image_storage._vault_lock(self.library.root):
+                for control in controls:
+                    if control["id"] not in known_ids and "entry_steps" not in control:
+                        control["entry_steps"] = step_ids([*self.root_entry, *observed_route], "entry")
+                        knowledge.save_control(self.directory, control)
         if is_origin and entry_id and entry_id not in observed:
             # A manually added entry can be omitted by visual detection. Include
             # it only after resolving it again inside this observed window.
@@ -311,7 +370,7 @@ class NativeBackend:
                     "window_scope":frame["scope"],"actions":["right-click"],"entry_steps":self.root_entry}
             source["control_type"]=source["location"].get("ControlType") or "PaneControl"
             knowledge.save_control(self.directory,source);controls.append(source)
-        region_ids=([self.region["id"]] if is_origin and not dynamic_regions.is_dynamic(self.region) else
+        region_ids=([self.region["id"]] if retained_region else
                     [r["id"] for r in snapshot["regions"] if r.get("page_id")==scope.page_id])
         if popup_learning:
             region_ids=list(dict.fromkeys(r["region_id"] for r in controls))

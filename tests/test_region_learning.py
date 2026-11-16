@@ -40,7 +40,8 @@ def backend(library,tmp_path,monkeypatch):
 
 def test_new_state_archives_regions_and_controls_without_replacing_manual_map(backend,library,monkeypatch):
     image=Image.new("RGB",(400,300),"white")
-    frame=dict(state_id="dialog",image=image,target=backend.expected,scope={"kind":"main"},issues=[])
+    frame=dict(state_id="dialog",image=image,target={**backend.expected,"handle":789,"title":"Dialog"},
+               scope=dict(kind="owned",class_name="Window",title="Dialog"),root=object(),issues=[])
     monkeypatch.setattr(backend,"stable_frame",lambda:frame)
     before=deepcopy(library.regions("demo"));entry=add_control(library);route=[workflows.click_step(entry)]
     calls=[]
@@ -57,6 +58,123 @@ def test_new_state_archives_regions_and_controls_without_replacing_manual_map(ba
     assert region["learning_source"]=="deep-learning" and region["entry_steps"][0]["target"]["control_id"]==entry["id"]
     assert calls[0]["observation_owner"]==backend.expected and calls[0]["strategy"]=="local-visual"
     assert backend.observe(route=[]) is result and len(calls)==1
+
+
+@pytest.fixture
+def content_frame(backend, monkeypatch):
+    from easy_uiauto import library_actions
+    from test_mcp_scanner import FakeControl
+    panel = FakeControl("工具栏", "PaneControl", (50, 60, 450, 180), automation_id="101")
+    panel.ClassName = "NativePanel"
+    root = FakeControl("Test", "WindowControl", (50, 60, 450, 360), [panel])
+    monkeypatch.setattr(library_actions, "resolve_record", lambda *a, **kw: panel)
+    return dict(state_id="new-content", image=Image.new("RGB", (400, 300)), target=backend.expected,
+                scope={"kind":"main"}, bounds=scanner._rect(root), root=root, issues=[])
+
+
+@pytest.mark.parametrize("drawn", [False, True])
+def test_changed_content_retains_manual_region_and_control_entry_routes(backend, library, monkeypatch, content_frame, drawn):
+    from easy_uiauto.mcp import automatic_layout
+    if drawn:
+        backend.region.pop("location")
+        knowledge.save_region(backend.directory, backend.region)
+    before = deepcopy(library.read("demo"))
+    entry = add_control(library)
+    entry.update(region_id=backend.region["id"], entry_steps=[], semantic_source="manual")
+    knowledge.save_control(backend.directory, entry)
+    route = [workflows.click_step(entry)]
+    monkeypatch.setattr(backend, "stable_frame", lambda: content_frame)
+    monkeypatch.setattr(automatic_layout, "propose", lambda *a: pytest.fail("repartitioned manual content area"))
+    scans = []
+    def scan(*args, **kwargs):
+        layout = kwargs["manual_layout"]; scans.append(layout)
+        assert layout["restrict_regions"] and layout["page_id"] == backend.region["page_id"]
+        assert [r["id"] for r in layout["regions"]] == [backend.region["id"].split(".", 1)[1]]
+        assert kwargs["navigation_context"] is None
+        new = {**entry, "id":"diagram", "page_id":layout["page_id"], "region_id":layout["regions"][0]["id"]}
+        new.pop("entry_steps")
+        # Simulate the scanner's preservation of saved prerequisites on rescans.
+        old = knowledge.find_control_record(backend.directory, new["id"])
+        knowledge.save_control(backend.directory, knowledge.merge_control_state(old[1] if old else {}, new))
+        return dict(observed_control_ids=[entry["id"], new["id"]], truncated=False)
+    monkeypatch.setattr(scanner, "scan_window", scan)
+    first = backend.observe(route=route)
+    content_frame["state_id"] = "another-content-state"
+    second = backend.observe(route=[workflows.click_step(entry, action="double-click")])
+    assert first["node_id"] != second["node_id"]
+    assert first["region_ids"] == second["region_ids"] == [backend.region["id"]]
+    snapshot = library.read("demo")
+    assert snapshot["regions"] == before["regions"] and snapshot["pages"] == before["pages"]
+    assert len(snapshot["controls"]) == 2 and len(scans) == 2
+    records = {r["id"]:r for r in snapshot["controls"]}
+    assert records[entry["id"]]["entry_steps"] == []
+    steps = library.entry_steps("demo", records["diagram"])
+    assert len(steps) == 1 and steps[0]["action"] == "click"
+    assert steps[0]["target"]["control_id"] == entry["id"]
+
+
+def test_resume_old_state_uses_valid_manual_region_without_deleting_old_page(backend, library, monkeypatch, content_frame):
+    old = {**backend.region, "id":"deep-old.region", "page_id":"deep-old", "learning_source":"deep-learning"}
+    knowledge.save_region(backend.directory, old)
+    backend.previous_graph = dict(states={"old-node":dict(id="old-node", fingerprint=content_frame["state_id"],
+                                                        region_ids=[old["id"]], route=[])})
+    monkeypatch.setattr(backend, "stable_frame", lambda:content_frame)
+    monkeypatch.setattr(scanner, "scan_window", lambda *a, **kw:dict(observed_control_ids=[], truncated=False))
+    result = backend.observe()
+    assert result["node_id"] == "old-node" and result["region_ids"] == [backend.region["id"]]
+    assert next(r for r in library.read("demo")["regions"] if r["id"] == old["id"]) == old
+
+
+@pytest.mark.parametrize("change", ["condition", "missing", "moved", "replacement", "owned", "other-window"])
+def test_different_layout_does_not_reuse_manual_region(backend, library, monkeypatch, content_frame, change):
+    from easy_uiauto import library_actions
+    from easy_uiauto.mcp.results import ActionError
+    if change == "condition":
+        backend.region["state_condition"] = {"kind":"selected"}
+        monkeypatch.setattr(region_actions, "condition_matches", lambda *a:False)
+    elif change == "missing":
+        def missing(*a, **kw):raise ActionError("control_not_found", "panel absent")
+        monkeypatch.setattr(library_actions, "resolve_record", missing)
+    elif change == "moved":
+        content_frame["root"]._children[0].BoundingRectangle.bottom = 220
+    elif change == "replacement":
+        content_frame["root"]._children[0].AutomationId = "different-panel"
+    elif change == "owned":
+        content_frame["scope"] = {"kind":"owned"}
+    else:
+        content_frame["target"] = {**backend.expected, "handle":999}
+    assert backend.existing_region_layout(content_frame) is None
+
+
+@pytest.mark.parametrize("code,reason", [("ambiguous_match", ""), ("control_not_found", "uia_access_denied")])
+def test_region_probe_errors_stop_before_scanning(backend, monkeypatch, content_frame, code, reason):
+    from easy_uiauto import library_actions
+    from easy_uiauto.mcp.results import ActionError
+    def fail(*a, **kw):raise ActionError(code, "cannot read panel", reason=reason)
+    monkeypatch.setattr(library_actions, "resolve_record", fail)
+    monkeypatch.setattr(backend, "stable_frame", lambda:content_frame)
+    monkeypatch.setattr(scanner, "scan_window", lambda *a, **kw:pytest.fail("scanned after failed probe"))
+    with pytest.raises(ActionError, match=code):backend.observe()
+
+
+def test_resized_main_requires_layout_review_without_writing_a_new_page(backend, library, monkeypatch, content_frame):
+    before = library.read("demo")
+    content_frame["bounds"]["width"] = 500
+    monkeypatch.setattr(backend, "stable_frame", lambda:content_frame)
+    with pytest.raises(ValueError, match="尺寸已改变"):backend.observe()
+    assert library.read("demo") == before
+
+
+def test_changed_layout_does_not_overwrite_previously_reused_manual_page(backend, library, monkeypatch, content_frame):
+    before = deepcopy(library.regions("demo")); page = deepcopy(library.page("demo"))
+    content_frame["root"]._children[0].BoundingRectangle.bottom = 240
+    backend.previous_graph = dict(states={"old-node":dict(id="old-node", fingerprint=content_frame["state_id"],
+                                                        region_ids=[backend.region["id"]], route=[])})
+    monkeypatch.setattr(backend, "stable_frame", lambda:content_frame)
+    monkeypatch.setattr(scanner, "scan_window", lambda *a, **kw:dict(observed_control_ids=[], truncated=False))
+    observed = backend.observe()
+    assert observed["region_ids"] != [backend.region["id"]]
+    assert library.regions("demo") == before and library.page("demo") == page
 
 
 def test_planner_missing_input_and_commit_policy_leave_explicit_blocks(backend,library,monkeypatch):
@@ -352,7 +470,9 @@ def test_full_update_reuses_flows_and_verifies_changed_navigation(backend,librar
     monkeypatch.setattr(region_actions,"open_region",lambda *a,**k:None)
     def frame():
         return dict(state_id=f"v{machine['version']}-{machine['state']}",image=Image.new("RGB",(400,300)),
-                    target=backend.expected,scope={"kind":"main"},issues=[])
+                    target=backend.expected if machine["state"]=="root" else {**backend.expected,"handle":789,"title":"Dialog"},
+                    scope={"kind":"main"} if machine["state"]=="root" else dict(kind="owned",title="Dialog",class_name="Window"),
+                    root=object(),issues=[])
     def scan(*args,**kwargs):
         layout=kwargs["manual_layout"];observed_pages.append((machine["version"],machine["state"],layout["page_id"]))
         ids={"root":["menu","toolbar"],"dialog":["fill"],"done":["result"]}[machine["state"]]

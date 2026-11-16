@@ -108,6 +108,16 @@ business operation to complete coverage. Read `complete`, `unfinished`, `issues`
 and `workflow_ids` from the task result. The progress report is also saved under
 the app's usage knowledge and `learning/*.json`.
 
+Exploration states and knowledge pages are distinct. When the main window, saved
+region boundaries and any configured state condition remain valid, content changes
+within that region reuse its page/region IDs and scan only that region. Newly
+discovered controls retain their observed entry steps; the shared region and
+existing controls keep their prerequisites. A picked region must still resolve to
+the same native panel and bounds. A resized window requires layout review; an
+independent dialog or changed panel/state may use a separate page. Do not create a
+second area merely because a diagram appeared or changed. Existing historical
+duplicate pages are not automatically migrated or deleted by relearning.
+
 For learning from one saved control, call `operation="deep-learn-control"` with its
 `control_id`, the same `app_id`/`vault`, and the selected main `window_handle`.
 The worker infers the saved parent region, restricts initial interactions to that

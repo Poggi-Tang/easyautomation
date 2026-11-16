@@ -53,6 +53,46 @@ def scan(layout,root):
 def records(root):return knowledge.load_index(knowledge.app_dir("chosen-app",root))["controls"]
 
 
+def test_deep_content_states_reuse_manual_region_through_real_scanner(local, monkeypatch):
+    from easy_uiauto import region_learning, workflows
+    from easy_uiauto.knowledge_library import KnowledgeLibrary
+    layout, root, window, button, detections, calls, _points = local
+    first = scan(layout, root)
+    store = KnowledgeLibrary(root)
+    store.save_capture("chosen-app", dict(image=str(store.asset("chosen-app", store.page("chosen-app")["image"])),
+        width=400, height=300, window_name="Example", window_class="WindowControl"))
+    store.confirm_layout("chosen-app")
+    region = store.regions("chosen-app")[0]
+    expected = dict(handle=1, process_id=123, class_name="WindowControl", title="Example")
+    monkeypatch.setattr(region_learning.configuration, "load_gui_configuration", lambda:dict(
+        api_url="https://example.invalid/v1", api_key="test", api_model="test"))
+    backend = region_learning.NativeBackend(store, "chosen-app", region, expected, root)
+    frame = dict(state_id="initial", image=Image.new("RGB", (400, 300)), target=expected,
+                 scope={"kind":"main"}, bounds=scanner._rect(window), root=window, issues=[])
+    monkeypatch.setattr(backend, "stable_frame", lambda:frame)
+    repeated = backend.observe()
+    assert {r["id"] for r in repeated["controls"]} == set(first["observed_control_ids"])
+    initial = next(r for r in repeated["controls"] if r["control_type"] == "ButtonControl")
+    button.Name = "New diagram"; button.AutomationId = "new-diagram"
+    monkeypatch.setattr(utils, "get_control_info", lambda *a, **kw:([
+        dict(ControlType="WindowControl", Name="Example"), dict(ControlType="GroupControl", Name="layout"),
+        dict(ControlType="ButtonControl", Name=button.Name, AutomationId=button.AutomationId)], button))
+    detections[:] = [element(1, "graphic-control", (40, 30, 160, 90))]
+    frame["state_id"] = "diagram-visible"
+    learned = backend.observe(route=[workflows.click_step(initial)])
+    frame["state_id"] = "diagram-updated"
+    again = backend.observe(route=[workflows.click_step(initial)])
+    assert learned["region_ids"] == again["region_ids"] == [region["id"]]
+    assert learned["controls"][0]["id"] == again["controls"][0]["id"]
+    assert learned["controls"][0]["id"] not in first["observed_control_ids"]
+    snapshot = store.read("chosen-app")
+    assert len(snapshot["pages"]) == len(snapshot["regions"]) == 1
+    assert len(snapshot["controls"]) == len(first["observed_control_ids"]) + 1
+    assert all(r["page_id"] == layout["page_id"] and r["region_id"] == "toolbar" for r in snapshot["controls"])
+    assert store.entry_steps("chosen-app", again["controls"][0])[0]["target"]["control_id"] == initial["id"]
+    assert calls == [(400, 150)] * 4
+
+
 @pytest.mark.parametrize("failure_first", [False, True])
 def test_one_stale_point_keeps_other_controls_and_failed_visual_observation(local, monkeypatch, failure_first):
     layout, root, _window, _button, detections, *_ = local
