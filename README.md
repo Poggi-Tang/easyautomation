@@ -777,6 +777,16 @@ its path. Open `index.html` there to view all three layers and resource links:
 
 The default `--profile ui` handles ordinary software screenshots, matching MCP
 local mode. Use `--profile block-diagram` for control and electrical model diagrams.
+The default UI path also detects light canvases where exterior wire pixels connect
+at least three independently bounded components. Within those canvases it applies
+the same outline, color-body and busbar recovery as block-diagram, while keeping
+surrounding UI and palette items separate. Panel borders are excluded from geometry
+analysis so embedded canvases retain their internal components. Inspect
+`diagram_recovery` in `ui-fusion.json` for canvas bounds, connection evidence and
+replacement counts. GUI learning, MCP, CLI and Python share this automatic path.
+Insufficient canvas evidence leaves the UI rules active; explicit block-diagram
+remains available for model images. Recovery does not verify electrical connectivity
+or execution.
 UI mode checks proposal pixels and a two-pixel context,
 rejecting regions without visible foreground or borders while retaining bordered
 empty inputs. Compact closed control borders protect graphics from OCR deduplication;

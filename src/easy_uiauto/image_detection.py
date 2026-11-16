@@ -765,12 +765,30 @@ def combine_detections(image, yolo, ocr, *, profile="block-diagram"):
         if t.get("layout_correction"):
             item["ocr_layout_correction"] = t["layout_correction"]
         elements.append(item)
+    if profile == 'ui':
+        from . import ui_diagram
+
+        diagram_context = ui_diagram.prepare(image, palette_report)
+        diagram = combine_detections(diagram_context['image'], yolo, ocr, profile='block-diagram')
+        diagram_report = ui_diagram.discover(image, diagram, diagram_context)
+        ui_report['diagram_recovery'] = diagram_report
+        if diagram_report['enabled']:
+            elements = ui_diagram.merge(elements, diagram, diagram_report)
+            graphics = [e for e in elements if e['entity_type']=='graphic-control']
+            geometry = [c for c in diagram['geometry_candidates'] if ui_diagram.in_canvas(c['rect'],diagram_report)]
+            colors = [e for e in graphics if e.get('color_evidence')]
+            unmatched = [p for p in unmatched if not p.get('rect') or not ui_diagram.in_canvas(p['rect'],diagram_report)]
+            unmatched.extend(p for p in diagram['unassigned_yolo_proposals']
+                             if p.get('rect') and ui_diagram.in_canvas(p['rect'],diagram_report))
+            restored_ocr = {e['raw_ocr_id'] for e in elements if e.get('diagram_canvas') and 'raw_ocr_id' in e}
+            rejected_text = [t for t in rejected_text if t.get('id') not in restored_ocr]
+            diagram_report['ui_filtering_stage'] = 'UI filtering precedes diagram recovery; final assignments are in elements'
     return dict(
         profile=profile, elements=image_analysis.complete_element_bounds(elements, *image.size, 1),
         ui_fusion=ui_report,
-        template_recovered_graphics=len(recovered_icons),
+        template_recovered_graphics=sum(e.get('source')=='local-template-recovery' for e in graphics),
         blank_rejected_graphics=sum(not r.get("accepted", True) for r in unmatched),
-        element_count=len(elements), graphic_count=len(graphics), text_count=len(texts),
+        element_count=len(elements), graphic_count=len(graphics), text_count=len(elements)-len(graphics),
         yolo_supported_graphics=sum(bool(e["yolo_proposal_ids"]) for e in graphics),
         geometry_recovered_graphics=sum(not e["yolo_proposal_ids"] for e in graphics),
         yolo_raw_count=len(yolo["boxes"]), geometry_candidates=geometry,

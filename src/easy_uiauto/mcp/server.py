@@ -2578,6 +2578,9 @@ async def analyze_ui_image(
             whole circuit model components instead of their internal symbols.
         engine: local (default) uses YOLOv9-E + RapidOCR PP-OCRv6; api opts into remote vision.
         profile: Local geometry profile: ui (default) or block-diagram for model diagrams.
+            UI automatically restores whole model components inside light canvases
+            when exterior wires connect at least three bounded bodies. Other UI
+            regions keep their normal fusion; explicit block-diagram forces diagram geometry.
         auto_crop: First crop a reliable outer window frame locally; ambiguous images
             stay unchanged. False keeps the full input. Input and crop offsets are saved.
         confidence: Local YOLO threshold, default 0.1.

@@ -87,6 +87,15 @@ visual_components rather than emitted as a second control. Inspect palette_layou
 in ui-fusion.json for headers, spacing, pixel bounds and grouped predictions.
 These inferred cells keep their full bounds during rectangle snapping. They are
 unscored layout observations, not verified identities or executable targets.
+The default UI pipeline also restores whole model components on light canvases
+when exterior wire pixels connect at least three separately bounded bodies.
+Canvas boundaries isolate this recovery from surrounding controls and palettes;
+panel borders are excluded from geometry analysis without resizing the image.
+Inspect diagram_recovery in ui-fusion.json for regions, connections, evidence IDs
+and replacement counts. It reuses current YOLO/OCR observations and the same
+geometry used by block-diagram. Explicit block-diagram remains available for
+model images without enough automatic canvas evidence. Recovery does not verify
+electrical semantics, connectivity or UI execution.
 Large UI screenshots pack populated regions into as many 1280px detail canvases
 as needed, reusing loaded weights. Oversized regions use overlapping native-scale
 tiles so small controls crossing a tile seam can appear intact in another tile.
