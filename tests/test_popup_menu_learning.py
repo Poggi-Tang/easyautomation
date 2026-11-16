@@ -170,6 +170,8 @@ def test_deep_observation_planner_and_tree_receive_current_popup_items(popup, mo
     backend.configure_learning(dict(states={},root="",entry_control_id=entry["id"]),"new",[entry["id"]],[])
     frame = dict(state_id="file-menu", image=Image.new("RGB", (220,160), "white"), target=popup_native,
                  scope=scope, bounds=scanner._rect(menu), root=menu, issues=[])
+    frame["visible_windows"]={backend.surface_key(popup_native)}
+    backend.transition=dict(before_windows=set(),controls={entry["id"]},steps=[workflows.click_step(entry)])
     monkeypatch.setattr(backend, "stable_frame", lambda: frame)
     observation = backend.observe(route=[workflows.click_step(entry)])
     assert {r["name"] for r in observation["controls"]} == set(NAMES)

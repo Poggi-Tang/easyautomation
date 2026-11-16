@@ -44,6 +44,8 @@ def test_new_state_archives_regions_and_controls_without_replacing_manual_map(ba
                scope=dict(kind="owned",class_name="Window",title="Dialog"),root=object(),issues=[])
     monkeypatch.setattr(backend,"stable_frame",lambda:frame)
     before=deepcopy(library.regions("demo"));entry=add_control(library);route=[workflows.click_step(entry)]
+    frame["visible_windows"]={backend.surface_key(frame["target"])}
+    backend.transition=dict(before_windows=set(),controls={entry["id"]},steps=route)
     calls=[]
     def scan(*args,**kw):
         calls.append(kw);layout=kw["manual_layout"]
@@ -165,15 +167,17 @@ def test_resized_main_requires_layout_review_without_writing_a_new_page(backend,
     assert library.read("demo") == before
 
 
-def test_changed_layout_does_not_overwrite_previously_reused_manual_page(backend, library, monkeypatch, content_frame):
+def test_changed_layout_stops_without_repartitioning_or_writing(backend, library, monkeypatch, content_frame):
     before = deepcopy(library.regions("demo")); page = deepcopy(library.page("demo"))
     content_frame["root"]._children[0].BoundingRectangle.bottom = 240
     backend.previous_graph = dict(states={"old-node":dict(id="old-node", fingerprint=content_frame["state_id"],
                                                         region_ids=[backend.region["id"]], route=[])})
     monkeypatch.setattr(backend, "stable_frame", lambda:content_frame)
-    monkeypatch.setattr(scanner, "scan_window", lambda *a, **kw:dict(observed_control_ids=[], truncated=False))
-    observed = backend.observe()
-    assert observed["region_ids"] != [backend.region["id"]]
+    monkeypatch.setattr(scanner, "scan_window", lambda *a, **kw:pytest.fail("scanned outside selected region"))
+    snapshot=deepcopy(library.read("demo"))
+    with pytest.raises(ValueError,match="未执行整窗"):
+        backend.observe()
+    assert library.read("demo")==snapshot
     assert library.regions("demo") == before and library.page("demo") == page
 
 
@@ -335,6 +339,9 @@ def test_manual_entry_omitted_by_scan_requires_fresh_visible_locator(backend,lib
     from easy_uiauto import library_actions,image_models
     record=add_control(library);record.update(region_id=backend.region["id"],semantic_source="manual")
     knowledge.save_control(library.directory("demo"),record)
+    sibling={**deepcopy(record),"id":"unrelated-sibling"}
+    descendant={**deepcopy(record),"id":"known-followup","entry_steps":[workflows.click_step(record)]}
+    knowledge.save_control(backend.directory,sibling);knowledge.save_control(backend.directory,descendant)
     backend.configure_learning(dict(states={},root="",entry_control_id=record["id"]),"new",[record["id"]],[])
     opened=[]
     def open_entry(lib,app,entry,*a,**k):
@@ -353,6 +360,7 @@ def test_manual_entry_omitted_by_scan_requires_fresh_visible_locator(backend,lib
                bounds=dict(left=0,top=0,width=400,height=300),issues=[])
     monkeypatch.setattr(backend,"stable_frame",lambda:deepcopy(frame))
     observed=backend.observe(root=True)
+    assert observed["excluded_entry_control_ids"]==[sibling["id"]]
     assert opened==[record["id"]]
     assert (record["id"] in [r["id"] for r in observed["controls"]])==resolved
     if not resolved:assert any("指定入口尚未定位" in reason for reason in observed["issues"])
@@ -472,7 +480,7 @@ def test_full_update_reuses_flows_and_verifies_changed_navigation(backend,librar
         return dict(state_id=f"v{machine['version']}-{machine['state']}",image=Image.new("RGB",(400,300)),
                     target=backend.expected if machine["state"]=="root" else {**backend.expected,"handle":789,"title":"Dialog"},
                     scope={"kind":"main"} if machine["state"]=="root" else dict(kind="owned",title="Dialog",class_name="Window"),
-                    root=object(),issues=[])
+                    root=object(),visible_windows={(789,456,"Window")} if machine["state"]!="root" else set(),issues=[])
     def scan(*args,**kwargs):
         layout=kwargs["manual_layout"];observed_pages.append((machine["version"],machine["state"],layout["page_id"]))
         ids={"root":["menu","toolbar"],"dialog":["fill"],"done":["result"]}[machine["state"]]
@@ -496,6 +504,7 @@ def test_full_update_reuses_flows_and_verifies_changed_navigation(backend,librar
     def configure(instance):
         monkeypatch.setattr(instance,"stable_frame",frame)
         def execute(steps):
+            instance.transition=dict(before_windows=frame()["visible_windows"],controls=set(instance.observed_controls),steps=deepcopy(steps))
             for step in steps:
                 if step["action"]=="inspect":continue
                 identifier=step["target"]["control_id"];executed.append((machine["version"],identifier))

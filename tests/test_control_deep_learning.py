@@ -139,6 +139,30 @@ def test_visible_sibling_in_changed_main_window_is_still_excluded(library, regio
     assert result["complete"] and backend.executed == ["toolbar", "fill"]
 
 
+@pytest.mark.parametrize("smuggled",[False,True])
+def test_entry_only_origin_still_excludes_known_siblings_after_navigation(library,region,smuggled):
+    backend=Backend(library);observe=backend.observe;plan=backend.plan
+    def observed(**kwargs):
+        result=observe(**kwargs)
+        result["excluded_entry_control_ids"]=["menu","context"]
+        if backend.current=="root":result["controls"]=[backend.controls["toolbar"]]
+        elif backend.current=="dialog":result["controls"].append(backend.controls["menu"])
+        return result
+    def planned(observation,route):
+        result=plan(observation,route)
+        if backend.current=="root":result["branches"]=result["branches"][1:2]
+        elif backend.current=="dialog":
+            steps=([workflows.click_step(backend.controls["fill"])] if smuggled else [])
+            steps.append(workflows.click_step(backend.controls["menu"]))
+            result["branches"].append(dict(name="无关入口",steps=steps))
+        return result
+    backend.observe=observed;backend.plan=planned
+    explorer=Explorer(library,"demo",region,backend,entry_control_id="toolbar")
+    result=explorer.run()
+    assert result["complete"] and backend.executed==["toolbar","fill"]
+    assert explorer.graph["excluded_entry_control_ids"]==["context","menu"]
+
+
 def test_start_screen_cannot_count_as_control_workflow_completion(library, region):
     backend = Backend(library)
     backend.plan = lambda observation, route:dict(terminal=True,branches=[],completion_checks=[

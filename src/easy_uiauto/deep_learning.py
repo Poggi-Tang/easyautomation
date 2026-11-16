@@ -213,7 +213,7 @@ class Explorer:
     def excluded_entries(self):
         if not self.scope_controls:return set()
         root = self.graph["states"].get(self.graph["root"], {})
-        return set(root.get("controls", [])) - self.scope_controls
+        return (set(root.get("controls", [])) | set(self.graph.get("excluded_entry_control_ids",[]))) - self.scope_controls
 
     def scope_reachable(self, identifier, trail=()):
         if identifier in trail or identifier == self.graph["root"]:return False
@@ -223,8 +223,11 @@ class Explorer:
 
     def branch_in_scope(self, branch, node=None, route=()):
         if not self.scope_controls:return True
+        targets={s.get("target",{}).get("control_id") for s in branch.get("steps",[]) if s.get("action")!="inspect"}
+        targets.add(self.branch_entry(branch))
+        if targets & self.excluded_entries():return False
         if node and self.follows_entry(node["id"], route):
-            return self.branch_entry(branch) not in self.excluded_entries()
+            return True
         return (self.branch_selected(branch) or
                 not self.entry_control_id and self.scope_reachable(branch.get("target_state")))
 
@@ -271,6 +274,8 @@ class Explorer:
 
     def node(self, observation, route):
         identifier = self.identifier(observation)
+        self.graph["excluded_entry_control_ids"]=sorted(set(self.graph.get("excluded_entry_control_ids",[])) |
+                                                        set(observation.get("excluded_entry_control_ids",[])))
         previous = self.graph["states"].get(identifier)
         followup = self.follows_entry(identifier, route)
         if identifier in self.replanned:return previous
