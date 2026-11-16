@@ -447,7 +447,7 @@ def execute(flow, controls, expected_window, *, parameters=None, progress=None, 
                     else:Controller.activate_window_handle(expected_window["handle"], control=main)
                 activated = True
                 control, _evidence = observe(step, step.get("timeout_seconds", 10))
-            item.update(target_evidence(control))
+            item.update(target_evidence(control, record=records[step["target"]["control_id"]]))
             if action != "inspect":
                 allowed = {expected_window["handle"], *(w["handle"] for w in owned_windows(expected_window))}
                 if int(uiautomation.GetForegroundWindow() or 0) not in allowed:

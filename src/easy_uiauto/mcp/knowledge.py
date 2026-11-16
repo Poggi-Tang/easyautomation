@@ -286,7 +286,7 @@ def merge_control_state(previous: dict, record: dict) -> dict:
             and record.get("semantic_source")!="manual"):
         for key in ("description","description_source","description_status","description_effect_record"):
             if key in previous:record[key]=previous[key]
-    for key in ("navigation_path", "navigation_source", "window_scope", "last_click_execution", "visual_observation", "hierarchy_parent", "region_behavior", "entry_steps"):
+    for key in ("navigation_path", "navigation_source", "window_scope", "last_click_execution", "locator_verification", "visual_observation", "hierarchy_parent", "region_behavior", "entry_steps"):
         if key not in record and key in previous:
             record[key] = previous[key]
     function = previous.get("function_verification", {})

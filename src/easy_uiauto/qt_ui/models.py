@@ -21,6 +21,12 @@ def control_status(record):
     status = record.get("status")
     verification = record.get("verification", {})
     if knowledge.runtime_quarantined(record):return "已隔离"
+    from ..locator_verification import current
+    check = current(record)
+    if check.get("status") == "passed":
+        return "图片定位已验证" if check.get("resolved_by") == "image" else "定位已验证"
+    if check.get("status") == "failed":
+        return "图片定位待验证" if record.get("control_type") == "VisualElement" else "定位待复核"
     if status == "quarantined":
         if verification.get("image")=="passed" or record.get("visual_fallback_ready"):
             return "功能待确认" if verification.get("location")=="passed" else "图片定位待验证"

@@ -106,7 +106,12 @@ def test_locator_image_preview_uses_explicit_image_and_verify_passes_image_conte
     window.verify()
     args,options=calls[0]
     assert args[0]=='verify' and args[1]['vault']==str(library.root) and args[1]['app_id']=='demo'
+    assert args[1]['control_id']==record['id']
     assert 'image' in args[1] and options['hide']
+    refresh=[]
+    monkeypatch.setattr(window,'reload',lambda *a,**kw:refresh.append((a,kw)))
+    args[2]({'message':'图片定位成功'})
+    assert refresh[0][1]==dict(message='图片定位成功',app_ids={'demo'})
     location['Img']='missing.png';window.locator.setPlainText(json.dumps(location))
     assert window.template_selector.count()==0 and window.template_preview.image_size==(0,0)
 

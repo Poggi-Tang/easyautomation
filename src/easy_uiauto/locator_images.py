@@ -58,8 +58,12 @@ def target_arguments(target):
     return {"rectangle": target.rectangle} if isinstance(target, ImageTarget) else {"control": target}
 
 
-def target_evidence(target):
+def target_evidence(target, *, record=None):
+    extra = {}
+    if record is not None and target is not None:
+        from .locator_verification import signature
+        extra = {"control_id": record.get("id"), "locator_signature": signature(record)}
     if isinstance(target, ImageTarget):
         return dict(resolved_by="image", rect=target.rectangle, template=str(target.reference),
-                    score=target.score, uniqueness=target.uniqueness)
-    return dict(resolved_by="location")
+                    score=target.score, uniqueness=target.uniqueness, **extra)
+    return dict(resolved_by="location", **extra)

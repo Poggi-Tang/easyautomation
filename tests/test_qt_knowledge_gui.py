@@ -60,6 +60,21 @@ def test_tree_status_distinguishes_native_visual_and_unconfirmed_records(record,
     assert control_status(record)==expected
 
 
+@pytest.mark.parametrize("method,kind",[("image","VisualElement"),("image","ButtonControl"),("location","ButtonControl")])
+def test_tree_uses_current_locator_evidence_instead_of_initial_scan_status(method,kind):
+    from easy_uiauto import locator_verification
+    from easy_uiauto.qt_ui.models import control_status
+    record=dict(status="observed",control_type=kind,semantic_status="uncertain",image="component.png")
+    result=dict(ok=True,resolved_by=method,locator_signature=locator_verification.signature(record))
+    assert locator_verification.apply(record,result,source="verify")
+    assert control_status(record)==("图片定位已验证" if method=="image" else "定位已验证")
+    record["quarantine"]={"active":True}
+    assert control_status(record)=="已隔离"
+    record.pop("quarantine")
+    locator_verification.apply(record,{**result,"ok":False},source="verify")
+    assert control_status(record)==("图片定位待验证" if kind=="VisualElement" else "定位待复核")
+
+
 def settle(app,predicate,seconds=5):
     deadline=time.monotonic()+seconds
     while time.monotonic()<deadline:

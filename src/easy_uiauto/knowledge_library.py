@@ -383,7 +383,10 @@ class KnowledgeLibrary:
                      "reason":"实际执行及结果校验通过" if execution.get("ok") and current and checked else "运行失败、缺少结果校验或运行证据已过期",
                      "definition_hash":execution.get("definition_hash"),"control_hash":execution.get("control_hash"),
                      "at":knowledge.utc_now()}}
-            return self.save_workflow(app_id, {**flow, "last_run": {**execution, "at": knowledge.utc_now()}})
+            self._save_execution_locators(self.directory(app_id), execution)
+            saved = self.save_workflow(app_id, {**flow, "last_run": {**execution, "at": knowledge.utc_now()}})
+            self._refresh(self.directory(app_id))
+            return saved
 
     def bind(self, app_id: str, name: str, window: dict) -> Path:
         if not name.strip():
@@ -792,6 +795,7 @@ class KnowledgeLibrary:
         """Persist input outcomes without claiming a business effect or releasing quarantine."""
         directory = self.directory(app_id)
         with image_storage._vault_lock(self.root):
+            self._save_execution_locators(directory, execution)
             found = knowledge.find_control_record(directory, control_id, include_quarantine=True)
             if found:
                 record = found[1]
@@ -802,6 +806,29 @@ class KnowledgeLibrary:
                 except (OSError, ValueError) as error:
                     execution["image_cleanup_error"] = str(error)
                 self._refresh(directory)
+
+    @staticmethod
+    def _save_execution_locators(directory, execution):
+        from . import locator_verification
+        for step in execution.get("steps", []):
+            if (not step.get("control_id") or step.get("skipped")
+                    or not (step.get("completed") or step.get("ok"))
+                    or step.get("resolved_by") not in {"image", "location"}):
+                continue
+            found = knowledge.find_control_record(directory, step["control_id"], include_quarantine=True)
+            if found and locator_verification.apply(found[1], {**step, "ok": True}, source="execution"):
+                knowledge.save_control(directory, found[1])
+
+    def save_locator_verification(self, app_id, control_id, result):
+        from . import locator_verification
+        directory = self.directory(app_id)
+        with image_storage._vault_lock(self.root):
+            found = knowledge.find_control_record(directory, control_id, include_quarantine=True)
+            if not found or not locator_verification.apply(found[1], result, source="verify"):
+                return False
+            knowledge.save_control(directory, found[1])
+            self._refresh(directory)
+            return True
 
     def capture_before_click(self, app_id: str, control_id: str, control, main_window,
                              *, update_reference: bool = False) -> dict:

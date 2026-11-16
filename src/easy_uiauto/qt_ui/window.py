@@ -968,9 +968,11 @@ class KnowledgeWindow(QMainWindow):
     def verify(self):
         if not self.maybe_save(self.verify):return
         window=self.bound_window()
-        if window:self.start_task("verify",dict(vault=str(self.library.root),app_id=self.app_id,
-            **{key:deepcopy(self.record.get(key)) for key in ("name","location","image","image_variants")},
-            window_scope=self.record.get("window_scope",{"kind":"main"}),window=window),lambda r:self.status_label.setText(r["message"]),hide=True)
+        app_id=self.app_id;key=self.current.get("key")
+        if window:self.start_task("verify",dict(vault=str(self.library.root),app_id=app_id,control_id=self.record["id"],
+            **{key:deepcopy(self.record.get(key)) for key in ("name","location","image","image_variants","image_sha256")},
+            window_scope=self.record.get("window_scope",{"kind":"main"}),window=window),
+            lambda r:self.reload(key,message=r["message"],app_ids={app_id}),hide=True)
 
     def execute_control(self):
         if not self.maybe_save(self.execute_control):return

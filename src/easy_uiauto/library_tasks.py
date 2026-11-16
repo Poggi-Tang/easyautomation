@@ -452,16 +452,27 @@ def _run_worker(folder: Path):
             import uiautomation
             from .utils import observe_control
             from .knowledge_library import KnowledgeLibrary
+            from .locator_verification import signature
 
             with uiautomation.UIAutomationInitializerInThread():
-                if request.get("window"):
-                    from .library_actions import bind_window, resolve_record
+                checked_signature = signature(request)
+                try:
+                    if request.get("window"):
+                        from .library_actions import bind_window, resolve_record
 
-                    main_window = bind_window(request["window"])
-                    control = resolve_record(request, request["window"], main_window,
-                                             directory=KnowledgeLibrary(request["vault"]).directory(request["app_id"]))
-                else:
-                    control = observe_control(request["location"])
+                        main_window = bind_window(request["window"])
+                        control = resolve_record(request, request["window"], main_window,
+                                                 directory=KnowledgeLibrary(request["vault"]).directory(request["app_id"]))
+                    else:
+                        control = observe_control(request["location"])
+                except Exception as error:
+                    if request.get("control_id"):
+                        try:
+                            KnowledgeLibrary(request["vault"]).save_locator_verification(request["app_id"],request["control_id"],
+                                dict(ok=False,locator_signature=checked_signature,error=str(error)))
+                        except Exception as storage_error:
+                            error.add_note(f"Saving locator evidence also failed: {storage_error}")
+                    raise
                 from .locator_images import ImageTarget,target_evidence
                 if isinstance(control,ImageTarget):
                     result=dict(ok=True,name=control.name,control_type="",**target_evidence(control),
@@ -471,7 +482,13 @@ def _run_worker(folder: Path):
                     result = {"ok": True, "name": control.Name, "control_type": control.ControlTypeName,
                               "resolved_by":"location", "rect": dict(left=rectangle.left, top=rectangle.top,
                                            right=rectangle.right, bottom=rectangle.bottom),
-                              "message": "UIA 定位成功；未点击控件，未改变验证或隔离状态"}
+                              "message": "UIA 定位成功；未点击控件"}
+                result["locator_signature"] = checked_signature
+                if request.get("control_id"):
+                    result["verification_saved"] = KnowledgeLibrary(request["vault"]).save_locator_verification(
+                        request["app_id"],request["control_id"],result)
+                    result["message"] += ("；定位验证结果已保存" if result["verification_saved"] else
+                                          "；控件已修改或删除，本次结果未写回")
         else:
             raise ValueError("未知知识库任务")
         progress("任务完成")

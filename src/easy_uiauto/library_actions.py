@@ -322,7 +322,7 @@ def execute_plan(plan: list[dict], expected: dict, *, progress=None, checkpoint=
             step = {"control_id": record["id"], "name": record.get("semantic_name") or record.get("name"),
                     "action": "click", "input_attempted": False, "completed": False}
             result["steps"].append(step)
-            step.update(target_evidence(control))
+            step.update(target_evidence(control, record=record))
             if before_click is not None:
                 step["before"] = before_click(record, control, window)
                 checkpoint(result)
