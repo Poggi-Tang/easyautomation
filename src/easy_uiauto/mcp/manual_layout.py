@@ -55,12 +55,57 @@ def assign_region(rectangle: dict, regions: list[dict]) -> tuple[str, str]:
     return matches[0][1], "contained" if matches[0][0] >= .999 else "largest-overlap"
 
 
+def adapt_to_window(layout: dict, window_rect: dict, *, window=None, owner=None) -> dict:
+    """Rebind picked regions on resize; keep manual crop geometry independent of identity."""
+    from copy import deepcopy
+    size = layout.get("image_size", {})
+    if (size.get("width"), size.get("height")) == (window_rect["width"], window_rect["height"]):return layout
+    result = deepcopy(layout)
+    if window is not None:
+        from ..library_actions import resolve_record
+        from . import knowledge, scanner
+        for region in result.get("regions", []):
+            if not region.get("location", {}).get("Xpath"):
+                break
+            control = resolve_record({**region, "window_scope":layout.get("window_scope", {"kind":"main"})},
+                                     owner or dict(handle=layout["window_handle"],process_id=layout["window_process_id"],
+                                                   class_name=layout["window_class"]), window)
+            for key, attribute in (("automation_id","AutomationId"),("class_name","ClassName"),("control_type","ControlTypeName")):
+                if region.get(key) and region[key] != getattr(control, attribute, ""):
+                    raise ValueError("区域定位命中了不同控件，请重新选择区域；已有控件属性保留")
+            rectangle = scanner._rect(control)
+            if any(rectangle[k] < window_rect[k]-2 for k in ("left","top")) or any(
+                    rectangle[k] > window_rect[k]+2 for k in ("right","bottom")):
+                raise ValueError("区域已超出当前窗口，未扩大扫描范围；请检查区域边界")
+            region["normalized_rect"] = knowledge.normalized_rect(rectangle, window_rect)
+        else:
+            validate_regions(result.get("regions", []))
+            result["image_size"] = dict(width=window_rect["width"],height=window_rect["height"])
+            result["geometry_adapted"] = "native-location"
+            return result
+    # A drawn crop has no native identity. Only reuse it when the reference frame
+    # is visually the same after scaling; never blindly stretch a changed layout.
+    reference = layout.get("reference_image")
+    if window is not None and reference:
+        from PIL import Image
+        from ..state_matching import same_image
+        from . import scanner
+        with Image.open(reference) as old:
+            same = same_image(old, scanner._screenshot_window(window_rect))
+        if same:
+            result = deepcopy(layout)
+            result["image_size"] = dict(width=window_rect["width"],height=window_rect["height"])
+            result["geometry_adapted"] = "scaled-reference"
+            return result
+    return layout
+
+
 def segmentation(layout: dict, window_rect: dict) -> dict:
     """Map user rectangles to a same-size screenshot; never infer a new layout."""
     size = layout.get("image_size", {})
     if (size.get("width"), size.get("height")) != (window_rect["width"], window_rect["height"]):
         raise ValueError(
-            "软件窗口尺寸已改变，请刷新截图并确认区域后再学习；"
+            "软件窗口尺寸已改变，尚未确认区域在新尺寸下的边界；请刷新截图确认区域，已有控件属性和学习记录保留；"
             f"记录尺寸={size.get('width')}×{size.get('height')}，"
             f"当前可见帧={window_rect['width']}×{window_rect['height']}，"
             f"window_handle={layout.get('window_handle', 0)}，坐标来源=visible-window-bounds")

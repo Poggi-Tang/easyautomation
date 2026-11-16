@@ -9,7 +9,7 @@ import re
 import time
 from urllib import request as urlrequest
 
-from . import workflows, relearning
+from . import workflows, relearning, state_matching
 from .deep_learning import Explorer, normalize_plan, step_ids, validate_plan
 from .mcp import configuration, image_storage, knowledge
 
@@ -148,10 +148,56 @@ class NativeBackend:
         nodes=self.previous_graph.get("states",{})
         exact=next((n for n in nodes.values() if n.get("fingerprint",n["id"])==frame["state_id"]),None)
         if exact:return exact
+        matching=[n for n in nodes.values() if state_matching.matches(n.get("state_evidence"),frame.get("state_evidence"))]
+        if not matching and root and self.mode=="resume":
+            matching=self.legacy_state_matches(frame,nodes)
+        if len(matching)==1:return matching[0]
         if self.mode=="resume":return None
         if root:return nodes.get(self.previous_graph.get("root"))
         matching=[n for n in nodes.values() if relearning.steps_key(n.get("route",[]),anchor=True)==relearning.steps_key(route,anchor=True)]
         return matching[0] if len(matching)==1 else None
+
+    def legacy_state_matches(self, frame, nodes):
+        """Old sessions kept hashes only. Recover from their actual before-action frames."""
+        from PIL import Image
+        from .library_actions import resolve_record
+        from .mcp import scanner
+        if frame.get("scope",{}).get("kind")!="main" or "root" not in frame:return []
+        records={r["id"]:r for r in self.library.read(self.app_id)["controls"]}
+        matching=[]
+        for node in nodes.values():
+            if node.get("state_evidence"):continue
+            images=[]
+            for branch in node.get("branches",[]):
+                steps=branch.get("evidence",{}).get("steps",[])
+                if steps and steps[0].get("before",{}).get("context_image"):
+                    before=steps[0]["before"]
+                    if before.get("main_rect") == dict(left=0.,top=0.,right=1.,bottom=1.):
+                        images.append(before["context_image"])
+            if not images:continue
+            same=False
+            for reference in images:
+                path=self.library.asset(self.app_id,reference)
+                if path:
+                    with Image.open(path) as image:
+                        if state_matching.same_image(image,frame["image"]):same=True;break
+            if not same or not node.get("controls"):continue
+            # Image equality alone cannot establish which controls can be used.
+            # A historical source frame plus fresh native bindings is required.
+            valid=True
+            for identifier in node["controls"]:
+                record=records.get(identifier)
+                if not record or not record.get("location",{}).get("Xpath"):
+                    valid=False;break
+                try:
+                    control=resolve_record(record,self.expected,frame["root"])
+                    if record.get("is_enabled_at_scan") is not None and bool(control.IsEnabled)!=record["is_enabled_at_scan"]:
+                        valid=False;break
+                    if scanner._rect(control)["width"]<2:valid=False;break
+                except Exception:
+                    valid=False;break
+            if valid:matching.append(node)
+        return matching
 
     def frame(self):
         import uiautomation as auto
@@ -211,6 +257,9 @@ class NativeBackend:
         visual = scanner._image_sha256(image) if len(signature)<3 or any(i["type"]=="CustomControl" for i in signature) else ""
         state_id=knowledge.stable_id("state",self.app_id,scope,str(main.Name),signature,visual)
         return dict(state_id=state_id,image=image,target=target,scope=scope,bounds=bounds,root=root,
+                    state_evidence=dict(version=1,scope=scope,
+                        native=knowledge.stable_id("native-state",self.app_id,scope,str(main.Name),signature),
+                        image=state_matching.visual_evidence(image)),
                     visible_windows={self.surface_key(w) for w in windows},issues=[])
 
     @staticmethod
@@ -248,9 +297,14 @@ class NativeBackend:
         for _ in range(12):
             self.progress("等待界面状态稳定")
             current=self.frame()
-            if previous==current["state_id"]:return current
-            previous=current["state_id"];time.sleep(.15)
+            if previous and self.same_state(current,previous):return current
+            previous=current;time.sleep(.15)
         raise ValueError("界面状态持续变化，未继续发送输入")
+
+    @staticmethod
+    def same_state(frame, observation):
+        return (frame["state_id"]==observation.get("state_id",observation.get("fingerprint",observation.get("id")))
+                or state_matching.matches(frame.get("state_evidence"),observation.get("state_evidence")))
 
     def existing_region_layout(self, frame):
         """A new exploration state need not be a new knowledge page."""
@@ -276,8 +330,7 @@ class NativeBackend:
             return None
         layout = scope.learning_layout(self.app_id, frame["target"], region_id=self.region["id"])
         layout["window_scope"]=window_scope
-        # Fixed manual rectangles remain authoritative, including regions drawn
-        # without a UIA locator. A resize requires reviewing their boundaries.
+        layout = manual_layout.adapt_to_window(layout, frame["bounds"], window=frame["root"], owner=self.expected)
         manual_layout.segmentation(layout, frame["bounds"])
         if self.region.get("location", {}).get("Xpath"):
             try:
@@ -293,7 +346,7 @@ class NativeBackend:
                 if self.region.get(key) and getattr(control, attribute, "") != self.region[key]:
                     return None
             current = scanner._rect(control)
-            bounds, rectangle = frame["bounds"], self.region["normalized_rect"]
+            bounds, rectangle = frame["bounds"], layout["regions"][0]["normalized_rect"]
             for edge in ("left", "top", "right", "bottom"):
                 horizontal = edge in {"left", "right"}
                 expected = bounds["left" if horizontal else "top"] + rectangle[edge]*bounds["width" if horizontal else "height"]
@@ -325,11 +378,16 @@ class NativeBackend:
         frame=self.stable_frame();identifier=frame["state_id"]
         previous=self.previous_node(frame,route,root)
         self.check_surface(frame,previous,root,route)
-        if identifier in self.cache:
-            self.observed_controls={r["id"] for r in self.cache[identifier]["controls"]}-self.excluded_entry_ids
-            return self.cache[identifier]
+        cached=self.cache.get(identifier) or next((o for o in self.cache.values() if self.same_state(frame,o)),None)
+        if cached and cached["image"].size == frame["image"].size:
+            self.observed_controls={r["id"] for r in cached["controls"]}-self.excluded_entry_ids
+            return cached
+        if cached and not previous:
+            # Keep the state identity, but refresh control geometry and the
+            # planner's screenshot after resizing during this learning run.
+            previous=dict(id=cached["node_id"],region_ids=cached["region_ids"],route=route or [])
         if root and self.mode=="resume" and self.previous_graph.get("states") and not previous:
-            raise ValueError("当前界面不在已有学习记录中；请恢复已知状态，软件已更新时选择“适配软件更新”")
+            raise ValueError("未能匹配已有学习状态，控件属性和已完成进度已保留。请恢复原界面后继续；同一界面可选“改进学习结果”重新观察并复用记录，只有软件版本变化才需“适配软件更新”")
         is_origin=root and (not previous or previous["id"]==self.previous_graph.get("root"))
         entry_id=self.previous_graph.get("entry_control_id")
         if entry_id and is_origin:
@@ -360,6 +418,10 @@ class NativeBackend:
         elif retained_region:
             scope=self.library.scoped(self.region["page_id"])
             layout=retained_layout or scope.learning_layout(self.app_id,frame["target"],region_id=self.region["id"])
+            if "bounds" in frame:
+                from .mcp import manual_layout
+                layout=manual_layout.adapt_to_window(layout,frame["bounds"],window=frame["root"],owner=self.expected)
+                manual_layout.segmentation(layout,frame["bounds"])
         else:
             selected_scope=self.region.get("window_scope") or self.library.scoped(self.region["page_id"]).page(self.app_id).get("window_scope",{"kind":"main"})
             same_surface=selected_scope.get("kind","main")==frame["scope"].get("kind") and all(
@@ -383,7 +445,9 @@ class NativeBackend:
                 scope.apply_automatic_layout(self.app_id,proposal)
                 scope.confirm_layout(self.app_id)
             layout=scope.learning_layout(self.app_id,frame["target"])
-            from .mcp.manual_layout import segmentation
+            from .mcp.manual_layout import segmentation, adapt_to_window
+            if "bounds" in frame:
+                layout=adapt_to_window(layout,frame["bounds"],window=frame["root"],owner=self.expected)
             segmentation(layout,dict(width=frame["image"].width,height=frame["image"].height))
             layout["restrict_regions"]=True
             with image_storage._vault_lock(self.library.root):
@@ -403,7 +467,7 @@ class NativeBackend:
                 max_controls=self.max_controls,strategy="local-visual",manual_layout=layout,semantic_mode="native",
                 progress=self.progress,show_overlay=False,observation_owner=self.expected,
                 navigation_context=navigation_context))
-        if self.stable_frame()["state_id"]!=identifier:raise ValueError("扫描期间界面改变，未根据过时结果操作")
+        if not self.same_state(self.stable_frame(),frame):raise ValueError("扫描期间界面改变，未根据过时结果操作")
         snapshot=self.library.read(self.app_id)
         observed=set(result.get("observed_control_ids",[]))
         controls=[r for r in snapshot["controls"] if r["id"] in observed]
@@ -465,6 +529,7 @@ class NativeBackend:
                     for k in ("left","top","right","bottom")}
                 planning_rects[control["id"]]=knowledge.normalized_rect(rectangle,frame["bounds"])
         observation=dict(state_id=identifier,node_id=previous["id"] if previous else identifier,
+            state_evidence=frame.get("state_evidence",{}),
             name=frame["target"]["title"],controls=controls,region_ids=region_ids,
             excluded_entry_control_ids=sorted(self.excluded_entry_ids),
             planning_rects=planning_rects,
@@ -498,7 +563,8 @@ class NativeBackend:
                      selected_control_ids=([] if observation.get("exploration_scope",{}).get("followup") else
                          observation.get("exploration_scope",{}).get("selected_control_ids",
                              sorted(self.revision.control_ids) if self.revision else [])),
-                     previous_learning=observation.get("previous_learning",{}))
+                     previous_learning={k:v for k,v in observation.get("previous_learning",{}).items()
+                                        if k != "state_evidence"})
         if len(json.dumps(payload,ensure_ascii=False))>160000:
             raise ValueError("本状态的规划资料超过容量，请细分区域或缩减测试输入后继续；未跳过控件")
         plan=normalize_plan(_request_plan(self.settings,payload,observation["image"]))
@@ -543,7 +609,7 @@ class NativeBackend:
         return plan
 
     def assert_state(self, observation):
-        if self.stable_frame()["state_id"]!=observation["state_id"]:
+        if not self.same_state(self.stable_frame(),observation):
             raise ValueError("当前界面已偏离计划状态，未继续操作")
 
     def execute(self, steps):
@@ -577,7 +643,7 @@ class NativeBackend:
         return self.execute([dict(action="inspect",target=checks[0]["target"],checks=checks,description="校验业务结果")])
 
     def restore(self, parent, child, return_steps, route):
-        if self.stable_frame()["state_id"]==parent["state_id"]:return
+        if self.same_state(self.stable_frame(),parent):return
         if return_steps:
             allowed={r["id"]:r for r in child["controls"]}
             for step in return_steps:
@@ -590,7 +656,7 @@ class NativeBackend:
                 if step["action"] in {"press-key","hotkey"} and str(step.get("text","")).lower() not in {"esc","escape","alt+left"}:
                     raise ValueError("返回快捷键尚未验证，请配置返回起点的组合动作")
             self.execute(return_steps)
-            if self.stable_frame()["state_id"]==parent["state_id"]:return
+            if self.same_state(self.stable_frame(),parent):return
         if self.reset_workflow_id:
             if any(not step.get("learning_replayable") for step in route):
                 raise ValueError("返回路径包含不能重复的业务操作，已停止并保留后续未完成分支")
@@ -598,7 +664,7 @@ class NativeBackend:
             workflows.execute(catalog[self.reset_workflow_id],self.library.read(self.app_id)["controls"],self.expected,
                               parameters=self.inputs,directory=self.directory,progress=self.progress,checkpoint=self.checkpoint)
             if self.root_entry or route:self.execute([*self.root_entry,*route])
-            if self.stable_frame()["state_id"]==parent["state_id"]:return
+            if self.same_state(self.stable_frame(),parent):return
         raise ValueError("无法确认已返回分支起点；已保留结果，请恢复起点或配置返回起点的组合动作后继续")
 
     def validate_affected_workflows(self, graph, budget):
@@ -626,7 +692,7 @@ class NativeBackend:
                 node=graph["states"].get(flow.get("entry_state"))
                 if not node:raise ValueError("无法确认流程起点；请在组合动作中打开正确起点后运行验证")
                 frame=self.stable_frame()
-                if frame["state_id"]!=(node.get("fingerprint") or node["id"]):raise ValueError("当前不是该流程起点，待恢复对应状态后验证")
+                if not self.same_state(frame,node):raise ValueError("当前不是该流程起点，待恢复对应状态后验证")
                 # Never replay a business step already attempted by this learning run.
                 if any(s.get("learning_effect")=="commit" for s in steps):
                     attempted={relearning.steps_key([s],anchor=True) for n in graph["states"].values()

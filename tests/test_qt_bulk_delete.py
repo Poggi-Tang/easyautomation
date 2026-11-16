@@ -71,7 +71,7 @@ def test_batch_delete_confirms_once_and_preserves_unselected_control(app,window,
 
 
 @pytest.mark.parametrize("source",["ai","visual-first",""])
-def test_legacy_region_can_be_deleted_from_toolbar_without_deleting_its_controls(app,window,monkeypatch,source):
+def test_deleting_region_from_toolbar_includes_its_controls(app,window,monkeypatch,source):
     directory=window.library.directory("demo")
     region=dict(id="manual-main.old-region",app_id="demo",page_id="manual-main",name="历史区域",source=source)
     knowledge.save_region(directory,region)
@@ -87,8 +87,9 @@ def test_legacy_region_can_be_deleted_from_toolbar_without_deleting_its_controls
     monkeypatch.setattr(QMessageBox,"question",lambda _p,_t,text,*a:(questions.append(text),QMessageBox.StandardButton.Yes)[1])
     delete.click();settle(app,lambda:not window.deleting and not window.jobs)
     assert len(questions)==1 and key not in window.model.nodes
-    assert len(window.library.read("demo")["controls"])==3
-    assert knowledge.find_control_record(directory,"control-one")[1]["region_id"]=="unassigned"
+    assert "共 2 项记录" in questions[0]
+    assert len(window.library.read("demo")["controls"])==2
+    assert knowledge.find_control_record(directory,"control-one") is None
     window.reload();settle(app,lambda:not window.jobs)
     assert key not in window.model.nodes
 
@@ -109,6 +110,29 @@ def test_classification_menu_explains_why_delete_is_disabled(app,window,monkeypa
     window.tree_menu(window.tree.visualRect(index).center())
     assert ("删除所选（0）",False) in menus[0]
     assert any("待归档是分类节点" in text and not enabled for text,enabled in menus[0])
+
+
+@pytest.mark.parametrize("confirm",[False,True])
+def test_parent_delete_includes_collapsed_filtered_children(app,window,monkeypatch,confirm):
+    directory=window.library.directory("demo")
+    child=knowledge.find_control_record(directory,"control-second")[1]
+    child.update(semantic_name="隐藏的子项",hierarchy_parent="control-one")
+    knowledge.save_control(directory,child)
+    parent_key="control:demo:control-one"
+    window.reload(parent_key);settle(app,lambda:not window.jobs)
+    window.search.setText("打开")
+    settle(app,lambda:not window.search_timer.isActive())
+    window.goto(parent_key);window.tree.collapseAll()
+    child_index=window.proxy.mapFromSource(window.model.nodes["control:demo:control-second"].index())
+    assert not child_index.isValid()
+    questions=[]
+    answer=QMessageBox.StandardButton.Yes if confirm else QMessageBox.StandardButton.No
+    monkeypatch.setattr(QMessageBox,"question",lambda _p,_t,text,*a:(questions.append(text),answer)[1])
+    window.remove();settle(app,lambda:not window.deleting and not window.jobs)
+    assert len(questions)==1 and "共 2 项记录" in questions[0] and "搜索隐藏" in questions[0]
+    remaining={r["id"] for r in window.library.read("demo")["controls"]}
+    assert remaining==({"control-third"} if confirm else {"control-one","control-second","control-third"})
+    if confirm:assert "已删除 2 项记录" in window.status_label.text()
 
 
 def test_cancellation_does_not_change_records_or_selection(window,monkeypatch):
@@ -173,7 +197,7 @@ def test_right_click_preserves_the_existing_multiselection(app,window,monkeypatc
 def test_background_failure_reenables_gui_and_keeps_records(app,window,monkeypatch):
     select(window,["control:demo:control-one","control:demo:control-second"])
     monkeypatch.setattr(QMessageBox,"question",lambda *a:QMessageBox.StandardButton.Yes)
-    def fail(_items):raise PermissionError("locked record")
+    def fail(_items,**_kwargs):raise PermissionError("locked record")
     monkeypatch.setattr(window.library,"archive_many",fail)
     errors=[];window.error=lambda title,error:errors.append(str(error))
     window.remove();settle(app,lambda:not window.deleting and not window.jobs)

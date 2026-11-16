@@ -1236,20 +1236,21 @@ class KnowledgeWindow(QMainWindow):
         if self.task or self.deleting or self.saving:return
         selected=deepcopy(self.selected_nodes());nodes=self.deletable_nodes(selected)
         if not nodes or not self.maybe_save(self.remove):return
+        items=[dict(app_id=n["app_id"],kind=n["kind"],id=n["record"]["id"],page_id=n["record"].get("page_id",PAGE_ID)) for n in nodes]
+        preview=self.library.expand_archive_items(items,self.snapshots)
         lines=[f"{self.snapshots.get(n['app_id'],{}).get('application',{}).get('name',n['app_id'])} / "
                +(n['record'].get('semantic_name') or n['record'].get('name') or n['record']['id']) for n in nodes]
-        prompt=f"删除选中的 {len(nodes)} 项记录？\n\n"+"\n".join(lines[:12])
+        prompt=f"删除选中的 {len(nodes)} 项及其子节点，共 {len(preview)} 项记录？\n\n"+"\n".join(lines[:12])
         if len(lines)>12:prompt+=f"\n……另有 {len(lines)-12} 项"
-        prompt+="\n\n记录移入归档。未选中的子项保留；直属控件解除区域归属，相关前置步骤和组合动作可能需要重新配置。"
+        prompt+="\n\n所有下级区域、控件一并移入归档，包括折叠或搜索隐藏的子项，图片保留。其他位置引用这些控件的前置步骤和组合动作需重新配置。"
         if len(selected)>len(nodes):prompt+=f"\n另有 {len(selected)-len(nodes)} 项软件、分类或区域状态分组节点保留。"
         if QMessageBox.question(self,"删除所选",prompt,QMessageBox.StandardButton.Yes|QMessageBox.StandardButton.No,
                                 QMessageBox.StandardButton.No)!=QMessageBox.StandardButton.Yes:return
         library=self.library;app_id=self.app_id or nodes[0]["app_id"]
-        items=[dict(app_id=n["app_id"],kind=n["kind"],id=n["record"]["id"],page_id=n["record"].get("page_id",PAGE_ID)) for n in nodes]
         self.deleting=True;self.centralWidget().setEnabled(False);self.progress.setRange(0,0);self.progress.show()
-        self.status_label.setText(f"正在删除 {len(items)} 项记录…")
+        self.status_label.setText(f"正在删除 {len(preview)} 项记录…")
         def archive():
-            try:return library.archive_many(items),None
+            try:return library.archive_many(items,expected_items=preview),None
             except Exception as error:return None,error
         def finished(value):
             self.deleting=False;self.centralWidget().setEnabled(True);self.progress.hide()

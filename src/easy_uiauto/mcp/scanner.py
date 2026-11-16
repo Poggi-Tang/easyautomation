@@ -1930,6 +1930,8 @@ def scan_window(
     window_rect = _window_rect(window)
     if window_rect["width"] <= 1 or window_rect["height"] <= 1:
         raise RuntimeError(f"Window has no visible bounds: {actual_name}")
+    if manual_layout is not None:
+        manual_layout = layout_rules.adapt_to_window(manual_layout, window_rect, window=window, owner=observation_owner)
     manual_segmentation = (layout_rules.segmentation(manual_layout, window_rect)
                            if manual_layout is not None else None)
 
@@ -2015,10 +2017,12 @@ def scan_window(
     }
     if manual_layout is not None:
         existing_page = directory / "pages" / f"{knowledge.slugify(page_id)}.md"
+        previous_page = {}
         if existing_page.is_file():
             previous_page, _body = knowledge.read_markdown(existing_page)
             page_record = {**previous_page, **page_record}
-        page_record.update(region_source="manual", observed_window_size={
+        page_record.update(region_source="manual", observed_window_size=(previous_page.get("observed_window_size")
+            if manual_layout.get("geometry_adapted") else None) or {
             "width": window_rect["width"], "height": window_rect["height"]},
             capture_geometry="visible-window-bounds", window_class=selected["class_name"])
         if strategy == "local-visual":
@@ -2027,17 +2031,21 @@ def scan_window(
     previous_regions = {r["id"]: r for _p, r in knowledge.iter_records(directory, "region")} if manual_layout is not None else {}
     for region in segmentation["regions"]:
         region_record = {key: value for key, value in region.items() if key != "rect"}
+        previous_region = previous_regions.get(f"{page_id}.{region['id']}", {})
+        rectangle = knowledge.normalized_rect(region["rect"], window_rect, relative=True)
+        if (manual_layout or {}).get("geometry_adapted"):
+            # The saved manual layout still refers to its original screenshot;
+            # adaptation only changes the coordinates of this scan.
+            rectangle = previous_region.get("normalized_rect") or rectangle
         knowledge.save_region(
             directory,
             {
-                **previous_regions.get(f"{page_id}.{region['id']}", {}),
+                **previous_region,
                 **region_record,
                 "id": f"{page_id}.{region['id']}",
                 "page_id": page_id,
                 "app_id": app_id,
-                "normalized_rect": knowledge.normalized_rect(
-                    region["rect"], window_rect, relative=True
-                ),
+                "normalized_rect": rectangle,
                 "geometry_role": "visual-hint-only",
                 **({"source": "manual"} if manual_layout is not None else {}),
             },

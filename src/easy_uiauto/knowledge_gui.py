@@ -1088,11 +1088,14 @@ class KnowledgeWindow:
     def remove(self):
         if not self.selected or self.selected[1] not in {"region", "control"}: return
         app_id, kind, record = self.selected
-        if not messagebox.askyesno("删除所选", "记录将移入软件目录的归档中，图片保留。删除区域后，其中控件会重新归档。是否继续？", parent=self.root): return
         try:
-            self.library.archive(app_id, kind, record["id"])
+            items=[dict(app_id=app_id,kind=kind,id=record["id"],page_id=record.get("page_id",PAGE_ID))]
+            preview=self.library.expand_archive_items(items,{app_id:self.library.read(app_id)})
+            prompt=f"删除所选节点及所有下级区域、控件，共 {len(preview)} 项记录？记录移入归档，图片保留。引用这些控件的前置步骤和组合动作需重新配置。"
+            if not messagebox.askyesno("删除所选",prompt,parent=self.root):return
+            self.library.archive_many(items,expected_items=preview)
             self.dirty = False; self.reload(f"app:{app_id}"); self.status.set("已移入 .easy_uiauto/archive，未删除图片。")
-        except (ValueError, OSError) as error: messagebox.showerror("删除失败", str(error), parent=self.root)
+        except (ValueError, OSError, RuntimeError) as error: messagebox.showerror("删除失败", str(error), parent=self.root)
 
     def export(self):
         if not self.app_id: return

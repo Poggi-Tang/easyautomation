@@ -169,7 +169,7 @@ def test_multilevel_popup_regions_attach_to_their_own_entry_and_survive_missing_
     second_region = graph["containers"]["second"]
     assert graph["parents"]["region:"+second_region] == "control:recent"
     assert graph["parents"]["control:project"] == "region:"+second_region
-    store.archive("demo", "control", "second")
+    store.archive("demo", "control", "second", recursive=False)
     graph = get_graph(store)
     assert "second" not in graph["containers"]
     assert graph["parents"]["control:project"] == "control:recent"
@@ -227,7 +227,7 @@ def test_rename_and_archive_do_not_change_learning_pixels_or_resurrect_deleted_r
     store.sync_dynamic_regions("demo")
     assert get_graph(store)["dynamic"][root]["name"] == "文件操作"
     child = store.save_dynamic_region("demo", "创建", dict(left=.1, top=.2, right=.6, bottom=.35), parent_region_id=root)
-    store.archive("demo", "region", root)
+    store.archive("demo", "region", root, recursive=False)
     store.sync_dynamic_regions("demo")
     assert "popup" not in get_graph(store)["containers"]
     assert get_graph(store)["parents"]["region:"+child] == "control:file"

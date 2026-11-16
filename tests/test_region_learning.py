@@ -164,11 +164,21 @@ def test_region_probe_errors_stop_before_scanning(backend, monkeypatch, content_
     with pytest.raises(ActionError, match=code):backend.observe()
 
 
-def test_resized_main_requires_layout_review_without_writing_a_new_page(backend, library, monkeypatch, content_frame):
+def test_resized_main_rebinds_region_without_writing_a_new_page(backend, library, monkeypatch, content_frame):
     before = library.read("demo")
-    content_frame["bounds"]["width"] = 500
+    content_frame["bounds"].update(width=500,right=550)
+    content_frame["image"]=Image.new("RGB",(500,300))
+    content_frame["root"]._children[0].BoundingRectangle.right=550
     monkeypatch.setattr(backend, "stable_frame", lambda:content_frame)
-    with pytest.raises(ValueError, match="尺寸已改变"):backend.observe()
+    layouts=[]
+    def scan(*a,**kw):
+        layouts.append(kw["manual_layout"])
+        return dict(observed_control_ids=[],truncated=False)
+    monkeypatch.setattr(scanner,"scan_window",scan)
+    observed=backend.observe()
+    assert observed["region_ids"]==[backend.region["id"]]
+    assert len(layouts)==1 and layouts[0]["image_size"]==dict(width=500,height=300)
+    assert layouts[0]["restrict_regions"] and len(layouts[0]["regions"])==1
     assert library.read("demo") == before
 
 
@@ -362,7 +372,7 @@ def test_manual_entry_omitted_by_scan_requires_fresh_visible_locator(backend,lib
     monkeypatch.setattr(scanner,"_window_rect",lambda _:dict(left=10,top=10,width=20,height=20))
     monkeypatch.setattr(scanner,"scan_window",lambda *a,**k:pytest.fail("single-entry origin must not rescan the region"))
     frame=dict(state_id="root",image=Image.new("RGB",(400,300)),target=backend.expected,scope={"kind":"main"},
-               bounds=dict(left=0,top=0,width=400,height=300),issues=[])
+               bounds=dict(left=0,top=0,width=400,height=300),root=object(),issues=[])
     monkeypatch.setattr(backend,"stable_frame",lambda:deepcopy(frame))
     observed=backend.observe(root=True)
     assert observed["excluded_entry_control_ids"]==[sibling["id"]]

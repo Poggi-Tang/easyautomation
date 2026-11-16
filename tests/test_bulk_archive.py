@@ -34,13 +34,13 @@ def test_many_controls_are_deduplicated_and_index_refreshed_once(library,monkeyp
     assert [r["id"] for r in knowledge.load_index(library.directory("demo"))["controls"]]==[original["id"]]
 
 
-def test_selected_parent_and_child_do_not_delete_unselected_descendants(library):
+def test_nonrecursive_archive_keeps_unselected_descendants(library):
     first=add_control(library)
     other={**first,"id":"other","navigation_path":[first["id"]]}
     knowledge.save_control(library.directory("demo"),other)
     identifier=library.save_region("demo","区域",dict(left=0,top=0,right=1,bottom=.5))
     region=next(r for r in library.regions("demo") if r["id"]==identifier)
-    library.archive_many([item(region,"region"),item(first)])
+    library.archive_many([item(region,"region"),item(first)],recursive=False)
     saved=library.read("demo")
     assert not any(r["id"]==identifier for r in saved["regions"])
     assert len(saved["controls"])==1
@@ -74,7 +74,7 @@ def test_archive_real_regions_preserves_other_regions_and_detaches_retained_cont
     collision={**first,"id":"unassigned-control","region_id":"unassigned","command":PAGE_ID+".unassigned.open"}
     for control in (first,second,collision):knowledge.save_control(directory,control)
     before={r["id"]:r for r in library.read("demo")["controls"]}
-    archived=library.archive("demo","region",region["id"])
+    archived=library.archive("demo","region",region["id"],recursive=False)
     library.sync_dynamic_regions("demo")
     snapshot=library.read("demo");after={r["id"]:r for r in snapshot["controls"]}
     assert archived.is_file() and [r["id"] for r in snapshot["regions"]]==[other["id"]]
@@ -133,8 +133,81 @@ def test_multiple_removed_dynamic_ancestors_are_skipped_for_retained_children(po
     child=store.save_dynamic_region("demo","子",dict(left=.1,top=.2,right=.6,bottom=.35),parent_region_id=root)
     grandchild=store.save_dynamic_region("demo","孙",dict(left=.12,top=.21,right=.58,bottom=.34),parent_region_id=child)
     regions={r["id"]:r for r in store.read("demo")["regions"]}
-    store.archive_many([item(regions[root],"region"),item(regions[child],"region")])
+    store.archive_many([item(regions[root],"region"),item(regions[child],"region")],recursive=False)
     after=store.read("demo");kept=next(r for r in after["regions"] if r["id"]==grandchild)
     assert not kept.get("parent_region_id") and kept["parent_control_id"]=="file"
     assert any(r["id"]=="popup" and r["region_behavior"]=="control" for r in after["controls"])
     assert all(any(r["id"]==old["id"] for r in after["controls"]) for old in records)
+
+
+@pytest.mark.parametrize("selection",["region","opener"])
+def test_recursive_archive_removes_nested_popup_and_hidden_sources_without_resurrection(popup,selection):
+    store,controls,static=popup
+    from easy_uiauto.mcp.dynamic_regions import build_tree
+    directory=store.directory("demo")
+    graph=build_tree(store.read("demo")["controls"],store.read("demo")["regions"])
+    root=graph["containers"]["popup"]
+    child=store.save_dynamic_region("demo","子",dict(left=.1,top=.2,right=.6,bottom=.35),parent_region_id=root)
+    grandchild=store.save_dynamic_region("demo","孙",dict(left=.12,top=.21,right=.58,bottom=.34),parent_region_id=child)
+    # A same-named toolbar command and a route reference outside the subtree survive.
+    sibling={**controls[0],"id":"toolbar-copy","navigation_path":[],"hierarchy_parent":""}
+    reference={**controls[2],"id":"referenced-elsewhere","hierarchy_parent":"",
+               "entry_steps":[dict(action="click",target="file")]}
+    for record in (sibling,reference):knowledge.save_control(directory,record)
+    before=store.read("demo");regions={r["id"]:r for r in before["regions"]}
+    selected=([item(regions[root],"region"),item(regions[child],"region")] if selection=="region"
+              else [item(controls[0])])
+    preview=store.expand_archive_items(selected,{"demo":before})
+    paths=store.archive_many(selected,expected_items=preview)
+    assert len(paths)==len(preview)==(6 if selection=="region" else 7)
+    assert len(set(paths))==len(paths) and all(p.is_file() for p in paths)
+    store.sync_dynamic_regions("demo")
+    after=store.read("demo")
+    assert {r["id"] for r in after["regions"]}=={static}
+    assert {r["id"] for r in after["controls"]}==({"file","toolbar-copy","referenced-elsewhere"}
+                                                 if selection=="region" else {"toolbar-copy","referenced-elsewhere"})
+    for identifier in ("toolbar-copy","referenced-elsewhere"):
+        assert next(r for r in after["controls"] if r["id"]==identifier)==next(r for r in before["controls"] if r["id"]==identifier)
+    assert all(store.asset("demo",r["image"]).is_file() for r in controls)
+    assert not {root,child,grandchild}&{r["id"] for r in knowledge.load_index(directory)["regions"]}
+
+
+def test_recursive_archive_follows_native_and_manual_control_hierarchy(library):
+    from easy_uiauto.mcp.protocol import location_from_xpath
+    parent=add_control(library);directory=library.directory("demo")
+    native={**parent,"id":"native-child","location":location_from_xpath([*parent["location"]["Xpath"],
+            dict(ControlType="TextControl",Name="Caption")])}
+    manual={**parent,"id":"manual-child","hierarchy_parent":"native-child","location":location_from_xpath([
+            *parent["location"]["Xpath"][:-1],dict(ControlType="ButtonControl",Name="Manual")])}
+    unrelated={**parent,"id":"sibling","location":location_from_xpath([
+            *parent["location"]["Xpath"][:-1],dict(ControlType="ButtonControl",Name="Other")])}
+    for record in (native,manual,unrelated):knowledge.save_control(directory,record)
+    paths=library.archive_many([item(parent),item(manual)])
+    assert len(paths)==3
+    assert [r["id"] for r in library.read("demo")["controls"]]==["sibling"]
+
+
+def test_recursive_archive_includes_owned_popup_page_but_preserves_other_states(library):
+    parent=add_control(library);directory=library.directory("demo")
+    region=dict(id="popup-page.form",app_id="demo",page_id="popup-page",name="对话框",
+                learning_source="deep-learning",window_scope=dict(kind="owned"),parent_control_id=parent["id"])
+    knowledge.save_region(directory,region)
+    child={**parent,"id":"dialog-field","page_id":"popup-page","region_id":"form"}
+    other={**child,"id":"other-state","page_id":"unrelated-page"}
+    for record in (child,other):knowledge.save_control(directory,record)
+    paths=library.archive_many([item(parent)])
+    assert len(paths)==3
+    assert not library.read("demo")["regions"]
+    assert [r["id"] for r in library.read("demo")["controls"]]==[other["id"]]
+
+
+def test_changed_subtree_requires_new_confirmation_before_any_write(library):
+    parent=add_control(library);directory=library.directory("demo")
+    selected=[item(parent)]
+    preview=library.expand_archive_items(selected,{"demo":library.read("demo")})
+    knowledge.save_control(directory,{**parent,"id":"new-child","hierarchy_parent":parent["id"]})
+    before=active_files(library)
+    with pytest.raises(ValueError,match="子节点已变化"):
+        library.archive_many(selected,expected_items=preview)
+    assert active_files(library)==before
+    assert not list((directory/".easy_uiauto/archive").glob("**/*.md"))

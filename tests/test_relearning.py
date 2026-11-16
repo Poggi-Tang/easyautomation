@@ -31,6 +31,27 @@ def test_continue_replans_blocked_descendant_after_inputs_and_references_change(
     assert len(list((library.directory("demo")/"learning/history").glob("*.json")))==1
 
 
+def test_matched_repaint_updates_saved_evidence_without_repeating_completed_branches(library, region):
+    first = Explorer(library,"demo",region,Backend(library))
+    assert first.run()["complete"]
+    old_branches = deepcopy(first.graph["states"]["root"]["branches"])
+    backend = Backend(library)
+    observe = backend.observe
+    def repainted(**kwargs):
+        observation = observe(**kwargs)
+        observation.update(node_id="root",state_id="repainted-root",state_evidence={"version":1,"image":"new-evidence"})
+        return observation
+    backend.observe = repainted
+    second = Explorer(library,"demo",region,backend)
+    assert second.run()["complete"]
+    assert not backend.executed and not backend.planned
+    saved = json.loads(second.path.read_text(encoding="utf-8"))
+    assert saved["states"]["root"]["fingerprint"] == "repainted-root"
+    assert saved["states"]["root"]["state_evidence"]["image"] == "new-evidence"
+    assert saved["states"]["root"]["branches"] == old_branches
+    assert saved["id"] == first.graph["id"] and set(saved["states"]) == set(first.graph["states"])
+
+
 def test_continue_retries_failure_before_input_but_keeps_uncertain_input(library,region):
     backend=Backend(library)
     def fail(steps):

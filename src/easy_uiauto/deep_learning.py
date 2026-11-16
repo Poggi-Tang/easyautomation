@@ -277,6 +277,8 @@ class Explorer:
         self.graph["excluded_entry_control_ids"]=sorted(set(self.graph.get("excluded_entry_control_ids",[])) |
                                                         set(observation.get("excluded_entry_control_ids",[])))
         previous = self.graph["states"].get(identifier)
+        if previous and observation.get("state_evidence"):
+            previous.update(fingerprint=observation["state_id"],state_evidence=deepcopy(observation["state_evidence"]))
         followup = self.follows_entry(identifier, route)
         if identifier in self.replanned:return previous
         if previous and self.mode == "improve" and not self.selected(previous) and not followup:return previous
@@ -327,7 +329,8 @@ class Explorer:
                     return_steps=step_ids(plan.get("return_steps", []), "back"),
                     completion_checks=plan.get("completion_checks", []), terminal=bool(plan.get("terminal")),
                     verified_terminal=False, issues=list(observation.get("issues", []))+list(plan.get("unresolved", [])),
-                    route=deepcopy(route), region_ids=observation.get("region_ids", []), fingerprint=observation["state_id"])
+                    route=deepcopy(route), region_ids=observation.get("region_ids", []), fingerprint=observation["state_id"],
+                    state_evidence=deepcopy(observation.get("state_evidence",{})))
         if self.scope_controls and not followup and node["terminal"]:
             node["terminal"] = False
             node["issues"].append("尚未从指定控件进入后续流程，不能仅凭起点界面确认学习完成")
@@ -488,7 +491,7 @@ class Explorer:
             observation = self.backend.observe(root=True, route=[])
             identifier = self.identifier(observation)
             if self.graph["root"] and identifier != self.graph["root"] and identifier not in self.graph["states"]:
-                raise ValueError("当前界面不在已有学习记录中；请恢复已知状态，软件已更新时选择“适配软件更新”")
+                raise ValueError("未能匹配已有学习状态，已保留进度；请恢复原界面后继续，同一界面可选“改进学习结果”重新观察，软件版本变化时再选“适配软件更新”")
             self.graph["root"] = self.graph["root"] or identifier;self.graph["status"]="running";self.persist()
             route=self.graph["states"].get(identifier,{}).get("route",[])
             self.visit(observation, route)

@@ -696,6 +696,7 @@ class KnowledgeLibrary:
         return {"app_id": app_id, "page_id": self.page_id, "page_name": page.get("name", "人工区域布局"),
                 "window_handle": window["handle"], "window_process_id": window["process_id"],
                 "window_class": window["class_name"], "image_size": page["observed_window_size"],
+                "reference_image": str(self.asset(app_id,page.get("layout_image","")) or ""),
                 "regions": regions, "restrict_regions": bool(region_id),
                 "window_scope": page.get("window_scope", {"kind":"main"})}
 
@@ -852,8 +853,9 @@ class KnowledgeLibrary:
                 knowledge.save_control(directory, record)
             return observation
 
-    def archive(self, app_id: str, kind: str, identifier: str) -> Path:
-        return self.archive_many([dict(app_id=app_id,kind=kind,id=identifier,page_id=self.page_id)])[0]
+    def archive(self, app_id: str, kind: str, identifier: str, *, recursive: bool = True) -> Path:
+        return self.archive_many([dict(app_id=app_id,kind=kind,id=identifier,page_id=self.page_id)],
+                                 recursive=recursive)[0]
 
     @staticmethod
     def archive_block_reason(kind: str, record: dict) -> str:
@@ -865,21 +867,64 @@ class KnowledgeLibrary:
             return "请选择具体的区域、控件或参考资料。"
         return "" if record.get("id") else "所选节点没有可删除的记录。"
 
-    def archive_many(self, items: list[dict]) -> list[Path]:
-        """Archive explicit selections; keep unselected descendants and refresh once per app."""
+    @staticmethod
+    def expand_archive_items(items: list[dict], snapshots: dict) -> list[dict]:
+        """Include the same descendants as the knowledge tree, even when collapsed/filtered.
+
+        Container controls hidden by a region are part of that region's archive;
+        leaving them active would recreate the deleted subtree on the next sync.
+        Navigation/workflow references outside the tree are not ownership edges.
+        """
+        graphs, records = {}, {}
+        for app_id in dict.fromkeys(item["app_id"] for item in items):
+            snapshot = snapshots[app_id]
+            graphs[app_id] = dynamic_regions.build_tree(snapshot.get("controls", []), snapshot.get("regions", []))
+            records[app_id] = {f"{kind}:{r['id']}": r
+                              for kind in ("control", "region", "reference")
+                              for r in snapshot.get(kind+"s", [])}
+            children = graphs[app_id]["children"]
+            for control_id, region_id in graphs[app_id]["containers"].items():
+                children.setdefault("region:"+region_id, []).append("control:"+control_id)
+                children.setdefault("control:"+control_id, []).append("region:"+region_id)
+        pending, result, seen = list(items), [], set()
+        for item in pending:
+            app_id = item["app_id"]
+            node = f"{item['kind']}:{item['id']}"
+            key = app_id, node
+            if key in seen:continue
+            seen.add(key);result.append(dict(item))
+            for child in graphs[app_id]["children"].get(node, []):
+                record = records[app_id].get(child)
+                if record is None:continue
+                kind, identifier = child.split(":", 1)
+                pending.append(dict(app_id=app_id, kind=kind, id=identifier, page_id=record.get("page_id", PAGE_ID)))
+        return result
+
+    def archive_many(self, items: list[dict], *, recursive: bool = True,
+                     expected_items: list[dict] | None = None) -> list[Path]:
+        """Archive selected subtrees atomically; recursive=False keeps their children."""
         if not items:return []
         with image_storage._vault_lock(self.root):
             batch=uuid4().hex;plan=[];seen=set();apps={}
+            for app_id in dict.fromkeys(item["app_id"] for item in items):
+                directory=self.directory(app_id)
+                apps[app_id]=(directory,knowledge.iter_records(directory))
+            if recursive:
+                snapshots={app_id:{kind+"s":[r for _p,r in records if r.get("kind")==kind]
+                                   for kind in ("control","region","reference")}
+                           for app_id,(_directory,records) in apps.items()}
+                items=self.expand_archive_items(items,snapshots)
+            if expected_items is not None:
+                def selection(values):
+                    return {(r["app_id"],r["kind"],r["id"],r.get("page_id",PAGE_ID)) for r in values}
+                if selection(items)!=selection(expected_items):
+                    raise ValueError("子节点已变化，请刷新知识库后重新确认删除范围")
             for item in items:
                 app_id,kind,identifier=item["app_id"],item["kind"],item["id"]
                 if kind not in {"control","region","reference"}:raise ValueError("只能删除区域、控件或参考资料")
                 key=app_id,kind,identifier
                 if key in seen:continue
                 seen.add(key)
-                if app_id not in apps:
-                    directory=self.directory(app_id)
-                    records=knowledge.iter_records(directory)
-                    apps[app_id]=(directory,records)
                 directory,records=apps[app_id]
                 matches=[(p,r) for p,r in records if r.get("kind")==kind and r.get("id")==identifier]
                 if len(matches)!=1:raise ValueError("所选记录已不存在，请刷新知识库")

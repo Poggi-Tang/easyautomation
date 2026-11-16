@@ -51,7 +51,7 @@ def test_navigation_edits_persist_and_removed_prerequisite_blocks_replay(library
     library.save_execution("demo", "new", {"ok": True, "input_attempted": True})
     saved = next(r for r in library.read("demo")["controls"] if r["id"] == "new")
     assert saved["status"] == target["status"] and saved["last_click_execution"]["ok"]
-    library.archive("demo", "control", parent["id"])
+    library.archive("demo", "control", parent["id"], recursive=False)
     with pytest.raises(ValueError, match="删除"):
         library.click_plan("demo", "new")
 
@@ -138,7 +138,7 @@ def test_archiving_region_preserves_children_and_images(library):
     identifier = library.save_region("demo", "区域", dict(left=0, top=0, right=1, bottom=.5))
     region = library.regions("demo")[0]
     image = library.asset("demo", region["image"])
-    archived = library.archive("demo", "region", identifier)
+    archived = library.archive("demo", "region", identifier, recursive=False)
     assert archived.is_file() and image.is_file()
     assert library.read("demo")["controls"][0]["region_id"] == "unassigned"
     assert knowledge.find_control_record(library.directory("demo"), record["id"])

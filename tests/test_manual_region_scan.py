@@ -59,6 +59,61 @@ def test_repeat_learning_updates_instead_of_duplicate_records(setup):
     assert second["knowledge_controls_total"] == 2
 
 
+def test_resized_region_scan_preserves_reference_layout_other_regions_and_control_edits(setup, monkeypatch):
+    from copy import deepcopy
+    from PIL import Image
+    from easy_uiauto import library_actions
+
+    _layout, native, root = setup
+    store = KnowledgeLibrary(root)
+    store.bind("chosen-app", "Demo", dict(title="Example", class_name="WindowControl"))
+    source = root / "source.png"
+    _test_screen().save(source)
+    store.save_capture("chosen-app", dict(image=str(source), width=400, height=300,
+                                          window_name="Example", window_class="WindowControl"))
+    region_id = store.save_region("chosen-app", "工具栏", dict(left=0, top=0, right=1, bottom=.5), "toolbar")
+    store.save_region("chosen-app", "内容区", dict(left=0, top=.5, right=1, bottom=1), "content")
+    region = next(r for r in store.regions("chosen-app") if r["id"] == region_id)
+    region.update(location={"Xpath":[dict(ControlType="PaneControl", AutomationId="toolbar")]},
+                  automation_id="toolbar", class_name="PaneControl", control_type="PaneControl")
+    knowledge.save_region(store.directory("chosen-app"), region)
+    store.confirm_layout("chosen-app")
+    run(store.learning_layout("chosen-app", native), root)
+    record = next(r for r in store.read("chosen-app")["controls"] if r["name"] == "Save")
+    store.update_control("chosen-app", record["id"], name="保存工程", description="人工填写的说明",
+                         aliases=["存盘"], location=record["location"], match_mode="identity")
+    before = deepcopy(store.read("chosen-app"))
+    reference = deepcopy(store.page("chosen-app"))
+    main = scanner.uiautomation.ControlFromHandle(1)
+    button, label = main.GetChildren()
+    panel = FakeControl("工具栏", "PaneControl", (0, 0, 800, 150), automation_id="toolbar")
+    monkeypatch.setattr(library_actions, "resolve_record", lambda *a, **kw: panel)
+    monkeypatch.setattr(scanner, "_window_rect", scanner._rect)
+    monkeypatch.setattr(scanner, "_screenshot_window", lambda r: Image.new("RGB", (r["width"], r["height"]), "white"))
+    for width, height, left in ((800, 600, 600), (400, 300, 40)):
+        main.BoundingRectangle.right = width
+        main.BoundingRectangle.bottom = height
+        panel.BoundingRectangle.right = width
+        button.BoundingRectangle.left = left
+        button.BoundingRectangle.right = left + 120
+        label.BoundingRectangle.top = height - 80
+        label.BoundingRectangle.bottom = height - 50
+        result = run(store.learning_layout("chosen-app", native, region_id=region_id), root)
+        current = store.read("chosen-app")
+        assert result["observed_control_ids"] == [record["id"]]
+        assert result["unassigned_controls"] == 0
+        assert {r["id"] for r in current["controls"]} == {r["id"] for r in before["controls"]}
+        updated = next(r for r in current["controls"] if r["id"] == record["id"])
+        assert updated["description"] == "人工填写的说明" and updated["semantic_name"] == "保存工程"
+        assert updated["region_id"] == "toolbar" and updated["normalized_rect"]["left"] == left / width
+        assert next(r for r in current["controls"] if r["name"] == "Heading") == next(
+            r for r in before["controls"] if r["name"] == "Heading")
+        assert {r["id"]:r["normalized_rect"] for r in current["regions"]} == {
+            r["id"]:r["normalized_rect"] for r in before["regions"]}
+        assert store.page("chosen-app")["observed_window_size"] == reference["observed_window_size"]
+        assert store.page("chosen-app")["layout_image"] == reference["layout_image"]
+
+
 def test_expanded_menu_container_saves_dynamic_region_during_learning(setup, monkeypatch):
     layout, _native, root = setup
     run(layout, root)
