@@ -95,13 +95,26 @@ def test_source_setup_installs_once_and_updates_same_version_source(tmp_path):
 if (-not $NoIntegrate) { throw "GUI must not change MCP integration" }
 New-Item -ItemType Directory -Path (Join-Path $Target "python/Lib/site-packages/easy_uiauto/qt_ui") -Force > $null
 Set-Content -LiteralPath (Join-Path $Target "python/pythonw.exe") -Value "fake"
+Set-Content -LiteralPath (Join-Path $Target "python/python.exe") -Value "fake"
 Set-Content -LiteralPath (Join-Path $Target "python/Lib/site-packages/easy_uiauto/qt_ui/window.py") -Value "fake"
 Add-Content -LiteralPath (Join-Path $Target "calls.txt") -Value "install"
 $global:LASTEXITCODE = 0
 ''', encoding="utf-8-sig")
     target = tmp_path / "installed gui"
-    command = ["cmd.exe", "/d", "/c", "setup.bat",
-               "-Target", str(target), "-NoLaunch", "-NoShortcut"]
+    harness = source / "fallback.ps1"
+    harness.write_text('''param([string]$Target)
+function Get-Command { $null }
+$global:FallbackTestTarget = $Target
+Set-Item -LiteralPath ("Function:\\" + (Join-Path $Target "python/python.exe")) -Value {
+    if ($args -contains "install") {
+        Add-Content -LiteralPath (Join-Path $global:FallbackTestTarget "calls.txt") -Value "source-update"
+    }
+    $global:LASTEXITCODE = 0
+}
+& (Join-Path $PSScriptRoot "scripts/gui_setup.ps1") -Target $Target -NoLaunch -NoShortcut
+''', encoding="utf-8-sig")
+    command = ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(harness),
+               "-Target", str(target)]
     for _ in range(2):
         result = subprocess.run(command, cwd=source, stdin=subprocess.DEVNULL, capture_output=True, timeout=30)
         assert result.returncode == 0, result.stderr.decode(errors="replace")
@@ -158,3 +171,87 @@ Set-Item -LiteralPath ("Function:\\" + $gpuTestCommand) -Value {
     assert (result.returncode != 0) == failure, result.stderr.decode(errors="replace")
     args = json.loads((source / "gpu-args.json").read_text(encoding="utf-8-sig"))
     assert args == ["-I", "-X", "utf8", str(source / "scripts/install_gpu.py"), "--cuda-index", "cu130"]
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows PowerShell setup")
+@pytest.mark.parametrize("runtime", ["fresh", "managed", "venv"])
+@pytest.mark.parametrize("failure", ["", "install", "verify"])
+def test_source_setup_reuses_python_without_bootstrap_download(tmp_path, runtime, failure):
+    source = tmp_path / "source with spaces"
+    scripts = source / "scripts"
+    scripts.mkdir(parents=True)
+    module = source / "src/easy_uiauto/qt_gui.py"
+    module.parent.mkdir(parents=True)
+    module.write_text("first")
+    manifest = source / "pyproject.toml"
+    manifest.write_text('version = "1.0"')
+    (source / "MANIFEST.in").write_text("include setup.bat")
+    shutil.copy2(ROOT / "scripts/gui_setup.ps1", scripts / "gui_setup.ps1")
+    (scripts / "full_setup.ps1").write_text('throw "Unexpected Python download"')
+    target = tmp_path / "installed gui"
+    if runtime != "fresh":
+        folder = target / "python" / ("Scripts" if runtime == "venv" else "")
+        folder.mkdir(parents=True)
+        (folder / "python.exe").write_text("fake")
+        (folder / "pythonw.exe").write_text("fake")
+    harness = source / "check.ps1"
+    harness.write_text(r'''param([string]$Target, [string]$Failure)
+$ErrorActionPreference = "Stop"
+$global:TestTarget = $Target
+$global:TestFailure = $Failure
+function Get-Command { [pscustomobject]@{ Source = "fake-local-python" } }
+$invokePython = {
+    $values = @($args)
+    New-Item -ItemType Directory -Path $global:TestTarget -Force > $null
+    ConvertTo-Json -InputObject $values -Compress | Add-Content (Join-Path $global:TestTarget "calls.jsonl") -Encoding UTF8
+    $global:LASTEXITCODE = 0
+    if ($values -contains "venv") {
+        $folder = Join-Path $global:TestTarget "python/Scripts"
+        New-Item -ItemType Directory -Path $folder -Force > $null
+        Set-Content (Join-Path $folder "python.exe") "fake"
+        Set-Content (Join-Path $folder "pythonw.exe") "fake"
+    }
+    if ($values -contains "install") {
+        if ($global:TestFailure -eq "install") { $global:LASTEXITCODE = 9; return }
+        $folder = Join-Path $global:TestTarget "python/Lib/site-packages/easy_uiauto/qt_ui"
+        New-Item -ItemType Directory -Path $folder -Force > $null
+        Set-Content (Join-Path $folder "window.py") "fake"
+    }
+    if (($values -contains "from easy_uiauto import qt_gui, local_image_worker") -and $global:TestFailure -eq "verify") {
+        $global:LASTEXITCODE = 8
+    }
+}
+Set-Item -LiteralPath "Function:\fake-local-python" -Value $invokePython
+Set-Item -LiteralPath ("Function:\" + (Join-Path $Target "python/python.exe")) -Value $invokePython
+Set-Item -LiteralPath ("Function:\" + (Join-Path $Target "python/Scripts/python.exe")) -Value $invokePython
+& (Join-Path $PSScriptRoot "scripts/gui_setup.ps1") -Target $Target -NoLaunch -NoShortcut
+''', encoding="utf-8-sig")
+    command = ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(harness),
+               "-Target", str(target)]
+    result = subprocess.run(command, capture_output=True, timeout=30)
+    assert result.returncode == 0, result.stderr.decode(errors="replace")
+    marker = target / "gui-source.json"
+    original_marker = marker.read_bytes()
+    calls_file = target / "calls.jsonl"
+    def calls():
+        return [json.loads(line.lstrip("\ufeff")) for line in calls_file.read_text(encoding="utf-8-sig").splitlines()]
+    initial = calls()
+    assert sum("venv" in args for args in initial) == (runtime == "fresh")
+    assert any(str(source)+"[full]" in args for args in initial)
+    result = subprocess.run(command, capture_output=True, timeout=30)
+    assert result.returncode == 0
+    assert calls() == initial  # No source change: no install/probe/network.
+    module.write_text("second")
+    result = subprocess.run(command + (["-Failure", failure] if failure else []), capture_output=True, timeout=30)
+    assert (result.returncode != 0) == bool(failure), result.stderr.decode(errors="replace")
+    assert any("--no-deps" in args and str(source) in args for args in calls()[len(initial):])
+    if failure:
+        assert marker.read_bytes() == original_marker
+        assert b"GUI is ready" not in result.stdout
+        return
+    assert marker.read_bytes() != original_marker
+    before_manifest_change = len(calls())
+    manifest.write_text('version = "1.1"')
+    result = subprocess.run(command, capture_output=True, timeout=30)
+    assert result.returncode == 0, result.stderr.decode(errors="replace")
+    assert any(str(source)+"[full]" in args for args in calls()[before_manifest_change:])

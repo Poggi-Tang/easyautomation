@@ -64,18 +64,68 @@ if (Test-Path -LiteralPath (Join-Path $guiRoot "gui-distribution.json")) {
     if (Test-Path -LiteralPath $markerPath) {
         try { $marker = Get-Content -LiteralPath $markerPath -Raw | ConvertFrom-Json } catch { $marker = $null }
     }
-    $launchFile = Join-Path $Target "python\pythonw.exe"
+    # Reuse a managed runtime or source venv before considering a download.
+    $runtimePython = Join-Path $Target "python\python.exe"
+    $runtimeHome = Join-Path $Target "python"
+    if (Test-Path -LiteralPath (Join-Path $runtimeHome "Scripts\python.exe")) {
+        $runtimePython = Join-Path $runtimeHome "Scripts\python.exe"
+    }
+    $launchFile = Join-Path (Split-Path -Parent $runtimePython) "pythonw.exe"
     $installedGui = Join-Path $Target "python\Lib\site-packages\easy_uiauto\qt_ui\window.py"
-    if (-not $marker -or $marker.fingerprint -ne $fingerprint -or -not (Test-Path -LiteralPath $launchFile) -or -not (Test-Path -LiteralPath $installedGui)) {
-        Write-Host "Installing this GUI source and its local models. The first run needs Internet access."
-        & (Join-Path $PSScriptRoot "full_setup.ps1") -Target $Target -NoIntegrate
-        if ($LASTEXITCODE -ne 0) { throw "GUI installation failed ($LASTEXITCODE)." }
-        @{ fingerprint = $fingerprint; source = $guiRoot } | ConvertTo-Json | Set-Content -LiteralPath $markerPath -Encoding UTF8
+    if (-not $marker -or $marker.fingerprint -ne $fingerprint -or -not (Test-Path -LiteralPath $runtimePython) -or -not (Test-Path -LiteralPath $launchFile) -or -not (Test-Path -LiteralPath $installedGui)) {
+        if (-not (Test-Path -LiteralPath $runtimePython)) {
+            $localPython = $null
+            $probe = "import sys,struct,venv; sys.exit(0 if sys.version_info >= (3,11) and struct.calcsize('P') == 8 else 1)"
+            foreach ($command in @("py", "python")) {
+                $candidate = Get-Command $command -CommandType Application -ErrorAction SilentlyContinue
+                if (-not $candidate -or $candidate.Source -match '[\\/]WindowsApps[\\/]') { continue }
+                $candidateArgs = @()
+                if ($command -eq "py") { $candidateArgs = @("-3") }
+                & $candidate.Source @candidateArgs -I -c $probe
+                if ($LASTEXITCODE -eq 0) {
+                    $localPython = $candidate.Source
+                    break
+                }
+            }
+            if ($localPython) {
+                if ((Test-Path -LiteralPath $runtimeHome) -and
+                    (Get-ChildItem -LiteralPath $runtimeHome -Force | Select-Object -First 1)) {
+                    throw "Incomplete Python environment at $runtimeHome. Choose a new -Target or repair that environment."
+                }
+                Write-Host "Creating a GUI environment with local Python: $localPython (no Python download)."
+                & $localPython @candidateArgs -I -m venv $runtimeHome
+                if ($LASTEXITCODE -ne 0) { throw "Could not create the GUI Python environment." }
+                $runtimePython = Join-Path $runtimeHome "Scripts\python.exe"
+                $launchFile = Join-Path $runtimeHome "Scripts\pythonw.exe"
+            }
+        }
+        $dependencyFingerprint = (Get-FileHash -LiteralPath (Join-Path $guiRoot "pyproject.toml") -Algorithm SHA256).Hash
+        if (Test-Path -LiteralPath $runtimePython) {
+            Write-Host "Updating local GUI source using $runtimePython (no Python download)."
+            $installArguments = @("-I", "-m", "pip", "--isolated", "install")
+            if ($marker -and $marker.dependencyFingerprint -eq $dependencyFingerprint -and (Test-Path -LiteralPath $installedGui)) {
+                # A local source requirement is rebuilt/reinstalled even at the same version.
+                $installArguments += @("--no-deps", $guiRoot)
+            } else {
+                Write-Host "Checking GUI and image dependencies; missing packages may be downloaded."
+                $installArguments += ($guiRoot + "[full]")
+            }
+            & $runtimePython @installArguments
+            if ($LASTEXITCODE -ne 0) { throw "GUI source installation failed; the source marker was not updated." }
+            & $runtimePython -I -c "from easy_uiauto import qt_gui, local_image_worker"
+            if ($LASTEXITCODE -ne 0) { throw "GUI import verification failed; the source marker was not updated." }
+        } else {
+            Write-Host "No local 64-bit Python 3.11+ found. Preparing the complete runtime and models."
+            & (Join-Path $PSScriptRoot "full_setup.ps1") -Target $Target -NoIntegrate
+            if ($LASTEXITCODE -ne 0) { throw "GUI installation failed ($LASTEXITCODE)." }
+        }
+        @{ fingerprint = $fingerprint; dependencyFingerprint = $dependencyFingerprint; source = $guiRoot } |
+            ConvertTo-Json | Set-Content -LiteralPath $markerPath -Encoding UTF8
     }
     $launchArguments = "-I -X utf8 -m easy_uiauto.library_launcher"
     $workingDirectory = $Target
     $shortcutIcon = Join-Path $Target "python\Lib\site-packages\easy_uiauto\resources\easy-uiauto.ico"
-    $inferencePython = Join-Path $Target "python\python.exe"
+    $inferencePython = $runtimePython
 }
 
 if ($Gpu) {

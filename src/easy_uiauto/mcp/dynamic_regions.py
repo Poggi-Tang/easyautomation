@@ -134,6 +134,15 @@ def build_tree(controls: list[dict], regions: list[dict]) -> dict:
             containers[identifier] = containers[primary]
     dynamic = {i: r for i, r in dynamic.items() if r.get("source") != "dynamic-container"
                or isinstance(r.get("source_control_id"), str) and containers.get(r["source_control_id"]) == i}
+    # Region context-menu targets are executable aliases of an existing region,
+    # not another visible widget. The stable ID also recognizes older records.
+    for region in regions:
+        identifier = knowledge.stable_id("region-entry", region["id"])
+        entry = records.get(identifier, {})
+        if (entry.get("page_id") == region.get("page_id")
+                and entry.get("region_id") == region["id"]
+                and entry.get("hierarchy_parent", "auto") == "auto"):
+            containers[identifier] = region["id"]
     parents = {}
 
     def control_node(identifier):

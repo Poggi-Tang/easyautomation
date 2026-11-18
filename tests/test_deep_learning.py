@@ -15,7 +15,7 @@ class Backend:
         self.library=library;self.current="root";self.executed=[];self.planned=[];self.fail=fail;self.blocked=blocked
         base=add_control(library);self.controls={}
         for identifier in ("menu","toolbar","context","fill","result"):
-            record={**base,"id":identifier,"name":identifier,"semantic_name":identifier,"actions":["click"]}
+            record={**base,"id":identifier,"name":identifier,"semantic_name":identifier,"actions":[] if identifier=="result" else ["click"]}
             knowledge.save_control(library.directory("demo"),record);self.controls[identifier]=record
 
     def observe(self, **_):
@@ -138,3 +138,74 @@ def test_generated_shared_workflow_reuses_user_parameter_defaults(library,tmp_pa
     root=catalog[explorer.graph["entry_workflow_ids"][0]]
     expanded=workflows.expand_calls(root,catalog,parameters={"结果":"另一个结果"})
     assert expanded["steps"][-1]["checks"][0]["expected"]=="另一个结果"
+
+
+@pytest.mark.parametrize("terminal", [False, True])
+def test_inspection_and_click_do_not_cover_search_input_or_context_menu(library, tmp_path, terminal):
+    library.save_picked_region("demo", picked(tmp_path))
+    backend = Backend(library)
+    backend.controls["menu"]["actions"] = ["click", "set-text", "right-click"]
+    backend.observe = lambda **_:dict(state_id="root", controls=[backend.controls["menu"]])
+    calls = []
+    def plan(observation, route):
+        calls.append(deepcopy(observation.get("planning_feedback", {})))
+        step = workflows.click_step(backend.controls["menu"], action="inspect")
+        step["checks"] = [dict(kind="exists", target=dict(control_id="menu"))]
+        return dict(terminal=terminal, branches=[dict(name="仅观察", steps=[step])],
+                    completion_checks=[dict(kind="exists", target=dict(control_id="menu"))] if terminal else [])
+    backend.plan = plan
+    backend.execute = lambda steps:dict(ok=True)
+    backend.verify = lambda *args:dict(ok=True)
+    explorer = Explorer(library, "demo", library.regions("demo")[0], backend)
+    result = explorer.run()
+    assert not result["complete"]
+    assert len(calls) == 3
+    assert {gap["action"] for gap in calls[1]["missing_interactions"]} == {"click", "set-text", "right-click"}
+    assert {gap["action"] for gap in explorer.graph["states"]["root"]["interaction_gaps"]} == {"click", "set-text", "right-click"}
+
+
+def test_missing_search_action_is_replanned_then_executed(library, tmp_path):
+    library.save_picked_region("demo", picked(tmp_path))
+    backend = Backend(library)
+    backend.controls["menu"].update(name="搜索", semantic_name="搜索", actions=["click", "set-text", "right-click"])
+    seen = []
+    def observe(**kwargs):
+        ids = ["menu"] if backend.current == "root" else ["result"]
+        return dict(state_id=backend.current, controls=[backend.controls[i] for i in ids])
+    def plan(observation, route):
+        if backend.current == "done":
+            return dict(terminal=True, branches=[], completion_checks=[dict(kind="text", expected="搜索结果", target=dict(control_id="result"))])
+        seen.append(deepcopy(observation.get("planning_feedback", {})))
+        actions = ["click"] if len(seen) == 1 else ["click", "set-text", "right-click"]
+        return dict(branches=[dict(name=action, effect="input" if action == "set-text" else "navigation", replayable=action != "set-text",
+            steps=[dict(action=action, target=dict(control_id="menu"), **({"text":"电阻"} if action == "set-text" else {}))]) for action in actions])
+    restored = []
+    def execute(steps):
+        action = steps[0]["action"]; backend.executed.append(action)
+        backend.current = "done" if action == "set-text" else "root"
+        return dict(ok=True, **({"input_values":{"menu":"原查询"}} if action == "set-text" else {}))
+    def restore(parent, child, steps, route, **kwargs):
+        restored.append(kwargs); backend.current = parent["state_id"]
+    backend.observe, backend.plan, backend.execute, backend.restore = observe, plan, execute, restore
+    backend.verify = lambda *args:dict(ok=True)
+    explorer = Explorer(library, "demo", library.regions("demo")[0], backend)
+    result = explorer.run()
+    assert result["complete"] and result["workflow_ids"]
+    assert result["coverage"] == dict(executed_branches=3, verified_outcomes=1, blocked_branches=0, missing_actions=0)
+    assert backend.executed == ["click", "set-text", "right-click"]
+    assert {gap["action"] for gap in seen[1]["missing_interactions"]} == {"set-text", "right-click"}
+    assert {"input_values":{"menu":"原查询"}} in restored
+    assert explorer.graph["states"]["root"]["branches"][1]["recovery_verified"]
+
+
+def test_legacy_complete_session_rechecks_action_coverage(library, tmp_path):
+    import json
+    library.save_picked_region("demo", picked(tmp_path)); region = library.regions("demo")[0]
+    first = Explorer(library, "demo", region, Backend(library))
+    assert first.run()["complete"]
+    graph = json.loads(first.path.read_text(encoding="utf-8")); graph.pop("coverage_version")
+    first.path.write_text(json.dumps(graph), encoding="utf-8")
+    backend = Backend(library); backend.controls["menu"]["actions"].append("set-text")
+    second = Explorer(library, "demo", region, backend)
+    assert not second.run()["complete"]
+    assert any(gap["action"] == "set-text" for gap in second.graph["states"]["root"]["interaction_gaps"])

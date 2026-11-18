@@ -196,7 +196,7 @@ def test_nested_icon_and_label_bind_once_regardless_of_detection_order(local,rev
     saved=records(root)
     assert len(saved)==1 and not result["failures"]
     assert result["visual_targets"]==3 and result["visual_only_observations"]==0
-    assert saved[0]["control_type"]=="ButtonControl" and saved[0]["entity_type"]=="graphic-control"
+    assert saved[0]["control_type"]=="ButtonControl" and saved[0]["entity_type"]=="ui-element"
     assert saved[0]["observed_value"]=="N" and len(saved[0]["visual_components"])==3
     assert saved[0]["is_enabled_at_scan"] is False
     again=scan(layout,root)
@@ -250,7 +250,7 @@ def test_component_item_keeps_its_caption_and_icon_as_evidence(local,monkeypatch
     assert len(saved)==1 and result["visual_only_observations"]==0 and not result["failures"]
     record=saved[0]
     assert record["name"]==item.Name and record["observed_value"]==item.Name
-    assert record["control_type"]==kind and record["entity_type"]=="graphic-control"
+    assert record["control_type"]==kind and record["entity_type"]=="ui-element"
     assert record["location"]["Xpath"][-1]["ControlType"]==kind and "click" in record["actions"]
     parts=record["visual_components"]
     assert len(parts)==2 and any(p["observed_value"]=="Park_Tr" and p["component_relation"]=="label-of" for p in parts)
@@ -514,3 +514,70 @@ def test_point_method_keeps_legacy_result_and_balances_com_on_permission_failure
         with pytest.raises(PermissionError,match="E_ACCESSDENIED"):utils.get_control_info(10,20,raise_errors=True)
     else:assert utils.get_control_info(10,20)==([],None)
     assert events==["init","uninit"]
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+@pytest.mark.parametrize("text_only", [False, True])
+def test_search_text_becomes_one_native_edit_control(local, monkeypatch, reverse, text_only):
+    layout, root, _window, search, detections, *_ = local
+    search.Name = "model_serach"
+    search.ControlTypeName = "EditControl"
+    search.ClassName = "SearchLineEdit"
+    monkeypatch.setattr(utils, "get_control_info", lambda *a, **kw: ([
+        dict(ControlType="WindowControl", Name="Example"),
+        dict(ControlType="EditControl", Name="model_serach", ClassName="SearchLineEdit")], search))
+    detections[:] = [element(1, "text-label", (65,45,135,70), "请输入关键词")]
+    if not text_only:
+        detections.append(element(2, "graphic-control", (40,30,160,90)))
+    if reverse:
+        detections.reverse()
+    result = scan(layout, root)
+    saved = records(root)
+    assert len(saved) == result["annotated_controls"] == 1
+    assert saved[0]["control_type"] == "EditControl"
+    assert saved[0]["entity_type"] == "ui-element"
+    assert saved[0]["semantic_role"] == "control"
+    assert "set-text" in saved[0]["actions"]
+    assert saved[0]["observed_value"] == "请输入关键词"
+    assert len(saved[0]["visual_components"]) == len(detections)
+    assert not result["failures"]
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+@pytest.mark.parametrize("confirmed", [False, True])
+def test_padded_ocr_icon_needs_independent_same_widget_confirmation(local, reverse, confirmed):
+    layout, root, _window, button, detections, *_ = local
+    # Native icon is 16x16; padded OCR "Q" is 26x22 (44.76% overlap).
+    button.BoundingRectangle = type(button.BoundingRectangle)(left=100,top=40,right=116,bottom=56)
+    detections[:] = [element(1, "text-label", (98,36,124,58), "Q")]
+    if confirmed:
+        detections.append(element(2, "graphic-control", (100,40,116,56)))
+    if reverse:
+        detections.reverse()
+    result = scan(layout, root)
+    saved = records(root)
+    assert len(saved) == result["annotated_controls"] == 1
+    if confirmed:
+        assert saved[0]["control_type"] == "ButtonControl"
+        assert saved[0]["entity_type"] == "ui-element"
+        assert not result["failures"]
+        label = next(c for c in saved[0]["visual_components"] if c.get("observed_value") == "Q")
+        assert label["component_binding"] == "same-native-widget"
+    else:
+        assert saved[0]["control_type"] == "VisualElement"
+        assert result["failures"][0]["reason"] == "geometry_rejected"
+
+
+
+def test_relearning_archives_padded_ocr_only_after_native_confirmation(local):
+    layout, root, _window, button, detections, *_ = local
+    button.BoundingRectangle = type(button.BoundingRectangle)(left=100,top=40,right=116,bottom=56)
+    detections[:] = [element(1, "text-label", (98,36,124,58), "Q")]
+    scan(layout, root)
+    duplicate = records(root)[0]
+    detections.append(element(2, "graphic-control", (100,40,116,56)))
+    result = scan(layout, root)
+    saved = records(root)
+    assert len(saved) == 1 and saved[0]["control_type"] == "ButtonControl"
+    assert result["component_reconciliation"]["archived"] == [
+        dict(control_id=duplicate["id"], owner_control_id=saved[0]["id"])]

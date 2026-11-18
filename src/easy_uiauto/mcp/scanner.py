@@ -925,9 +925,10 @@ def _visual_component(target: dict, window_rect: dict) -> dict:
         component["native_evidence"] = True
     if target.get("component_relation") in {"label-of", "part-of"}:
         component["component_relation"] = target["component_relation"]
-    if target.get("component_binding") == "passive-native-child":
+    if target.get("component_binding") in {"passive-native-child", "same-native-widget"}:
         component["component_binding"] = target["component_binding"]
-        component["native_location"] = target["native_location"]
+        if target["component_binding"] == "passive-native-child":
+            component["native_location"] = target["native_location"]
     if isinstance(rectangle, dict):
         component["normalized_rect"] = knowledge.normalized_rect(
             rectangle, window_rect, relative=True

@@ -143,6 +143,7 @@ def resolve(window, bounds, targets, limit, progress):
 
     controls, semantics, failures, paths, seen = [], {}, [], {}, {}
     passive_cache = {}
+    oversized_labels = []
     for number, target in enumerate(targets[:limit], start=1):
         progress(f"按标注坐标读取控件：{number}/{min(limit,len(targets))}")
         rect = target["relative_rect"]
@@ -198,7 +199,17 @@ def resolve(window, bounds, targets, limit, progress):
                       or _fits_atomic_target(control, absolute, window)):
                 reason = "geometry_rejected"
         if reason:
-            failures.append(dict(error=reason, reason=reason, diagnostics=details, observation=target))
+            failure = dict(error=reason, reason=reason, diagnostics=details, observation=target)
+            failures.append(failure)
+            # OCR can include padding around a small icon (e.g. a magnifier read
+            # as "Q"). Defer it until another proposal confirms the same widget.
+            if (reason == "geometry_rejected" and is_text(target)
+                    and kind in _ATOMIC_CONTROLS - {"TextControl"}
+                    and details.get("reason") == "insufficient_overlap"
+                    and details.get("area_ratio", 0) >= .25
+                    and _contains(absolute, scanner._rect(control))
+                    and _contains(scanner._rect(window), absolute)):
+                oversized_labels.append((scanner._control_key(control), failure))
             continue
         target = {**target, "component_relation": "label-of" if is_text(target) else "part-of"}
         key = scanner._control_key(control)
@@ -215,7 +226,7 @@ def resolve(window, bounds, targets, limit, progress):
                 components.extend(target.get("visual_components", []))
                 if is_text(target) and not primary.get("observed_value"):
                     primary["observed_value"] = target.get("observed_value", "")
-                if not is_text(target) and was_text_only:
+                if not is_text(target) and was_text_only and kind not in _ATOMIC_CONTROLS - {"TextControl"}:
                     primary["entity_type"] = target.get("entity_type", "ui-element")
             else:
                 failures.append(dict(error="distinct visual entity shares a UIA control",
@@ -231,13 +242,21 @@ def resolve(window, bounds, targets, limit, progress):
                                                                   bool(getattr(control,"IsEnabled", True))))
         semantic = manual_layout.native_semantics(candidate)
         semantics[index] = {**target, **semantic,
-                            "entity_type": ("ui-element" if is_text(target) and kind in _ATOMIC_CONTROLS - {"TextControl"}
+                            "entity_type": ("ui-element" if kind in _ATOMIC_CONTROLS - {"TextControl"}
                                             else target.get("entity_type", "ui-element")),
                             "observed_value": (getattr(control,"Name", "") if kind in {"ListItemControl","TreeItemControl"}
                                                else target.get("observed_value", "")),
                             "visual_components": [{**target, "native_evidence": True},
                                                   *target.get("visual_components", [])],
                             "analysis_result": target["analysis_result"]}
+    for key, failure in oversized_labels:
+        if key not in seen:
+            continue
+        target = failure["observation"]
+        primary = semantics[seen[key]]
+        primary["visual_components"].append({**target, "native_evidence": True,
+            "component_relation": "label-of", "component_binding": "same-native-widget"})
+        failures.remove(failure)
     return controls, semantics, failures, paths
 
 

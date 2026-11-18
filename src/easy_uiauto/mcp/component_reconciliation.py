@@ -23,8 +23,11 @@ def _matches(record, component):
         return (component.get("component_binding") == "passive-native-child"
                 and bool(_path(record.get("location", {})))
                 and _path(record["location"]) == _path(component.get("native_location", {})))
-    if (record.get("control_type") != "VisualElement"
-            or record.get("verification", {}).get("reason") != "shared_native_control"):
+    if record.get("control_type") != "VisualElement":
+        return False
+    reason = record.get("verification", {}).get("reason")
+    if reason != "shared_native_control" and not (
+            reason == "geometry_rejected" and component.get("component_binding") == "same-native-widget"):
         return False
     # Old visual failures have no native identity. Require the same observation
     # and practically identical geometry, never proximity or a shared name alone.

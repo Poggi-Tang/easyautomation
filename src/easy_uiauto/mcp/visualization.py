@@ -78,9 +78,13 @@ def control_markers(
     target_ids = target_ids or set()
     expanded = list(records)
     if include_components:
+        from .local_learning import _ATOMIC_CONTROLS
         for record in records:
             for index, component in enumerate(record.get("visual_components", []), start=1):
-                if isinstance(component, dict) and component.get("native_evidence"):
+                if isinstance(component, dict) and (component.get("native_evidence") or (
+                        record.get("control_type") in _ATOMIC_CONTROLS - {"TextControl"}
+                        and record.get("location", {}).get("Xpath")
+                        and component.get("component_relation") in {"label-of", "part-of"})):
                     continue
                 if not isinstance(component, dict) or not isinstance(
                     component.get("normalized_rect"), dict

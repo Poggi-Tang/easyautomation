@@ -249,3 +249,18 @@ def test_full_image_box_gets_a_margin_for_a_complete_adjacent_label():
     assert result.height > image.height
     assert marker["rect"] == _rect(0, 0, 40, 30)
     assert result.getpixel((origin["x"], origin["y"] + 20)) == (21, 101, 192)
+
+
+
+def test_native_widget_caption_is_evidence_without_an_extra_text_box():
+    record = _control("model_serach")
+    record.update(control_type="EditControl", location={"Xpath": [{"ControlType": "EditControl"}]})
+    caption = {"entity_type": "text-observation", "observed_value": "请输入关键词",
+        "component_relation": "part-of",
+        "normalized_rect": {"left": .05, "top": .08, "right": .1, "bottom": .12}}
+    record["visual_components"] = [caption]
+    markers = visualization.control_markers([record], _rect(0,0,400,300), _rect(0,0,400,300))
+    assert [m["control_id"] for m in markers] == ["model_serach"]
+    assert record["visual_components"] == [caption]
+    record["control_type"] = "CustomControl"
+    assert len(visualization.control_markers([record], _rect(0,0,400,300), _rect(0,0,400,300))) == 2

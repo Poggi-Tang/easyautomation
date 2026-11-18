@@ -29,19 +29,37 @@ record the observation gap in unresolved instead of inventing executable branche
 Cover every meaningful interactive entry, including toolbar/menu alternatives, right-click menus on
 trees/lists/canvases, tabs, dialogs, and branches revealed by previous actions. Branches are alternatives
 from this exact state, not sequential independent workflows. A branch may fill several currently visible
-fields and click their submit button. Use provided test inputs or explicit reference examples; never
-invent required paths, credentials, host names or business values. Missing inputs produce blocked branches.
-Do not enumerate arbitrary string values indefinitely. Distinguish relevant choices using references.
+fields and click their submit button. Explore every supported meaningful action of each entry,
+not merely one click per control. Inspect/exists checks and focusing an edit do not cover typing,
+right-click menus, double-click behavior or hover help. planning_feedback lists omitted actions;
+return a revised complete plan retaining valid alternatives, with explicit blocks for unavailable ones.
+Use provided test inputs or explicit reference examples. For a clearly local search/filter, also use
+an actual visible item name from controls or the screenshot as a grounded keyword, even when test_inputs
+is empty. Record its source in the step description. Never mistake placeholder text for the current value.
+Do not invent paths, credentials, host names or required business values; only those missing required
+inputs block the dependent branch, not independent navigation or local filtering.
+Missing result observations are a reason to execute a safe probe and observe next, NOT to block it.
+For local search: type a grounded keyword, end the forward branch and observe results; then test any
+observed submit/clear controls and supported alternate input triggers, and restore the original query.
+Choose representative meaningful input cases, not arbitrary strings indefinitely. Never submit a search
+that sends messages, executes commands or has unclear external effects merely because it accepts text.
+Right-clicking a known local edit/tree/list to inspect its menu is navigation; classify menu commands
+individually after observing them. Do not reject opening that menu just because its items are not yet known.
 Supported step actions: click, double-click, right-click, hover, set-text, press-key, hotkey, inspect.
 For unsupported gestures (such as dragging/scrolling), report blocked instead of silently skipping them.
 Each step: {action, target:{control_id,label,hit:'center'|'blank'}, text?, description, checks:[]}.
 Checks: {kind:'exists'|'not-visible'|'text'|'selected'|'node-exists'|'node-absent'|'window-title',
 target:{control_id,label},expected?}. All checks require actually observed control IDs.
-Do not classify merely opening a dialog/menu as business completion. terminal=true only when the
-preceding operation reached a concrete business result; provide executable completion_checks that
-distinguish success, not a generic main-window-exists check. A terminal state can have no branches.
-return_steps may close/cancel an opened menu/dialog or undo reversible UI navigation. Do not delete
-created data to recover. A user-configured reset workflow is handled separately by the controller.
+terminal describes a verified outcome of the incoming interaction, NOT completion of exploration.
+A search result, changed selection or revealed panel can be an interaction outcome, not just creation or
+saving business data. Provide concrete completion_checks (result text, selection, expected nodes) that
+distinguish it from the start; a generic window/input exists check does not prove search/filter success.
+Even at a terminal outcome, enumerate all remaining actionable entries; terminal never skips coverage.
+Opening a dialog/menu alone is not completion of its subsequent workflows. Observe and explore them.
+return_steps must restore the branch start: cancel/close the opened menu/dialog, restore the prior
+selection, or restore an input's exact original value from return_context.input_values using set-text.
+The controller records these values from the live input before writing, and can restore them automatically.
+Never invent an original value or use an OCR placeholder as one. Do not delete created data to recover. A user-configured reset workflow is handled separately by the controller.
 Classify effects as navigation, input, commit, destructive, external, or unknown. Destructive/external
 actions are recorded as blocked. commit (e.g. create/save test data) is allowed only when allow_commit=true.
 Classify the immediate operation: opening a New Project dialog can be navigation when supported by
@@ -508,6 +526,7 @@ class NativeBackend:
         if is_origin and not entry_id and self.region.get("location",{}).get("Xpath") and region_entry_valid:
             source={**self.region,"id":knowledge.stable_id("region-entry",self.region["id"]),"kind":"control",
                     "semantic_name":self.region["name"],"region_id":self.region["id"],"status":"observed",
+                    "source":"region-context-entry",
                     "window_scope":frame["scope"],"actions":["right-click"],"entry_steps":self.root_entry}
             source["control_type"]=source["location"].get("ControlType") or "PaneControl"
             knowledge.save_control(self.directory,source);controls.append(source)
@@ -540,7 +559,8 @@ class NativeBackend:
 
     def plan(self, observation, route):
         from . import reference_library
-        fields=("id","semantic_name","name","description","control_type","actions","is_enabled_at_scan","normalized_rect")
+        fields=("id","semantic_name","name","description","control_type","class_name","actions",
+                "is_enabled_at_scan","normalized_rect","observed_value","current_state","state_reason","help_text")
         controls=[{k:r.get(k) for k in fields} for r in observation["controls"]]
         for control in controls:
             if control["id"] in observation.get("planning_rects",{}):
@@ -559,6 +579,8 @@ class NativeBackend:
                      controls=controls,route=route,last_steps=self.last_step,
                      references=references,usage=usage,context_issues=context_issues,
                      learning_mode=self.mode,
+                     planning_feedback=observation.get("planning_feedback",{}),
+                     return_context=observation.get("return_context",{}),
                      exploration_scope=observation.get("exploration_scope",{}),
                      selected_control_ids=([] if observation.get("exploration_scope",{}).get("followup") else
                          observation.get("exploration_scope",{}).get("selected_control_ids",
@@ -611,24 +633,46 @@ class NativeBackend:
     def assert_state(self, observation):
         if not self.same_state(self.stable_frame(),observation):
             raise ValueError("当前界面已偏离计划状态，未继续操作")
+        # Restoration can return from a filtered/popup state with a different
+        # inventory. Scope the next transition to the verified parent again.
+        self.observed_controls={record["id"] for record in observation["controls"]}-self.excluded_entry_ids
 
-    def execute(self, steps):
+    def execute(self, steps, *, literal_text=False):
         from .mcp import control_observation
         from .library_actions import owned_windows
         self.last_step=deepcopy(steps)
         transition={}
         self.transition=None
+        input_ids={step["target"]["control_id"] for step in steps
+                   if step["action"]=="set-text" and step.get("learning_effect")=="input"}
+        input_values={}
         def before_action(record,control,main):
+            if record["id"] in input_ids and record["id"] not in input_values:
+                if bool(getattr(control,"IsPassword",False)):
+                    raise ValueError("密码输入不参与自动探索，未读取或写入")
+                pattern=control.GetValuePattern()
+                if pattern is None or pattern.IsReadOnly:
+                    raise ValueError("无法读取可恢复的输入原值，未执行该输入分支")
+                input_values[record["id"]]=str(pattern.Value)
             if not transition:
                 transition.update(before_windows={self.surface_key(w) for w in owned_windows(self.expected)},
                                   controls=set(self.observed_controls),steps=deepcopy(steps))
             return self.library.capture_before_click(self.app_id,record["id"],control,main)
         try:
-            result=workflows.execute(dict(keyword="深度学习交互",steps=step_ids(steps),parameters=self.inputs),
+            execution_steps=step_ids(steps)
+            parameters=dict(self.inputs)
+            if literal_text:
+                for index,step in enumerate(execution_steps):
+                    if "text" in step:
+                        key=f"_learning_restore_{index}"
+                        parameters[key]=step["text"]
+                        step["text"]="${"+key+"}"
+            result=workflows.execute(dict(keyword="深度学习交互",steps=execution_steps,parameters=parameters),
                 self.library.read(self.app_id)["controls"],self.expected,directory=self.directory,
                 progress=self.progress,checkpoint=self.checkpoint,
                 before_action=before_action,
                 after_action=lambda _r,main:control_observation.capture_after(self.directory,main))
+            if input_values:result["input_values"]=input_values
             if result.get("ok") and result.get("input_attempted") is not False:self.transition=transition or None
             return result
         except Exception as error:
@@ -636,26 +680,37 @@ class NativeBackend:
             # Missing evidence here therefore means validation/preparation failed.
             if not hasattr(error,"execution_result"):
                 error.execution_result=dict(ok=False,input_attempted=False,error=str(error))
+            if input_values:error.execution_result["input_values"]=input_values
             raise
 
     def verify(self, observation, checks):
         self.assert_state(observation)
         return self.execute([dict(action="inspect",target=checks[0]["target"],checks=checks,description="校验业务结果")])
 
-    def restore(self, parent, child, return_steps, route):
-        if self.same_state(self.stable_frame(),parent):return
+    def restore(self, parent, child, return_steps, route, *, input_values=None):
+        input_values=input_values or {}
+        if not input_values and self.same_state(self.stable_frame(),parent):return
+        allowed={r["id"]:r for r in child["controls"]}
+        return_steps=deepcopy(return_steps)
+        restored={step.get("target",{}).get("control_id") for step in return_steps if step.get("action")=="set-text"}
+        for identifier,value in input_values.items():
+            if identifier not in restored:
+                return_steps.append(dict(action="set-text",target=dict(control_id=identifier),text=value,
+                    description="恢复探索前实际读取的输入原值",checks=[]))
         if return_steps:
-            allowed={r["id"]:r for r in child["controls"]}
             for step in return_steps:
-                if step.get("action") not in {"click","press-key","hotkey","inspect"} or step.get("target",{}).get("control_id") not in allowed:
+                if step.get("action") not in {"click","press-key","hotkey","inspect","set-text"} or step.get("target",{}).get("control_id") not in allowed:
                     raise ValueError("返回步骤包含未观察目标或不支持的动作")
-                record=allowed[step["target"]["control_id"]]
+                identifier=step["target"]["control_id"]
+                if step["action"]=="set-text" and (identifier not in input_values or step.get("text")!=input_values[identifier]):
+                    raise ValueError("返回输入必须等于本次操作前实际读取的原值")
+                record=allowed[identifier]
                 label=" ".join(str(record.get(k) or "") for k in ("name","semantic_name","intent"))
                 if step["action"]!="inspect" and re.search(r"删除|清空|格式化|发送|支付|发布|上传|退出|保存|提交|创建|\b(delete|remove|format|send|publish|pay|upload|exit|save|submit|create)\b",label,re.I):
                     raise ValueError("返回步骤涉及业务提交、删除或退出，未自动执行")
                 if step["action"] in {"press-key","hotkey"} and str(step.get("text","")).lower() not in {"esc","escape","alt+left"}:
                     raise ValueError("返回快捷键尚未验证，请配置返回起点的组合动作")
-            self.execute(return_steps)
+            self.execute(return_steps,literal_text=True)
             if self.same_state(self.stable_frame(),parent):return
         if self.reset_workflow_id:
             if any(not step.get("learning_replayable") for step in route):

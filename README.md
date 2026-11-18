@@ -118,8 +118,12 @@ images, coordinates, recognition evidence and a local HTML viewer.
   state reference shared workflow steps. Unfinished branches retain their reasons.
   Relearning can continue unfinished branches, improve selected controls/workflows,
   or adapt to software updates while retaining manual edits and reporting validation results.
-  Deep learning requires the configured API and test inputs; creating or saving test
-  data is an explicit option in its dialog.
+  Deep learning requires the configured API; required business inputs must be supplied.
+  Local searches may use observed item names. Coverage is checked per control action,
+  with omitted actions sent back for planning and retained as incomplete if unresolved.
+  Input probes retain their live original values for verified restoration. A result state
+  does not exempt its remaining actions from exploration. Creating or saving test data
+  is an explicit option in the dialog.
   Select a saved control and use its toolbar or context menu to explore just that
   entry and its subsequent workflows, with a separate resumable learning record.
 

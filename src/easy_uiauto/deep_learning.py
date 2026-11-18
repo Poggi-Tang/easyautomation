@@ -105,6 +105,22 @@ def validate_plan(plan, controls):
     return plan
 
 
+def interaction_gaps(controls, branches):
+    """Audit actual actions, not target mentions in inspections/assertions."""
+    planned = {(step.get("target", {}).get("control_id"), step.get("action"))
+               for branch in branches for step in branch.get("steps", [])
+               if step.get("action") != "inspect"}
+    # A control-level block accounts for an unavailable entry without inventing
+    # executable steps. Action-specific blocks account only for their own steps.
+    blocked = {branch.get("control_id") for branch in branches
+               if branch.get("blocked") and not branch.get("steps")}
+    return [dict(control_id=control["id"], label=control.get("semantic_name") or control.get("name") or control["id"], action=action)
+            for control in controls if control.get("is_enabled_at_scan") is not False
+            for action in dict.fromkeys(control.get("actions", []))
+            if action != "inspect" and control["id"] not in blocked
+            and (control["id"], action) not in planned]
+
+
 class Explorer:
     def __init__(self, library, app_id, region, backend, *, max_actions=100, max_depth=24,
                  inputs=None, instructions="", resume=True, mode=None, session_id="", control_ids=(),
@@ -141,12 +157,14 @@ class Explorer:
             from .library_tasks import _write
             _write(history, previous)
             for node in self.graph["states"].values():
+                if self.graph.get("coverage_version") != 2:
+                    node["issues"].append("旧记录未按操作检查覆盖，需要重新规划遗漏交互")
                 for branch in node["branches"]:
                     if branch["status"] == "running":
                         branch.update(status="uncertain", reason="上次任务在操作中停止，请先检查实际结果；不会自动重做")
         known_branches = {b["id"] for n in self.graph["states"].values() for b in n["branches"]}
         if self.retry_branches - known_branches:raise ValueError("待重试分支不属于所选学习记录")
-        self.graph.update(mode=self.mode, options=dict(inputs=self.inputs, instructions=instructions,
+        self.graph.update(coverage_version=2, mode=self.mode, options=dict(inputs=self.inputs, instructions=instructions,
             **getattr(backend,"policy_identity",{})), scope=dict(control_ids=list(control_ids), workflow_ids=list(workflow_ids)))
         if entry_control_id:
             entry=next((r for r in library.read(app_id)["controls"] if r["id"]==entry_control_id),{})
@@ -243,6 +261,16 @@ class Explorer:
     def persist(self):
         from .library_tasks import _write
         self.graph["updated_at"] = knowledge.utc_now()
+        branches = [branch for node in self.graph["states"].values() for branch in node["branches"]
+                    if self.branch_in_scope(branch, node)]
+        nodes = [node for node in self.graph["states"].values() if self.node_in_scope(node)]
+        self.graph["coverage"] = dict(
+            executed_branches=sum(bool(branch.get("evidence", {}).get("ok"))
+                and branch["evidence"].get("input_attempted") is not False
+                and any(step["action"] != "inspect" for step in branch["steps"]) for branch in branches),
+            verified_outcomes=sum(bool(node.get("verified_terminal")) for node in nodes),
+            blocked_branches=sum(branch["status"] == "blocked" for branch in branches),
+            missing_actions=sum(len(node.get("interaction_gaps", [])) for node in nodes))
         with image_storage._vault_lock(self.library.root):
             self.path.parent.mkdir(parents=True, exist_ok=True)
             _write(self.path, self.graph)
@@ -251,7 +279,11 @@ class Explorer:
         statuses={"running":"正在学习（若任务已停止，请恢复起点后继续）","partial":"部分完成","complete":"完成"}
         lines=["状态："+statuses.get(self.graph["status"],self.graph["status"]),
                f"已发现 {len(self.graph['states'])} 个状态，归档 {len(self.graph['workflow_ids'])} 个组合动作。",
-               "覆盖范围为本次观察到的状态与规划分支，不代表任意输入值的全部组合。",self.stop_reason]
+               "探索覆盖按控件的各项操作检查；点击或检查不代表已学会输入等其他操作。范围为已观察状态，不代表任意输入值的全部组合。",self.stop_reason]
+        coverage=self.graph["coverage"]
+        lines.insert(2, f"已有执行证据的交互分支 {coverage['executed_branches']} 条；"
+            f"通过结果校验的状态 {coverage['verified_outcomes']} 个；"
+            f"阻塞分支 {coverage['blocked_branches']} 条；未规划操作 {coverage['missing_actions']} 项。")
         if self.entry_control_id:lines.insert(1,"学习入口："+self.graph["entry_control_name"]+"；范围包含该入口触发的后续流程。")
         summary=self.graph.get("changes",{})
         if summary:
@@ -288,7 +320,21 @@ class Explorer:
         observation["exploration_scope"] = dict(entry_control_id=self.entry_control_id,
             selected_control_ids=sorted(self.scope_controls), followup=followup,
             excluded_entry_control_ids=sorted(self.excluded_entries()) if followup else [])
-        plan = validate_plan(self.backend.plan(observation, route), observation["controls"])
+        scoped = [control for control in observation["controls"]
+                  if (not self.scope_controls or followup or control["id"] in self.scope_controls)
+                  and (not followup or control["id"] not in self.excluded_entries())]
+        # Give the planner concrete omissions to repair before desktop input.
+        # A bounded retry is not completion: remaining gaps stay resumable.
+        for attempt in range(3):
+            plan = validate_plan(self.backend.plan(observation, route), observation["controls"])
+            gaps = interaction_gaps(scoped, plan["branches"])
+            blocked = [dict(name=branch["name"], reason=branch["blocked"], effect=branch.get("effect"))
+                       for branch in plan["branches"] if branch.get("blocked")
+                       and branch.get("effect") in {"navigation", "input", "unknown"}]
+            if not gaps and not blocked:break
+            observation["planning_feedback"] = dict(missing_interactions=gaps, blocked_interactions=blocked, previous_plan=plan,
+                instruction="补全遗漏操作，并复核阻塞是否确有缺少的必要输入或安全依据；结果/菜单尚未观察不是拒绝安全探索的理由。不得绕过真实阻塞。")
+            if attempt < 2:self.progress(f"复核探索计划：{len(gaps)} 项操作遗漏，{len(blocked)} 条分支待核对阻塞依据")
         branches = [];remaining = list((previous or {}).get("branches", []))
         for item in plan["branches"]:
             old = relearning.branch_match(item, remaining)
@@ -331,22 +377,17 @@ class Explorer:
                     verified_terminal=False, issues=list(observation.get("issues", []))+list(plan.get("unresolved", [])),
                     route=deepcopy(route), region_ids=observation.get("region_ids", []), fingerprint=observation["state_id"],
                     state_evidence=deepcopy(observation.get("state_evidence",{})))
-        if self.scope_controls and not followup and node["terminal"]:
+        if node["terminal"] and (not route or self.scope_controls and not followup):
             node["terminal"] = False
-            node["issues"].append("尚未从指定控件进入后续流程，不能仅凭起点界面确认学习完成")
+            node["issues"].append("尚未执行范围内交互，不能仅凭起点界面确认学习完成")
         if previous and self.mode == "resume" and node["terminal"] and previous.get("verified_terminal") and previous.get("completion_checks")==node["completion_checks"]:
             node.update(verified_terminal=True, terminal_evidence=previous.get("terminal_evidence"))
-        # Every observed interactive control must be accounted for, even when it
-        # requires inputs or an unsupported gesture. Omission is not coverage.
-        covered = {t.get("control_id") for b in branches for _,t in workflows.targets(dict(steps=b.get("steps", [])))}
-        covered.update(b.get("control_id") for b in branches if b.get("blocked"))
-        if not node["terminal"]:
-            for control in observation["controls"]:
-                if self.scope_controls and not followup and control["id"] not in self.scope_controls:continue
-                if followup and control["id"] in self.excluded_entries():continue
-                if control.get("actions") and control.get("is_enabled_at_scan") is not False and control["id"] not in covered:
-                    node["issues"].append("未规划交互："+(control.get("semantic_name") or control["id"]))
-            if not branches:node["issues"].append("尚无可执行分支，也未确认业务结果")
+        gaps = interaction_gaps(scoped, branches)
+        node["interaction_gaps"] = gaps
+        node["issues"].extend("未规划交互："+gap["label"]+" / "+gap["action"] for gap in gaps)
+        # Reaching one result never exempts other actions in that same state.
+        if not branches and not node["terminal"]:
+            node["issues"].append("尚无可执行分支，也未确认交互结果")
         self.graph["states"][identifier] = node;self.replanned.add(identifier);self.persist()
         return node
 
@@ -382,6 +423,8 @@ class Explorer:
                     evidence = self.backend.execute(branch["steps"])
                     child_route = [*route, *deepcopy(branch["steps"])]
                     child = self.backend.observe(route=child_route)
+                    child["return_context"] = dict(name=node["name"], steps=deepcopy(branch["steps"]),
+                        input_values=deepcopy(evidence.get("input_values", {})))
                     branch.update(target_state=self.identifier(child), evidence=evidence, status="observed",executed_run=len(self.graph["runs"]))
                     self.persist()
                     if self.identifier(child) in self.active:
@@ -392,7 +435,10 @@ class Explorer:
                     self.persist()
                     if self.stop_reason:return
                     child_node = self.graph["states"].get(self.identifier(child), {})
-                    self.backend.restore(observation, child, child_node.get("return_steps", []), route)
+                    recovery = dict(input_values=evidence["input_values"]) if evidence.get("input_values") else {}
+                    self.backend.restore(observation, child, child_node.get("return_steps", []), route, **recovery)
+                    branch["recovery_verified"] = True
+                    self.persist()
                 except InterruptedError as error:
                     if branch["status"]=="running":
                         evidence=getattr(error,"execution_result",{})
@@ -543,7 +589,7 @@ class Explorer:
             change_message=(f" 新增 {len(changes['added'])}、更新 {len(changes['updated'])}、复用 {len(changes['reused'])} 个控件；"
                 f"{len(changes['unobserved'])} 个待定位，{sum(f['status']!='passed' for f in changes['workflows'].values())} 个流程待验证。")
         return dict(ok=True, complete=self.graph["status"]=="complete", states=len(self.graph["states"]),
-                    actions=self.actions, workflow_ids=self.graph["workflow_ids"], unfinished=unfinished, issues=issues,
+                    actions=self.actions, coverage=self.graph["coverage"], workflow_ids=self.graph["workflow_ids"], unfinished=unfinished, issues=issues,
                     report_path=str(self.path), session_id=self.graph["id"],changes=self.graph.get("changes",{}),
                     message=f"{relearning.MODES[self.mode]}{'完成' if self.graph['status']=='complete' else '部分完成'}；"
                     f"发现 {len(self.graph['states'])} 个状态，{len(unfinished)} 条分支未完成。"+(self.stop_reason or "")+change_message)

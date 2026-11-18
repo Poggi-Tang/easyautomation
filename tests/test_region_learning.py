@@ -501,7 +501,7 @@ def test_full_update_reuses_flows_and_verifies_changed_navigation(backend,librar
         ids={"root":["menu","toolbar"],"dialog":["fill"],"done":["result"]}[machine["state"]]
         for identifier in ids:
             record={**deepcopy(base),"id":identifier,"name":identifier,"semantic_name":identifier,
-                    "page_id":layout["page_id"],"region_id":layout["regions"][0]["id"],"actions":["click"]}
+                    "page_id":layout["page_id"],"region_id":layout["regions"][0]["id"],"actions":[] if identifier=="result" else ["click"]}
             # Layout IDs may be local; persist the full region identity like the scanner.
             if not record["region_id"].startswith(layout["page_id"]+"."):
                 record["region_id"]=layout["page_id"]+"."+record["region_id"]
@@ -542,3 +542,106 @@ def test_full_update_reuses_flows_and_verifies_changed_navigation(backend,librar
     for state in ("dialog","done"):
         assert {p for _,s,p in observed_pages if s==state}.__len__()==1
     assert [i for v,i in executed if v==2]==["menu","fill","toolbar"]
+
+
+
+def test_planner_receives_observed_search_terms_and_action_feedback(backend, library, monkeypatch):
+    record = add_control(library)
+    record.update(observed_value="电阻", class_name="SearchLineEdit", current_state="enabled", help_text="搜索元件")
+    feedback = dict(missing_interactions=[dict(control_id=record["id"], action="set-text")])
+    returned = dict(input_values={record["id"]:"旧查询"})
+    def request(settings, payload, image):
+        assert payload["test_inputs"] == {}
+        assert payload["controls"][0]["observed_value"] == "电阻"
+        assert payload["controls"][0]["class_name"] == "SearchLineEdit"
+        assert payload["planning_feedback"] == feedback
+        assert payload["return_context"] == returned
+        return dict(branches=[])
+    monkeypatch.setattr(region_learning, "_request_plan", request)
+    backend.plan(dict(controls=[record], image=Image.new("RGB", (10, 10)), planning_feedback=feedback, return_context=returned), [])
+
+
+def test_input_capture_uses_live_value_not_placeholder_and_preserves_first_value(backend, library, monkeypatch):
+    from easy_uiauto import library_actions
+    record = add_control(library); record["observed_value"] = "请输入关键词"
+    value = SimpleNamespace(Value="原始查询", IsReadOnly=False)
+    control = SimpleNamespace(IsPassword=False, GetValuePattern=lambda:value)
+    monkeypatch.setattr(library_actions, "owned_windows", lambda *_:[])
+    monkeypatch.setattr(library, "capture_before_click", lambda *args:dict(ok=True))
+    def execute(flow, *args, **kwargs):
+        kwargs["before_action"](record, control, object())
+        value.Value = "第一次搜索"
+        kwargs["before_action"](record, control, object())
+        return dict(ok=True, input_attempted=True)
+    monkeypatch.setattr(workflows, "execute", execute)
+    steps = [dict(action="set-text", target=dict(control_id=record["id"]), text="电阻", learning_effect="input")]
+    assert backend.execute(steps)["input_values"] == {record["id"]:"原始查询"}
+
+
+@pytest.mark.parametrize("password,pattern", [(True, None), (False, None), (False, SimpleNamespace(IsReadOnly=True))])
+def test_unsafe_or_unrecoverable_input_stops_before_writing(backend, library, monkeypatch, password, pattern):
+    record = add_control(library)
+    control = SimpleNamespace(IsPassword=password, GetValuePattern=lambda:pattern)
+    def execute(flow, *args, **kwargs):
+        kwargs["before_action"](record, control, object())
+        pytest.fail("input was allowed")
+    monkeypatch.setattr(workflows, "execute", execute)
+    with pytest.raises(ValueError) as error:
+        backend.execute([dict(action="set-text", target=dict(control_id=record["id"]), text="x", learning_effect="input")])
+    assert error.value.execution_result["input_attempted"] is False
+
+
+@pytest.mark.parametrize("original", ["", "原查询"])
+def test_restoration_writes_exact_original_and_verifies_parent(backend, library, monkeypatch, original):
+    record = add_control(library)
+    parent = dict(state_id="parent"); child = dict(state_id="child", controls=[record])
+    machine = dict(state="child"); executed = []
+    monkeypatch.setattr(backend, "stable_frame", lambda:dict(state_id=machine["state"]))
+    def execute(steps, **kwargs):
+        assert kwargs["literal_text"]
+        executed.extend(steps); machine["state"] = "parent"
+        return dict(ok=True)
+    monkeypatch.setattr(backend, "execute", execute)
+    backend.restore(parent, child, [], [], input_values={record["id"]:original})
+    assert len(executed) == 1 and executed[0]["action"] == "set-text" and executed[0]["text"] == original
+
+
+def test_restoration_rejects_invented_original_value(backend, library, monkeypatch):
+    record = add_control(library)
+    monkeypatch.setattr(backend, "stable_frame", lambda:dict(state_id="child"))
+    monkeypatch.setattr(backend, "execute", lambda *_:pytest.fail("invented restoration executed"))
+    with pytest.raises(ValueError, match="实际读取"):
+        backend.restore(dict(state_id="parent"), dict(state_id="child", controls=[record]),
+            [dict(action="set-text", target=dict(control_id=record["id"]), text="")], [], input_values={record["id"]:"原查询"})
+
+
+def test_restoration_failure_is_not_accepted_after_successful_write(backend, library, monkeypatch):
+    record = add_control(library)
+    monkeypatch.setattr(backend, "stable_frame", lambda:dict(state_id="child"))
+    monkeypatch.setattr(backend, "execute", lambda *_, **kwargs:dict(ok=True))
+    with pytest.raises(ValueError, match="无法确认已返回"):
+        backend.restore(dict(state_id="parent"), dict(state_id="child", controls=[record]), [], [], input_values={record["id"]:""})
+
+
+
+def test_verified_parent_restores_transition_control_scope(backend, monkeypatch):
+    backend.observed_controls = {"filtered-item"}
+    backend.excluded_entry_ids = {"unrelated"}
+    parent = dict(state_id="parent", controls=[dict(id="search"), dict(id="original-item"), dict(id="unrelated")])
+    monkeypatch.setattr(backend, "stable_frame", lambda:parent)
+    backend.assert_state(parent)
+    assert backend.observed_controls == {"search", "original-item"}
+
+
+
+def test_original_search_text_is_not_interpreted_as_a_parameter(backend, library, monkeypatch):
+    record = add_control(library)
+    original = "${business_value}"
+    backend.inputs = dict(business_value="must-not-replace-original")
+    def execute(flow, *args, **kwargs):
+        expanded = workflows.substitute(flow["steps"], flow["parameters"])
+        assert expanded[0]["text"] == original
+        return dict(ok=True, input_attempted=True)
+    monkeypatch.setattr(workflows, "execute", execute)
+    result = backend.execute([dict(action="set-text", target=dict(control_id=record["id"]), text=original)], literal_text=True)
+    assert result["ok"]

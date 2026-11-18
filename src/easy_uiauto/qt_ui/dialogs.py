@@ -129,8 +129,8 @@ class DeepLearningDialog(QDialog):
         self.sessions=list(sessions)
         layout=QVBoxLayout(self)
         hint=QLabel((f"从控件“{title}”开始，探索它打开的菜单、弹窗及后续流程；同区域其他入口不参与。" if entry_control else
-                     "从当前区域探索交互分支，自动保存新区域、控件和组合动作。")+
-                    "请使用测试工程；未完成的分支会保留在学习进度中。")
+                     "探索指定区域内各控件的可操作流程，并继续探索其打开的菜单、弹窗和后续状态。")+
+                    "实际操作、验证结果并恢复起点；不会把扫描或生成计划当作完成。请使用测试工程，遗漏与阻塞会保留在学习进度中。")
         hint.setWordWrap(True);layout.addWidget(hint);form=QFormLayout();layout.addLayout(form)
         self.mode=QComboBox()
         for value in ("resume","improve","update","new"):self.mode.addItem(MODES[value],value)
@@ -144,7 +144,7 @@ class DeepLearningDialog(QDialog):
         form.addRow("本次目的",self.mode);form.addRow("已有学习记录",self.session);form.addRow(self.mode_hint)
         self.instructions=QPlainTextEdit();self.instructions.setPlaceholderText("学习范围、需要覆盖的业务流程，以及参考资料中的要求")
         self.instructions.setMaximumHeight(110)
-        self.inputs=QPlainTextEdit("{}");self.inputs.setPlaceholderText('例如：{"工程名称":"学习测试", "保存路径":"D:/测试工程"}')
+        self.inputs=QPlainTextEdit("{}");self.inputs.setPlaceholderText('必要业务输入，例如：{"工程名称":"学习测试", "保存路径":"D:/测试工程"}；本地搜索可使用当前可见条目名称')
         self.inputs.setMaximumHeight(110)
         self.actions=QSpinBox();self.actions.setRange(1,2000);self.actions.setValue(100)
         self.depth=QSpinBox();self.depth.setRange(1,100);self.depth.setValue(24)
@@ -152,7 +152,7 @@ class DeepLearningDialog(QDialog):
         for flow in flows:self.reset.addItem(flow["keyword"],flow["id"])
         self.commit=QCheckBox("允许新建、保存等测试数据提交（不包括删除或外部发送）")
         form.addRow("学习要求",self.instructions);form.addRow("测试输入（JSON）",self.inputs)
-        form.addRow("本次交互步数",self.actions);form.addRow("探索深度",self.depth);form.addRow("返回起点动作",self.reset)
+        form.addRow("单轮交互安全上限",self.actions);form.addRow("单轮探索深度上限",self.depth);form.addRow("返回起点动作",self.reset)
         layout.addWidget(self.commit)
         self.scope=QTreeWidget();self.scope.setHeaderLabels(["指定内容（不勾选表示整个区域）","类型"]);self.scope.setMaximumHeight(150)
         for kind,records in (("control",controls),("workflow",flows)):

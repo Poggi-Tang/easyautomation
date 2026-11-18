@@ -275,3 +275,32 @@ def test_gui_region_node_and_drawing_preserve_fixed_reference_and_click_path(pop
     finally:
         if gui: gui.dirty = False; gui.close()
         else: root.destroy()
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+def test_region_context_entry_is_displayed_as_its_existing_region(legacy):
+    region = dict(id="main.library", page_id="main", name="元件库")
+    path = [dict(ControlType="WindowControl", Name="Example"),
+            dict(ControlType="GroupControl", Name="library")]
+    entry = dict(id=knowledge.stable_id("region-entry", region["id"]),
+        page_id="main", region_id=region["id"], name="元件库", role="manual-region",
+        control_type="GroupControl", actions=["right-click"], location=location_from_xpath(path))
+    if not legacy:
+        entry["source"] = "region-context-entry"
+    child = dict(id="search", page_id="main", region_id="library", name="model_serach",
+        control_type="EditControl", location=location_from_xpath(
+            [*path, dict(ControlType="EditControl", Name="model_serach")]))
+    same_name = dict(id="independent", page_id="main", region_id="library", name="元件库",
+        control_type="ButtonControl", location=location_from_xpath(
+            [path[0], dict(ControlType="ButtonControl", Name="元件库")]))
+    popup = dict(id="popup", page_id="popup-page", name="菜单", learning_source="deep-learning",
+        window_scope={"kind":"owned"}, parent_control_id=entry["id"])
+    controls = [entry, child, same_name]
+    before = deepcopy(controls)
+    graph = dynamic_regions.build_tree(controls, [region, popup])
+    assert graph["containers"][entry["id"]] == region["id"]
+    assert "control:"+entry["id"] not in graph["parents"]
+    assert graph["parents"]["control:search"] == "region:main.library"
+    assert graph["parents"]["control:independent"] == "region:main.library"
+    assert graph["parents"]["region:popup"] == "region:main.library"
+    assert controls == before  # Workflow IDs and the right-click target survive.
