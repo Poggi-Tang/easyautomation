@@ -11,7 +11,7 @@ from urllib import request as urlrequest
 
 from . import workflows, relearning, state_matching
 from .deep_learning import Explorer, normalize_plan, step_ids, validate_plan
-from .mcp import configuration, image_storage, knowledge
+from .mcp import configuration, image_storage, knowledge, semantic_identity
 
 
 PLANNER_PROMPT = """You plan exhaustive interaction exploration starting from a user-selected UI region.
@@ -69,7 +69,12 @@ Set replayable=true only for reversible navigation which can be repeated without
 effect; committing, saving, creating or deleting data is never replayable. Do not invoke shells or run code.
 Return a JSON object with name, terminal, completion_checks, return_steps, unresolved (string array),
 branches (array of {name,steps,effect,replayable,control_id?,blocked?}), and semantics (optional array
-of {control_id,name,description}). Include blocked entries for every meaningful unavailable interaction.
+of {control_id,name,description}). Each description explains the control's user-facing function,
+relevant object, and any useful prerequisite. Write these descriptions in Simplified Chinese,
+even for English interfaces. Keep exact UI labels and test values unchanged.
+Never describe how it was found, recognized, located,
+or bound; keep evidence and verification status separate. Include blocked entries for every
+meaningful unavailable interaction.
 previous_learning contains historical branches and outcomes. Reconsider blocked/failed branches using
 the latest references and test inputs. Keep recognizable entry names and observed target IDs so results
 can be merged. Do not drop old entries without accounting for them as blocked/unresolved. For improve,
@@ -128,6 +133,22 @@ def _request_plan(settings, payload, image):
         raise RuntimeError("深度学习规划服务请求失败（"+type(error).__name__+"），未执行新的操作") from None
 
 
+def _execution_evidence(result):
+    """Retain interaction proof, not the geometry used to capture it."""
+    evidence = deepcopy(result)
+    frames = [evidence.get("failure_observation", {})]
+    for step in evidence.get("steps", []):
+        step.pop("rect", None)
+        frames.extend(step.get(key, {}) for key in ("before", "after"))
+        for check in step.get("checks", []):
+            check.pop("rect", None)
+            frames.append(check.get("observation", {}))
+    for frame in frames:
+        for key in ("rect", "normalized_rect", "main_rect", "context_size"):
+            frame.pop(key, None)
+    return evidence
+
+
 class NativeBackend:
     def __init__(self, library, app_id, region, expected, folder, *, inputs=None, instructions="",
                  allow_commit=False, reset_workflow_id="", max_controls=3000, progress=lambda _:None,
@@ -137,7 +158,8 @@ class NativeBackend:
         if not isinstance(self.inputs,dict):raise ValueError("测试输入必须为对象")
         self.allow_commit,self.reset_workflow_id=allow_commit,reset_workflow_id
         self.policy_identity=dict(allow_commit=allow_commit,reset_workflow_id=reset_workflow_id)
-        self.max_controls,self.progress,self.checkpoint=max_controls,progress,checkpoint
+        self.max_controls,self.progress=max_controls,progress
+        self.checkpoint=lambda result:checkpoint(_execution_evidence(result))
         self.settings=configuration.load_gui_configuration()
         if not all(self.settings.get(k) for k in ("api_url","api_key","api_model")):
             raise ValueError("深度学习需要配置 API URL、API Key 和 API Model，用于规划交互分支")
@@ -326,10 +348,8 @@ class NativeBackend:
 
     def existing_region_layout(self, frame):
         """A new exploration state need not be a new knowledge page."""
-        from .library_actions import resolve_record
         from .region_actions import condition_matches
-        from .mcp import dynamic_regions, manual_layout, scanner
-        from .mcp.results import ActionError
+        from .mcp import dynamic_regions, manual_layout
 
         if dynamic_regions.is_dynamic(self.region):
             return None
@@ -346,41 +366,40 @@ class NativeBackend:
         condition = self.library.record_state(self.app_id, self.region).get("condition")
         if condition and not condition_matches(condition, self.expected, frame["root"]):
             return None
-        layout = scope.learning_layout(self.app_id, frame["target"], region_id=self.region["id"])
-        layout["window_scope"]=window_scope
-        layout = manual_layout.adapt_to_window(layout, frame["bounds"], window=frame["root"], owner=self.expected)
+        target = frame["target"]
+        region = {**self.region, "id": self.region["id"].removeprefix(scope.page_id + ".")}
+        located = manual_layout.resolve_learning_region(
+            region, frame["image"], frame["bounds"], window=frame["root"], owner=target,
+            image_path=scope.asset(self.app_id, region.get("image", "")),
+        )
+        if located is None:
+            return None
+        rectangle, method, native = located
+        region = {**region, "normalized_rect": knowledge.normalized_rect(rectangle, frame["bounds"])}
+        layout = dict(app_id=self.app_id, page_id=scope.page_id, page_name=page.get("name", "人工区域布局"),
+                      window_handle=target["handle"], window_process_id=target["process_id"],
+                      window_class=target["class_name"], window_scope=window_scope, regions=[region],
+                      restrict_regions=True, geometry_adapted=method,
+                      image_size=dict(width=frame["image"].width, height=frame["image"].height))
+        if native is not None:
+            from .mcp.protocol import location_from_xpath
+            from .utils import get_control_xpath
+            path = get_control_xpath(native)
+            if path[-1].get("AutomationId"):
+                path[-1].pop("Name", None)
+            for step in path:
+                step.pop("foundIndex", None)
+            layout["region_entry_location"] = location_from_xpath(path)
         manual_layout.segmentation(layout, frame["bounds"])
-        if self.region.get("location", {}).get("Xpath"):
-            try:
-                control = resolve_record({**self.region, "window_scope":window_scope}, self.expected, frame["root"])
-            except ActionError as error:
-                if error.code == "control_not_found" and not error.reason:
-                    return None
-                raise
-            # Position-based picker paths can resolve a replacement panel. Verify
-            # its native identity and bounds before carrying over manual ownership.
-            for key, attribute in (("automation_id", "AutomationId"), ("class_name", "ClassName"),
-                                   ("control_type", "ControlTypeName")):
-                if self.region.get(key) and getattr(control, attribute, "") != self.region[key]:
-                    return None
-            current = scanner._rect(control)
-            bounds, rectangle = frame["bounds"], layout["regions"][0]["normalized_rect"]
-            for edge in ("left", "top", "right", "bottom"):
-                horizontal = edge in {"left", "right"}
-                expected = bounds["left" if horizontal else "top"] + rectangle[edge]*bounds["width" if horizontal else "height"]
-                if abs(current[edge]-expected) > 2:
-                    return None
         return layout
 
     def observe(self, *, root=False, route=()):
         from . import __version__
-        from .mcp import scanner, automatic_layout, local_learning
+        from .mcp import scanner, local_learning
         from .mcp import dynamic_regions
         if root:
             from .region_actions import open_region
             from .image_models import inspect_models
-            if not dynamic_regions.is_dynamic(self.region):
-                self.library.scoped(self.region["page_id"]).learning_layout(self.app_id,self.expected,region_id=self.region["id"])
             models=inspect_models(progress=self.progress)
             if not models["ok"]:raise ValueError(models["message"]+"；请先在设置中补齐标注模型和运行环境")
             if self.mode=="update" or self.previous_graph.get("states"):
@@ -391,13 +410,21 @@ class NativeBackend:
             else:
                 # Replay only the saved prerequisites here. The observation below
                 # verifies the entry, including controls that use image locators.
-                start={**self.start_record,"location":{}} if self.previous_graph.get("entry_control_id") else self.start_record
+                # The region's locator is verified on the fresh frame below, not by its
+                # recorded sibling ordinal before observing it.
+                start={**self.start_record,"location":{}}
                 open_region(self.library,self.app_id,start,self.expected,progress=self.progress,checkpoint=self.checkpoint)
         frame=self.stable_frame();identifier=frame["state_id"]
         previous=self.previous_node(frame,route,root)
         self.check_surface(frame,previous,root,route)
+        is_origin=root and (not previous or previous["id"]==self.previous_graph.get("root"))
+        entry_id=self.previous_graph.get("entry_control_id")
+        entry_only=bool(is_origin and entry_id and self.mode!="update")
+        retained_layout = None if entry_only else self.existing_region_layout(frame)
+        live_region = retained_layout["regions"][0]["normalized_rect"] if retained_layout else None
         cached=self.cache.get(identifier) or next((o for o in self.cache.values() if self.same_state(frame,o)),None)
-        if cached and cached["image"].size == frame["image"].size:
+        if (cached and cached["image"].size == frame["image"].size
+                and cached.get("live_region") == live_region):
             self.observed_controls={r["id"] for r in cached["controls"]}-self.excluded_entry_ids
             return cached
         if cached and not previous:
@@ -406,21 +433,17 @@ class NativeBackend:
             previous=dict(id=cached["node_id"],region_ids=cached["region_ids"],route=route or [])
         if root and self.mode=="resume" and self.previous_graph.get("states") and not previous:
             raise ValueError("未能匹配已有学习状态，控件属性和已完成进度已保留。请恢复原界面后继续；同一界面可选“改进学习结果”重新观察并复用记录，只有软件版本变化才需“适配软件更新”")
-        is_origin=root and (not previous or previous["id"]==self.previous_graph.get("root"))
-        entry_id=self.previous_graph.get("entry_control_id")
         if entry_id and is_origin:
             self.excluded_entry_ids={r["id"] for r in self.library.read(self.app_id)["controls"]
                                      if r.get("page_id")==self.region["page_id"] and r["id"]!=entry_id
                                      and entry_id not in r.get("navigation_path",[])
                                      and not any(s.get("target",{}).get("control_id")==entry_id
                                                  for s in self.library.entry_steps(self.app_id,r))}
-        entry_only=bool(is_origin and entry_id and self.mode!="update")
         observed_route=list(route or (previous or {}).get("route", []))
         if not observed_route and dynamic_regions.is_dynamic(self.region):observed_route=list(self.root_entry)
         popup_learning=bool(frame["scope"].get("kind")=="owned" and observed_route
                             and local_learning._menu_window(frame["root"]))
-        retained_layout = None if popup_learning or is_origin else self.existing_region_layout(frame)
-        retained_region = not dynamic_regions.is_dynamic(self.region) and (is_origin or retained_layout is not None)
+        retained_region = not popup_learning and (entry_only or retained_layout is not None)
         navigation_context=None
         scan_target=frame["target"]
         if popup_learning:
@@ -428,24 +451,22 @@ class NativeBackend:
             opener=next((r for r in self.library.read(self.app_id)["controls"] if r["id"]==opener_id),None)
             if opener is None:raise ValueError("弹窗入口已不存在，未创建无归属菜单项")
             scope=self.library.scoped(opener["page_id"])
-            layout=scope.learning_layout(self.app_id,self.expected)
+            layout=dict(app_id=self.app_id, page_id=scope.page_id, window_handle=self.expected["handle"],
+                        window_process_id=self.expected["process_id"], window_class=self.expected["class_name"],
+                        regions=[])
             navigation_context=dict(path=[*opener.get("navigation_path",[]),opener_id],
                 popup_handles=[frame["target"]["handle"]],
                 entry_steps=step_ids([*self.root_entry,*observed_route],"entry"))
             scan_target=self.expected
         elif retained_region:
             scope=self.library.scoped(self.region["page_id"])
-            layout=retained_layout or scope.learning_layout(self.app_id,frame["target"],region_id=self.region["id"])
-            if "bounds" in frame:
-                from .mcp import manual_layout
-                layout=manual_layout.adapt_to_window(layout,frame["bounds"],window=frame["root"],owner=self.expected)
-                manual_layout.segmentation(layout,frame["bounds"])
+            layout=retained_layout
         else:
             selected_scope=self.region.get("window_scope") or self.library.scoped(self.region["page_id"]).page(self.app_id).get("window_scope",{"kind":"main"})
             same_surface=selected_scope.get("kind","main")==frame["scope"].get("kind") and all(
                 not selected_scope.get(k) or selected_scope[k]==frame["scope"].get(k) for k in ("class_name","title"))
             if frame["scope"].get("kind")!="owned" or same_surface:
-                raise ValueError("所选区域的定位、边界或状态已变化，无法确认仍在学习范围内；请重新确认区域后继续，未执行整窗划区或扫描")
+                raise ValueError("无法通过控件属性或唯一的参考图片确认所选区域，或区域状态条件未满足；请确认区域后继续，未执行整窗划区或扫描")
             # A new state inside the same dialog is not a new region. Its stable
             # surface identity excludes changing values, pixels and HWNDs.
             surface=dict(window_scope=frame["scope"],native={k:str(getattr(frame["root"],a,""))
@@ -455,36 +476,44 @@ class NativeBackend:
                          and r.get("window_scope")==frame["scope"]]
             page_id=old_regions[0]["page_id"] if old_regions else knowledge.stable_id("deep-surface",self.app_id,surface)
             scope=self.library.scoped(page_id)
-            if not scope.regions(self.app_id):
-                source=self.folder/"deep-frame.png";frame["image"].save(source)
-                scope.save_capture(self.app_id,dict(image=str(source),width=frame["image"].width,height=frame["image"].height,
-                    window_name=frame["target"]["title"],window_class=frame["target"]["class_name"],window_scope=frame["scope"]))
-                proposal=automatic_layout.propose(frame["image"])
-                scope.apply_automatic_layout(self.app_id,proposal)
-                scope.confirm_layout(self.app_id)
-            layout=scope.learning_layout(self.app_id,frame["target"])
-            from .mcp.manual_layout import segmentation, adapt_to_window
-            if "bounds" in frame:
-                layout=adapt_to_window(layout,frame["bounds"],window=frame["root"],owner=self.expected)
-            segmentation(layout,dict(width=frame["image"].width,height=frame["image"].height))
-            layout["restrict_regions"]=True
+            # Only the already-verified dialog is in scope. Treat it as one
+            # region; changing content or DPI must not create a new layout.
+            region_id = f"{page_id}.dialog"
+            saved = next((r for r in self.library.read(self.app_id)["regions"] if r["id"] == region_id), {})
             with image_storage._vault_lock(self.library.root):
-                for region in scope.regions(self.app_id):
-                    region.update(learning_source="deep-learning",window_scope=frame["scope"])
-                    region.setdefault("learning_origin_region",self.region["id"])
-                    if "entry_steps" not in region:region["entry_steps"]=step_ids([*self.root_entry,*observed_route],"entry")
-                    if frame["scope"].get("kind") == "owned" and observed_route:
+                if not saved:
+                    from .mcp.protocol import location_from_xpath
+
+                    native = dict(Name=surface["native"]["name"], AutomationId=surface["native"]["automation_id"],
+                                  ClassName=surface["native"]["class_name"], ControlType=surface["native"]["type"])
+                    saved = dict(id=region_id, app_id=self.app_id, page_id=page_id,
+                                 name=frame["target"]["title"] or "对话框",
+                                 source="deep-learning", learning_source="deep-learning",
+                                 learning_origin_region=self.region["id"], window_scope=frame["scope"],
+                                 location=location_from_xpath([{k:v for k,v in native.items() if v}]),
+                                 image=image_storage.save_interaction_image(self.directory, frame["image"]),
+                                 entry_steps=step_ids([*self.root_entry,*observed_route],"entry"))
+                    if observed_route:
                         opener = observed_route[-1].get("target", {}).get("control_id")
-                        if opener and "parent_control_id" not in region:
-                            region["parent_control_id"] = opener
-                    knowledge.save_region(self.directory,region)
+                        if opener:
+                            saved["parent_control_id"] = opener
+                    knowledge.save_region(self.directory, saved)
+            target = frame["target"]
+            layout = dict(app_id=self.app_id, page_id=page_id, page_name=saved["name"],
+                          window_handle=target["handle"], window_process_id=target["process_id"],
+                          window_class=target["class_name"], window_scope=frame["scope"],
+                          image_size=dict(width=frame["image"].width, height=frame["image"].height),
+                          regions=[dict(id="dialog", name=saved["name"], description=saved.get("description", ""),
+                                        normalized_rect=dict(left=0., top=0., right=1., bottom=1.))],
+                          geometry_adapted="owned-dialog", restrict_regions=True)
         known_ids = ({r["id"] for r in self.library.read(self.app_id)["controls"]}
                      if retained_region and not is_origin and observed_route else set())
+        live_control_bounds = {}
         result=(dict(observed_control_ids=[],truncated=False) if entry_only else
             scanner.scan_window(scan_target["title"],"","","",__version__,root=self.library.root,
                 max_controls=self.max_controls,strategy="local-visual",manual_layout=layout,semantic_mode="native",
                 progress=self.progress,show_overlay=False,observation_owner=self.expected,
-                navigation_context=navigation_context))
+                navigation_context=navigation_context, observation_geometry=live_control_bounds))
         if not self.same_state(self.stable_frame(),frame):raise ValueError("扫描期间界面改变，未根据过时结果操作")
         snapshot=self.library.read(self.app_id)
         observed=set(result.get("observed_control_ids",[]))
@@ -516,42 +545,38 @@ class NativeBackend:
                     frame["issues"].append("指定入口尚未定位："+str(error))
         # A selected container is itself a meaningful context-menu entry even
         # though the visual scanner deliberately omits layout containers.
-        region_entry_valid=True
-        if is_origin and self.mode=="update" and self.region.get("location",{}).get("Xpath"):
-            from .library_actions import bind_window, resolve_record
-            try:resolve_record({**self.region,"window_scope":frame["scope"]},self.expected,bind_window(self.expected))
-            except Exception:
-                region_entry_valid=False
-                frame["issues"].append("区域本身的定位已变化，右键入口尚未验证；请使用修改边界重新拾取该区域后继续适配")
-        if is_origin and not entry_id and self.region.get("location",{}).get("Xpath") and region_entry_valid:
-            source={**self.region,"id":knowledge.stable_id("region-entry",self.region["id"]),"kind":"control",
-                    "semantic_name":self.region["name"],"region_id":self.region["id"],"status":"observed",
-                    "source":"region-context-entry",
-                    "window_scope":frame["scope"],"actions":["right-click"],"entry_steps":self.root_entry}
-            source["control_type"]=source["location"].get("ControlType") or "PaneControl"
+        native_entry = (retained_layout or {}).get("region_entry_location")
+        if is_origin and not entry_id and native_entry:
+            source=dict(id=knowledge.stable_id("region-entry",self.region["id"]),
+                        app_id=self.app_id,page_id=self.region["page_id"],
+                        semantic_name=self.region["name"],name=self.region["name"],
+                        region_id=self.region["id"],status="observed",source="region-context-entry",
+                        image=self.region.get("image", ""),location=native_entry,
+                        control_type=native_entry.get("ControlType") or "PaneControl",
+                        window_scope=frame["scope"],actions=["right-click"],entry_steps=self.root_entry)
             knowledge.save_control(self.directory,source);controls.append(source)
         region_ids=([self.region["id"]] if retained_region else
-                    [r["id"] for r in snapshot["regions"] if r.get("page_id")==scope.page_id])
+                    [f"{scope.page_id}.{r['id']}" for r in layout["regions"]])
         if popup_learning:
             region_ids=list(dict.fromkeys(r["region_id"] for r in controls))
         if self.revision:controls=self.revision.reconcile(controls,region_ids,complete=not result.get("truncated"))
-        planning_rects={}
-        if popup_learning:
-            # Knowledge uses the main-window coordinate frame; the planner sees
+        planning_rects=live_control_bounds
+        if popup_learning and live_control_bounds:
+            planning_rects={}
+            # The scan uses the main-window coordinate frame; the planner sees
             # the popup crop, so its hints must use that crop's frame.
             from .library_actions import bind_window
             main_bounds=scanner._window_rect(bind_window(self.expected))
-            for control in controls:
-                n=control["normalized_rect"]
+            for control_id, n in live_control_bounds.items():
                 rectangle={k:main_bounds["left" if k in {"left","right"} else "top"]
                     +n[k]*main_bounds["width" if k in {"left","right"} else "height"]
                     for k in ("left","top","right","bottom")}
-                planning_rects[control["id"]]=knowledge.normalized_rect(rectangle,frame["bounds"])
+                planning_rects[control_id]=knowledge.normalized_rect(rectangle,frame["bounds"])
         observation=dict(state_id=identifier,node_id=previous["id"] if previous else identifier,
             state_evidence=frame.get("state_evidence",{}),
             name=frame["target"]["title"],controls=controls,region_ids=region_ids,
             excluded_entry_control_ids=sorted(self.excluded_entry_ids),
-            planning_rects=planning_rects,
+            planning_rects=planning_rects, live_region=live_region,
             image=frame["image"],issues=[*frame["issues"],*(["本次控件扫描被截断"] if result.get("truncated") else [])])
         self.cache[identifier]=observation
         self.observed_controls={r["id"] for r in controls}-self.excluded_entry_ids
@@ -560,7 +585,7 @@ class NativeBackend:
     def plan(self, observation, route):
         from . import reference_library
         fields=("id","semantic_name","name","description","control_type","class_name","actions",
-                "is_enabled_at_scan","normalized_rect","observed_value","current_state","state_reason","help_text")
+                "is_enabled_at_scan","observed_value","current_state","state_reason","help_text")
         controls=[{k:r.get(k) for k in fields} for r in observation["controls"]]
         for control in controls:
             if control["id"] in observation.get("planning_rects",{}):
@@ -623,9 +648,14 @@ class NativeBackend:
                 if semantic.get("control_id") in payload["exploration_scope"].get("excluded_entry_control_ids",[]):continue
                 if record is None or record.get("semantic_source")=="manual":continue
                 if record.get("description_source")=="interaction-observation":continue
-                record.update(semantic_name=str(semantic.get("name") or record.get("semantic_name") or record["name"]),
-                              description=str(semantic.get("description",record.get("description",""))),
-                              semantic_source="deep-learning-inference",description_status="inferred")
+                description=semantic_identity.generated_description(semantic.get("description"))
+                name=semantic.get("name")
+                if not (name or description):
+                    continue
+                record.update(semantic_name=name or record.get("semantic_name") or record["name"],
+                              semantic_source="deep-learning-inference")
+                if description:
+                    record.update(description=description, description_status="inferred")
                 knowledge.save_control(self.directory,record)
             self.library._refresh(self.directory)
         return plan
@@ -674,13 +704,14 @@ class NativeBackend:
                 after_action=lambda _r,main:control_observation.capture_after(self.directory,main))
             if input_values:result["input_values"]=input_values
             if result.get("ok") and result.get("input_attempted") is not False:self.transition=transition or None
-            return result
+            return _execution_evidence(result)
         except Exception as error:
             # execute() attaches evidence once it enters the desktop execution loop.
             # Missing evidence here therefore means validation/preparation failed.
             if not hasattr(error,"execution_result"):
                 error.execution_result=dict(ok=False,input_attempted=False,error=str(error))
             if input_values:error.execution_result["input_values"]=input_values
+            error.execution_result = _execution_evidence(error.execution_result)
             raise
 
     def verify(self, observation, checks):
@@ -757,6 +788,7 @@ class NativeBackend:
                 budget-=len(steps)
                 execution=workflows.execute(flow,self.library.read(self.app_id)["controls"],self.expected,
                     parameters=self.inputs,directory=self.directory,progress=self.progress,checkpoint=self.checkpoint)
+                execution = _execution_evidence(execution)
                 self.library.save_workflow_execution(self.app_id,identifier,execution)
                 report.update(status="passed",reason="实际执行及结果校验通过",execution=execution,
                               definition_hash=execution["definition_hash"],control_hash=execution["control_hash"])
@@ -764,7 +796,7 @@ class NativeBackend:
             except Exception as error:
                 execution=getattr(error,"execution_result",None)
                 report.update(status="failed" if execution else "pending",reason=str(error))
-                if execution:self.library.save_workflow_execution(self.app_id,identifier,execution)
+                if execution:self.library.save_workflow_execution(self.app_id,identifier,_execution_evidence(execution))
             latest=workflows.load_catalog(self.directory)[identifier]
             self.library.save_workflow(self.app_id,{**latest,"update_validation":report})
 

@@ -14,7 +14,7 @@ Learn Windows applications in a GUI and save their controls and workflows for re
 
 Select a window, mark regions, learn controls, compose workflows, and run them again.
 The GUI, MCP and Python share one local Markdown knowledge vault, including manual edits
-and learned results. Current version: **1.1.4**. Windows only. The GUI is primarily
+and learned results. Current version: **1.1.5**. Windows only. The GUI is primarily
 Chinese; documentation is available in English and Chinese.
 
 **Free for individuals; enterprise use requires a paid license.** The same policy
@@ -93,10 +93,10 @@ and generate commands such as
 `main.keypad.enter-digit-6.click`.
 
 Use it to record desktop operations, write automated tests, or give an agent access
-to saved controls and workflows. Version `1.1.4` rechecks region bounds after window
-resizing and matches learning states across scaling and minor repainting, while
-preserving control properties and progress. Deleting a parent node now archives its
-descendant regions and controls together. See the [release notes](CHANGELOG.md).
+to saved controls and workflows. Version `1.1.5` locates deep-learning regions by
+UI Automation properties or a unique reference-image match instead of saved
+coordinates. It also improves exploration of editable controls and generates
+control descriptions in Simplified Chinese. See the [release notes](CHANGELOG.md).
 
 Saved-image annotation uses **YOLO + RapidOCR** by default: provide an image path and
 an output directory to receive separate text, graphic and combined annotation

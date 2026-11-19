@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+from contextlib import nullcontext
 from types import SimpleNamespace
 
 from PIL import Image, ImageDraw, ImageGrab
@@ -295,6 +297,40 @@ def _semantic_result(
         }
         for item in candidates
     }
+
+
+def test_visual_semantics_keep_original_label_but_accept_only_chinese_descriptions(monkeypatch):
+    raw_controls = [
+        dict(id=1, semantic_name="Find", observed_value="Find", description="Find text."),
+        dict(id=2, semantic_name="Save", observed_value="Save",
+             description="使用 Save 保存当前文档。"),
+    ]
+    image = Image.new("RGB", (100, 100))
+    candidates = [
+        dict(id=item["id"], uia_name=item["semantic_name"], automation_id="",
+             control_type="ButtonControl", localized_control_type="button", class_name="Button",
+             help_text="", is_keyboard_focusable=True, is_enabled=True, region_id="content",
+             supported_actions=["click"], relative_rect=dict(left=10, top=10, right=40, bottom=40))
+        for item in raw_controls
+    ]
+
+    def urlopen(request, **_kwargs):
+        prompt = json.loads(request.data)["messages"][1]["content"][0]["text"]
+        assert "Simplified Chinese" in prompt
+        return nullcontext()
+
+    monkeypatch.setattr(scanner.urlrequest, "urlopen", urlopen)
+    monkeypatch.setattr(scanner, "_read_completion_content",
+                        lambda _: json.dumps(dict(controls=raw_controls)))
+    semantics = scanner._request_control_semantics(
+        image, candidates, {}, [], "https://example.invalid", "test-key", "vision", "1"
+    )
+    targets = [dict(item, left=10, top=10, width=30, height=30) for item in raw_controls]
+    segments = scanner._validate_segments(dict(controls=targets), *image.size)
+    for first, second in (semantics.values(), segments["controls"]):
+        assert first["description"] == "" and first["observed_value"] == "Find"
+        assert second["description"] == "使用 Save 保存当前文档。"
+        assert second["observed_value"] == "Save"
 
 
 def test_template_verification_requires_correct_unique_location() -> None:

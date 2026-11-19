@@ -75,13 +75,16 @@ def test_deep_content_states_reuse_manual_region_through_real_scanner(local, mon
     store = KnowledgeLibrary(root)
     store.save_capture("chosen-app", dict(image=str(store.asset("chosen-app", store.page("chosen-app")["image"])),
         width=400, height=300, window_name="Example", window_class="WindowControl"))
+    region = store.regions("chosen-app")[0]
+    store.save_region("chosen-app", region["name"], region["normalized_rect"], region["id"])
     store.confirm_layout("chosen-app")
     region = store.regions("chosen-app")[0]
+    assert store.asset("chosen-app", region["image"]).is_file()
     expected = dict(handle=1, process_id=123, class_name="WindowControl", title="Example")
     monkeypatch.setattr(region_learning.configuration, "load_gui_configuration", lambda:dict(
         api_url="https://example.invalid/v1", api_key="test", api_model="test"))
     backend = region_learning.NativeBackend(store, "chosen-app", region, expected, root)
-    frame = dict(state_id="initial", image=Image.new("RGB", (400, 300)), target=expected,
+    frame = dict(state_id="initial", image=scanner._screenshot_window(scanner._rect(window)), target=expected,
                  scope={"kind":"main"}, bounds=scanner._rect(window), root=window, issues=[])
     monkeypatch.setattr(backend, "stable_frame", lambda:frame)
     repeated = backend.observe()
@@ -105,6 +108,9 @@ def test_deep_content_states_reuse_manual_region_through_real_scanner(local, mon
     assert all(r["page_id"] == layout["page_id"] and r["region_id"] == "toolbar" for r in snapshot["controls"])
     assert store.entry_steps("chosen-app", again["controls"][0])[0]["target"]["control_id"] == initial["id"]
     assert calls == [(400, 150)] * 4
+    # The basic scan's analysis stays intact; the three deep scans do not add detector JSON.
+    assert len(list((store.directory("chosen-app") / "analysis").glob("*/elements.json"))) == 1
+    assert all("normalized_rect" not in r for r in snapshot["controls"])
 
 
 @pytest.mark.parametrize("failure_first", [False, True])

@@ -3,7 +3,7 @@ from copy import deepcopy
 from types import SimpleNamespace
 
 import pytest
-from PIL import Image
+from PIL import Image, ImageDraw
 
 from easy_uiauto import region_actions, region_learning, workflows
 from easy_uiauto.mcp import knowledge, library_tools, scanner
@@ -58,6 +58,9 @@ def test_new_state_archives_regions_and_controls_without_replacing_manual_map(ba
     assert library.regions("demo")==before
     region=next(r for r in library.read("demo")["regions"] if r["id"]==result["region_ids"][0])
     assert region["learning_source"]=="deep-learning" and region["entry_steps"][0]["target"]["control_id"]==entry["id"]
+    assert "normalized_rect" not in region and library.asset("demo",region["image"]).is_file()
+    assert region["parent_control_id"] == entry["id"]
+    assert region["window_scope"] == frame["scope"]
     assert calls[0]["observation_owner"]==backend.expected and calls[0]["strategy"]=="local-visual"
     assert backend.observe(route=[]) is result and len(calls)==1
 
@@ -79,6 +82,11 @@ def test_changed_content_retains_manual_region_and_control_entry_routes(backend,
     from easy_uiauto.mcp import automatic_layout
     if drawn:
         backend.region.pop("location")
+        reference = backend.library.asset(backend.app_id, backend.region["image"])
+        draw = ImageDraw.Draw(content_frame["image"])
+        draw.rectangle((35, 22, 126, 45), fill="red")
+        draw.polygon([(40, 28), (70, 76), (110, 30)], fill="white")
+        content_frame["image"].crop((10, 10, 200, 100)).save(reference)
         knowledge.save_region(backend.directory, backend.region)
     before = deepcopy(library.read("demo"))
     entry = add_control(library)
@@ -132,7 +140,7 @@ def test_resume_old_state_uses_valid_manual_region_without_deleting_old_page(bac
     assert path.read_bytes() == saved
 
 
-@pytest.mark.parametrize("change", ["condition", "missing", "moved", "replacement", "owned", "other-window"])
+@pytest.mark.parametrize("change", ["condition", "missing", "outside", "replacement", "owned", "other-window"])
 def test_different_layout_does_not_reuse_manual_region(backend, library, monkeypatch, content_frame, change):
     from easy_uiauto import library_actions
     from easy_uiauto.mcp.results import ActionError
@@ -142,8 +150,8 @@ def test_different_layout_does_not_reuse_manual_region(backend, library, monkeyp
     elif change == "missing":
         def missing(*a, **kw):raise ActionError("control_not_found", "panel absent")
         monkeypatch.setattr(library_actions, "resolve_record", missing)
-    elif change == "moved":
-        content_frame["root"]._children[0].BoundingRectangle.bottom = 220
+    elif change == "outside":
+        content_frame["root"]._children[0].BoundingRectangle.bottom = 420
     elif change == "replacement":
         content_frame["root"]._children[0].AutomationId = "different-panel"
     elif change == "owned":
@@ -182,9 +190,73 @@ def test_resized_main_rebinds_region_without_writing_a_new_page(backend, library
     assert library.read("demo") == before
 
 
-def test_changed_layout_stops_without_repartitioning_or_writing(backend, library, monkeypatch, content_frame):
+def test_same_window_size_uses_moved_native_region_without_saving_coordinates(
+    backend, library, monkeypatch, content_frame,
+):
+    panel = content_frame["root"]._children[0]
+    backend.region.pop("normalized_rect")
+    knowledge.save_region(backend.directory, backend.region)
+    original = deepcopy(library.regions("demo"))
+    layouts = []
+    monkeypatch.setattr(backend, "stable_frame", lambda: content_frame)
+
+    def scan(*_args, **kwargs):
+        layouts.append(kwargs["manual_layout"])
+        return dict(observed_control_ids=[], truncated=False)
+
+    monkeypatch.setattr(scanner, "scan_window", scan)
+    first = backend.observe()
+    panel.BoundingRectangle.bottom = 240
+    second = backend.observe()
+    assert first["state_id"] == second["state_id"]
+    assert second["region_ids"] == [backend.region["id"]]
+    assert [layout["regions"][0]["normalized_rect"]["bottom"] for layout in layouts] == [.4, .6]
+    assert library.regions("demo") == original
+
+
+@pytest.mark.parametrize("duplicate", [False, True])
+def test_live_region_image_fallback_requires_a_unique_match(
+    backend, content_frame, monkeypatch, duplicate,
+):
+    from easy_uiauto import library_actions
+    from easy_uiauto.mcp.results import ActionError
+
+    def missing(*_args, **_kwargs):
+        raise ActionError("control_not_found", "UIA region absent")
+
+    monkeypatch.setattr(library_actions, "resolve_record", missing)
+    template = Image.new("RGB", (40, 24), "white")
+    draw = ImageDraw.Draw(template)
+    draw.polygon([(2, 3), (33, 20), (15, 22)], fill="black")
+    draw.rectangle((24, 3, 29, 12), fill="red")
+    ref = backend.library.asset(backend.app_id, backend.region["image"])
+    template.save(ref)
+    content_frame["image"].paste(template, (80, 50))
+    if duplicate:
+        content_frame["image"].paste(template, (210, 130))
+    layout = backend.existing_region_layout(content_frame)
+    if duplicate:
+        assert layout is None
+    else:
+        assert layout["geometry_adapted"] == "image-location"
+        assert layout["regions"][0]["normalized_rect"]["left"] == .2
+        assert layout["regions"][0]["normalized_rect"]["right"] == .3
+
+
+def test_duplicate_native_region_identity_is_not_selected_by_old_ordinal(backend, content_frame):
+    from easy_uiauto.mcp.results import ActionError
+    from test_mcp_scanner import FakeControl
+
+    duplicate = FakeControl("另一个标题", "PaneControl", (50, 200, 450, 300), automation_id="101")
+    duplicate.ClassName = "NativePanel"
+    content_frame["root"]._children.append(duplicate)
+    with pytest.raises(ActionError, match="多个"):
+        backend.existing_region_layout(content_frame)
+
+
+def test_unidentified_area_stops_without_repartitioning_or_writing(backend, library, monkeypatch, content_frame):
     before = deepcopy(library.regions("demo")); page = deepcopy(library.page("demo"))
-    content_frame["root"]._children[0].BoundingRectangle.bottom = 240
+    content_frame["root"]._children[0].AutomationId = "unknown"
     backend.previous_graph = dict(states={"old-node":dict(id="old-node", fingerprint=content_frame["state_id"],
                                                         region_ids=[backend.region["id"]], route=[])})
     monkeypatch.setattr(backend, "stable_frame", lambda:content_frame)
@@ -393,20 +465,18 @@ def test_scoped_post_learning_validation_does_not_replay_unrelated_workflow(back
     assert report["status"]=="pending" and "本次控件学习" in report["reason"]
 
 
-def test_update_reuses_region_and_node_identity_when_interface_changes(backend,library,monkeypatch):
+def test_update_reuses_region_and_node_identity_when_interface_changes(backend,library,monkeypatch,content_frame):
     from easy_uiauto import library_actions, image_models
     record=add_control(library);record.update(region_id=backend.region["id"],semantic_source="manual",semantic_name="人工按钮")
     knowledge.save_control(library.directory("demo"),record)
     node=dict(id="old-state",fingerprint="old-state",name="主界面",route=[],region_ids=[backend.region["id"]],
               controls=[record["id"]],branches=[],issues=[],terminal=False,verified_terminal=False)
     backend.configure_learning(dict(root="old-state",states={"old-state":node}),"update",[],[])
-    image=Image.new("RGB",(400,300),"white")
-    frame=dict(state_id="updated-state",image=image,target=backend.expected,scope={"kind":"main"},issues=[])
+    frame={**content_frame,"state_id":"updated-state"}
     monkeypatch.setattr(backend,"stable_frame",lambda:deepcopy(frame))
     monkeypatch.setattr(image_models,"inspect_models",lambda **_:dict(ok=True))
     monkeypatch.setattr(library_actions,"activate_application",lambda _:None)
     monkeypatch.setattr(library_actions,"bind_window",lambda _:object())
-    monkeypatch.setattr(library_actions,"resolve_record",lambda *a,**k:object())
     def forbidden(*a,**k):raise AssertionError("update replayed old region entry")
     monkeypatch.setattr(region_actions,"open_region",forbidden)
     layouts=[]
@@ -460,19 +530,21 @@ def test_update_validation_does_not_execute_unsupported_or_unapproved_commit(bac
 
 def test_planner_improves_selected_semantics_and_keeps_manual_and_observed_effects(backend,library,monkeypatch):
     base=add_control(library);records=[]
-    for identifier,extra in (("selected",{}),("other",{}),("manual",dict(semantic_source="manual")),
+    for identifier,extra in (("selected",{}),("english",{}),("other",{}),
+                             ("manual",dict(semantic_source="manual")),
                              ("observed",dict(description_source="interaction-observation"))):
         record={**deepcopy(base),"id":identifier,"semantic_name":"旧名称","description":"旧说明",**extra}
         knowledge.save_control(library.directory("demo"),record);records.append(record)
-    backend.configure_learning(dict(states={},root=""),"improve",["selected","manual","observed"],[])
+    backend.configure_learning(dict(states={},root=""),"improve",["selected","english","manual","observed"],[])
     def plan(settings,payload,image):
         assert payload["learning_mode"]=="improve" and "selected" in payload["selected_control_ids"]
-        return dict(branches=[],semantics=[dict(control_id=r["id"],name="改进名称",description="改进说明") for r in records])
+        return dict(branches=[],semantics=[dict(control_id=r["id"],name="改进名称",
+            description="English only." if r["id"]=="english" else "改进说明") for r in records])
     monkeypatch.setattr(region_learning,"_request_plan",plan)
     backend.plan(dict(controls=records,image=Image.new("RGB",(10,10))),[])
     current={r["id"]:r for r in library.read("demo")["controls"]}
     assert current["selected"]["description"]=="改进说明"
-    assert all(current[i]["description"]=="旧说明" for i in ("other","manual","observed"))
+    assert all(current[i]["description"]=="旧说明" for i in ("english","other","manual","observed"))
 
 
 def test_preflight_failure_is_recorded_as_no_input(backend,library,monkeypatch):
@@ -482,20 +554,20 @@ def test_preflight_failure_is_recorded_as_no_input(backend,library,monkeypatch):
     assert caught.value.execution_result["input_attempted"] is False
 
 
-def test_full_update_reuses_flows_and_verifies_changed_navigation(backend,library,monkeypatch):
+def test_full_update_reuses_flows_and_verifies_changed_navigation(backend,library,monkeypatch,content_frame):
     from easy_uiauto import image_models, library_actions
     from easy_uiauto.deep_learning import Explorer
     base=add_control(library);machine=dict(state="root",version=1);observed_pages=[];executed=[]
     monkeypatch.setattr(image_models,"inspect_models",lambda **_:dict(ok=True))
     monkeypatch.setattr(library_actions,"activate_application",lambda _:None)
     monkeypatch.setattr(library_actions,"bind_window",lambda _:object())
-    monkeypatch.setattr(library_actions,"resolve_record",lambda *a,**k:object())
     monkeypatch.setattr(region_actions,"open_region",lambda *a,**k:None)
     def frame():
         return dict(state_id=f"v{machine['version']}-{machine['state']}",image=Image.new("RGB",(400,300)),
                     target=backend.expected if machine["state"]=="root" else {**backend.expected,"handle":789,"title":"Dialog"},
                     scope={"kind":"main"} if machine["state"]=="root" else dict(kind="owned",title="Dialog",class_name="Window"),
-                    root=object(),visible_windows={(789,456,"Window")} if machine["state"]!="root" else set(),issues=[])
+                    root=content_frame["root"] if machine["state"]=="root" else object(),
+                    bounds=content_frame["bounds"],visible_windows={(789,456,"Window")} if machine["state"]!="root" else set(),issues=[])
     def scan(*args,**kwargs):
         layout=kwargs["manual_layout"];observed_pages.append((machine["version"],machine["state"],layout["page_id"]))
         ids={"root":["menu","toolbar"],"dialog":["fill"],"done":["result"]}[machine["state"]]
@@ -559,6 +631,20 @@ def test_planner_receives_observed_search_terms_and_action_feedback(backend, lib
         return dict(branches=[])
     monkeypatch.setattr(region_learning, "_request_plan", request)
     backend.plan(dict(controls=[record], image=Image.new("RGB", (10, 10)), planning_feedback=feedback, return_context=returned), [])
+
+
+def test_deep_execution_evidence_preserves_properties_and_images_without_geometry():
+    evidence = {"steps": [{"input_attempted": True, "resolved_by": "image", "rect": {"left": 1},
+                           "before": {"context_image": "scene.png", "control_image": "control.png",
+                                      "context_size": {"width": 100}, "normalized_rect": {"left": .1}},
+                           "checks": [{"text": "验证通过", "rect": {"left": 2}}]}],
+                "failure_observation": {"main_rect": {"top": 0}, "context_image": "result.png"}}
+    proof = region_learning._execution_evidence(evidence)
+    assert proof["steps"] == [{"input_attempted": True, "resolved_by": "image",
+                              "before": {"context_image": "scene.png", "control_image": "control.png"},
+                              "checks": [{"text": "验证通过"}]}]
+    assert proof["failure_observation"] == {"context_image": "result.png"}
+    assert evidence["steps"][0]["rect"] == {"left": 1}
 
 
 def test_input_capture_uses_live_value_not_placeholder_and_preserves_first_value(backend, library, monkeypatch):

@@ -417,7 +417,8 @@ def locate_template(template, screenshot, window_rect: dict) -> dict:
             "second_score": 0.0,
             "detail": "control image is too small",
         }
-    if template.width >= screenshot.width or template.height >= screenshot.height:
+    if (template.width > screenshot.width or template.height > screenshot.height
+            or template.size == screenshot.size):
         return {
             "found": False,
             "score": 1.0,
@@ -766,10 +767,14 @@ def _segment_image(
         '"intent":"open-menu","role":"action","actions":["click"],"risk":"safe",'
         '"confidence":0.97,"left":10,"top":10,"width":40,"height":40}]}. '
         "Use compact JSON. Omit optional empty/default fields; do not repeat boilerplate "
-        "descriptions for every icon. Optional fields are entity_type, observed_value, "
+        "descriptions for every icon. Descriptions must state the user-facing function, affected "
+        "object, and useful prerequisite; never describe how the item was detected, located, "
+        "bound, or inferred. Write control, page and region descriptions in Simplified Chinese "
+        "even for English interfaces. Keep literal UI text and identifiers unchanged. "
+        "Optional fields are entity_type, observed_value, "
         "dynamic_context, current_state, state_reason, enabling_condition, relationships, "
         "aliases, requires_confirmation, description, ambiguity and evidence. Include these "
-        "when they carry visible information; keep descriptions under twelve words. "
+        "when they carry visible information; keep descriptions to one short sentence. "
         "Every control must include numeric confidence from 0 to 1. Use low confidence and "
         "ambiguity when an icon's function cannot be established from visible evidence. "
         "Keep a visually distinct notification badge as its own element even when attached "
@@ -898,7 +903,7 @@ def _semantic_context(raw: dict) -> dict:
             "type": knowledge.slugify(item.get("type") or "related-to"),
             "target_intent": knowledge.slugify(item.get("target_intent") or "", ""),
             "target_entity": knowledge.slugify(item.get("target_entity") or "", ""),
-            "description": str(item.get("description") or "").strip()[:300],
+            "description": semantic_identity.generated_description(item.get("description"), 300),
         }
         relationships.append({key: value for key, value in relationship.items() if value})
     return {
@@ -979,11 +984,15 @@ def _request_control_semantics(
         "Use the original screenshot for visual context and the annotated screenshot to map "
         "numeric IDs. Use the UI Automation metadata below too. Infer meaning from labels, icons, "
         "nearby text, region, layout, and application context together. Do not merely repeat the "
-        "control type or invent a purpose when evidence is weak. For ambiguous controls, explain "
+        "control type or invent a purpose when evidence is weak. The description must explain "
+        "what the control does for the user, not that it was recognized by UIA, OCR, an image, "
+        "a region, or a label. Put recognition evidence and verification status in their "
+        "separate fields. Write descriptions in Simplified Chinese even for English interfaces. "
+        "Keep literal labels and identifiers unchanged. For ambiguous controls, explain "
         "the ambiguity and set confidence "
         "below 0.72. Return every input ID exactly once as strict JSON only: "
         '{"controls":[{"id":1,"semantic_name":"Save document","intent":"save-document",'
-        '"description":"Save the current document to disk","role":"action",'
+        '"description":"将当前文档保存到磁盘。","role":"action",'
         '"entity_type":"document-action","observed_value":"",'
         '"dynamic_context":false,"current_state":"enabled","state_reason":"",'
         '"enabling_condition":"",'
@@ -1080,7 +1089,7 @@ def _request_control_semantics(
         semantics[item_id] = {
             "semantic_name": semantic_name,
             "intent": intent,
-            "description": str(raw.get("description") or "").strip()[:500],
+            "description": semantic_identity.generated_description(raw.get("description"), 500),
             "role": knowledge.slugify(raw.get("role") or "control"),
             "actions": actions,
             "aliases": [str(value).strip() for value in aliases[:12] if str(value).strip()]
@@ -1141,7 +1150,7 @@ def _validate_segments(result: dict, width: int, height: int) -> dict:
     page = {
         "id": knowledge.slugify(page.get("id") or page.get("name") or "main", "main"),
         "name": str(page.get("name") or "Main"),
-        "description": str(page.get("description") or ""),
+        "description": semantic_identity.generated_description(page.get("description")),
     }
     regions = []
     for index, region in enumerate(result.get("regions", []), start=1):
@@ -1163,7 +1172,7 @@ def _validate_segments(result: dict, width: int, height: int) -> dict:
                 ),
                 "name": str(region.get("name") or f"Region {index}"),
                 "role": knowledge.slugify(region.get("role") or "content"),
-                "description": str(region.get("description") or ""),
+                "description": semantic_identity.generated_description(region.get("description")),
                 "rect": {
                     "left": left,
                     "top": top,
@@ -1180,7 +1189,7 @@ def _validate_segments(result: dict, width: int, height: int) -> dict:
                 "id": "content",
                 "name": "Content",
                 "role": "content",
-                "description": "Fallback full-window region",
+                "description": "覆盖整个窗口的默认区域。",
                 "rect": {
                     "left": 0,
                     "top": 0,
@@ -1217,7 +1226,7 @@ def _validate_segments(result: dict, width: int, height: int) -> dict:
                 "region_id": knowledge.slugify(raw.get("region") or "unassigned"),
                 "semantic_name": str(raw.get("semantic_name") or "").strip()[:120],
                 "intent": knowledge.slugify(raw.get("intent") or "", ""),
-                "description": str(raw.get("description") or "").strip()[:500],
+                "description": semantic_identity.generated_description(raw.get("description"), 500),
                 "role": knowledge.slugify(raw.get("role") or "control"),
                 "actions": [
                     str(value).strip()
@@ -1491,7 +1500,7 @@ def _supplement_desktop_targets(window, window_rect: dict, segmentation: dict,
             targets.append({
                 "id": len(targets) + 1, "region_id": "desktop-items",
                 "semantic_name": "Desktop item", "intent": "open-desktop-item",
-                "description": "Open the named desktop item; its effect has not been tested.",
+                "description": "打开选中的桌面项目。",
                 "role": "action", "entity_type": "desktop-item", "observed_value": name,
                 "dynamic_context": True, "actions": ["double-click"], "aliases": [name],
                 "risk": "unknown", "requires_confirmation": True, "confidence": 1.0,
@@ -1507,7 +1516,7 @@ def _supplement_desktop_targets(window, window_rect: dict, segmentation: dict,
     if added:
         segmentation["regions"].append({
             "id": "desktop-items", "name": "Desktop items", "role": "desktop-workspace",
-            "description": "Individually enumerated Windows desktop items",
+            "description": "可从此处打开桌面上的文件、文件夹和快捷方式。",
             "rect": _relative_rect(window_rect, window_rect),
         })
     segmentation.setdefault("coverage", {}).update(
@@ -1522,7 +1531,7 @@ def _segment_desktop(screenshot, window, window_rect: dict, api_url: str, api_ke
     width, height = screenshot.size
     segmentation = _validate_segments({"page": {
         "id": "desktop", "name": "Windows Desktop",
-        "description": "Native desktop items with visually analyzed taskbars",
+        "description": "通过桌面项目和任务栏打开或切换应用。",
     }}, width, height)
     _supplement_desktop_targets(window, window_rect, segmentation, max_controls)
     bars = []
@@ -1866,6 +1875,7 @@ def scan_window(
     semantic_mode: str = "api",
     navigation_context: dict | None = None,
     observation_owner: dict | None = None,
+    observation_geometry: dict | None = None,
 ) -> dict:
     """Scan one visible application window and persist its UI command knowledge."""
     started = time.perf_counter()
@@ -1887,10 +1897,14 @@ def scan_window(
         raise ValueError("semantic_mode must be api or native")
     if navigation_context is not None and manual_layout is None:
         raise ValueError("展开控件学习必须绑定人工布局的所选窗口")
+    popup_only = bool(navigation_context and navigation_context.get("popup_handles"))
+    popup_without_layout = bool(popup_only and observation_geometry is not None and manual_layout is not None
+                                and not manual_layout.get("regions"))
     if manual_layout is not None:
         from . import manual_layout as layout_rules
 
-        layout_rules.validate_regions(manual_layout.get("regions", []))
+        if not popup_without_layout:
+            layout_rules.validate_regions(manual_layout.get("regions", []))
         if strategy == "visual-first":
             strategy = "local-visual"
     elif strategy == "local-visual":
@@ -1931,10 +1945,14 @@ def scan_window(
     window_rect = _window_rect(window)
     if window_rect["width"] <= 1 or window_rect["height"] <= 1:
         raise RuntimeError(f"Window has no visible bounds: {actual_name}")
-    if manual_layout is not None:
-        manual_layout = layout_rules.adapt_to_window(manual_layout, window_rect, window=window, owner=observation_owner)
-    manual_segmentation = (layout_rules.segmentation(manual_layout, window_rect)
-                           if manual_layout is not None else None)
+    manual_segmentation = None
+    if popup_without_layout:
+        # The owned menu has its own capture; no main-page crop is needed.
+        manual_segmentation = dict(page=dict(id=manual_layout["page_id"]), regions=[], controls=[], coverage={})
+    elif manual_layout is not None:
+        if observation_geometry is None:
+            manual_layout = layout_rules.adapt_to_window(manual_layout, window_rect, window=window, owner=observation_owner)
+        manual_segmentation = layout_rules.segmentation(manual_layout, window_rect)
 
     process_id = int(getattr(window, "ProcessId", 0) or 0)
     process_name = _process_name(process_id)
@@ -1951,7 +1969,6 @@ def scan_window(
     page_image = directory / "images" / "pages" / "latest.png"
     local_reports, local_paths, local_frames = [], {}, []
     local_native_menu = None
-    popup_only = bool(navigation_context and navigation_context.get("popup_handles"))
     if manual_layout is not None:
         progress("Using human-defined regions")
         segmentation = manual_segmentation
@@ -1963,7 +1980,7 @@ def scan_window(
             if not popup_only and local_native_menu is None:
                 segmentation["controls"], local_reports = local_learning.detect(
                     screenshot, window_rect, segmentation, directory, progress,
-                    expanded=bool(navigation_context))
+                    expanded=bool(navigation_context), store_geometry=observation_geometry is None)
     elif strategy == "visual-first" and _is_desktop_window(window):
         progress("Resolving native desktop items")
         segmentation = _segment_desktop(
@@ -2022,22 +2039,28 @@ def scan_window(
         if existing_page.is_file():
             previous_page, _body = knowledge.read_markdown(existing_page)
             page_record = {**previous_page, **page_record}
-        page_record.update(region_source="manual", observed_window_size=(previous_page.get("observed_window_size")
-            if manual_layout.get("geometry_adapted") else None) or {
-            "width": window_rect["width"], "height": window_rect["height"]},
-            capture_geometry="visible-window-bounds", window_class=selected["class_name"])
-        if strategy == "local-visual":
-            page_record["local_annotations"] = local_reports
-    knowledge.save_page(directory, page_record)
+        page_record.update(capture_geometry="visible-window-bounds", window_class=selected["class_name"])
+        if observation_geometry is None:
+            page_record.update(region_source="manual", observed_window_size=(previous_page.get("observed_window_size")
+                if manual_layout.get("geometry_adapted") else None) or {
+                "width": window_rect["width"], "height": window_rect["height"]})
+            if strategy == "local-visual":
+                page_record["local_annotations"] = local_reports
+        else:
+            page_record.pop("layout_fingerprint", None)
+            if manual_layout.get("geometry_adapted") == "owned-dialog":
+                page_record.setdefault("region_source", "deep-learning")
+                page_record["window_scope"] = manual_layout["window_scope"]
+    if not popup_without_layout:
+        knowledge.save_page(directory, page_record)
     previous_regions = {r["id"]: r for _p, r in knowledge.iter_records(directory, "region")} if manual_layout is not None else {}
     for region in segmentation["regions"]:
         region_record = {key: value for key, value in region.items() if key != "rect"}
         previous_region = previous_regions.get(f"{page_id}.{region['id']}", {})
         rectangle = knowledge.normalized_rect(region["rect"], window_rect, relative=True)
-        if (manual_layout or {}).get("geometry_adapted"):
-            # The saved manual layout still refers to its original screenshot;
-            # adaptation only changes the coordinates of this scan.
-            rectangle = previous_region.get("normalized_rect") or rectangle
+        if observation_geometry is not None or (manual_layout or {}).get("geometry_adapted"):
+            # A live crop is not part of the region's saved layout or identity.
+            rectangle = previous_region.get("normalized_rect")
         knowledge.save_region(
             directory,
             {
@@ -2046,9 +2069,9 @@ def scan_window(
                 "id": f"{page_id}.{region['id']}",
                 "page_id": page_id,
                 "app_id": app_id,
-                "normalized_rect": rectangle,
-                "geometry_role": "visual-hint-only",
-                **({"source": "manual"} if manual_layout is not None else {}),
+                **({"normalized_rect": rectangle} if rectangle is not None else {}),
+                "geometry_role": previous_region.get("geometry_role", "visual-hint-only"),
+                **({"source": previous_region.get("source", "manual")} if manual_layout is not None else {}),
             },
         )
 
@@ -2087,7 +2110,8 @@ def scan_window(
                 if native_menu is not None:
                     found, meanings, missing, paths = native_menu
                 else:
-                    targets, reports = local_learning.detect(image, bounds, segmentation, directory, progress, expanded=True)
+                    targets, reports = local_learning.detect(image, bounds, segmentation, directory, progress,
+                        expanded=True, store_geometry=observation_geometry is None)
                     found, meanings, missing, paths = local_learning.resolve(
                         popup, bounds, targets, max(0,max_controls-len(controls)), progress)
                 dx, dy = bounds["left"]-window_rect["left"], bounds["top"]-window_rect["top"]
@@ -2286,9 +2310,32 @@ def scan_window(
     popup_regions = {}
     if strategy == "local-visual" and navigation_context:
         popup_regions = local_learning.expanded_regions(directory,controls,navigation_context,window_rect,
-            observation_frame,app_id,page_id,paths=local_paths,scopes=control_scopes)
+            observation_frame,app_id,page_id,paths=local_paths,scopes=control_scopes,
+            store_geometry=observation_geometry is None)
     popup_history = ([r for _p, r in knowledge.iter_records(directory, "control")]
                      if popup_regions else [])
+    def save_observed_control(record):
+        if observation_geometry is not None:
+            observation_geometry[record["id"]] = record["normalized_rect"]
+            record = {key: value for key, value in record.items() if key != "normalized_rect"}
+            for field, geometry_keys in (
+                ("visual_observation", {"normalized_rect", "main_rect", "context_size"}),
+                ("detection", {"normalized_rect", "analysis_result"}),
+            ):
+                if field in record:
+                    record[field] = {k: v for k, v in record[field].items() if k not in geometry_keys}
+            if "visual_components" in record:
+                record["visual_components"] = [
+                    {k: v for k, v in part.items() if k not in {"normalized_rect", "geometry_role"}}
+                    for part in record["visual_components"]
+                ]
+            if record.get("location", {}).get("PARAMETERS", {}).get("normalized_rect"):
+                location = record["location"]
+                record["location"] = {**location, "PARAMETERS": {
+                    k: v for k, v in location["PARAMETERS"].items() if k != "normalized_rect"
+                }}
+        knowledge.save_control(directory, record)
+
     for index, (control, depth) in enumerate(controls, start=1):
         if index == 1 or index == len(controls) or index % verification_interval == 0:
             progress(f"Verifying controls {index}/{len(controls)}")
@@ -2406,6 +2453,9 @@ def scan_window(
                     "semantic_name", "intent", "confidence", "source")}
                 semantic = {**semantic, **native_semantic, "visual_semantic_prediction": prediction}
             if native_semantic and binding["status"] not in {"conflict", "unresolved"}:
+                if not semantic.get("description") and semantic.get("source") != "manual":
+                    semantic = {**semantic, **{key: native_semantic[key] for key in (
+                        "description", "description_source", "description_status")}}
                 risk_order = {"unknown": 0, "safe": 1, "state-changing": 2,
                               "external": 3, "destructive": 4}
                 if (risk_order.get(native_semantic["risk"], 0)
@@ -2645,7 +2695,7 @@ def scan_window(
             if blocker and blocker.get("window_scope", {"kind":"main"}) == record.get("window_scope", {"kind":"main"}):
                 record = knowledge.merge_control_state(blocker, record)
             status = record["status"]
-            knowledge.save_control(directory, record)
+            save_observed_control(record)
             counts[status] += 1
             key_controls += int(is_key)
             saved_current += 1
@@ -2760,7 +2810,7 @@ def scan_window(
                             "semantic_confidence","semantic_status"):
                     if key in previous: visual_record[key]=previous[key]
             visual_record = knowledge.merge_control_state(previous,visual_record)
-        knowledge.save_control(directory,visual_record)
+        save_observed_control(visual_record)
         counts["observed"] += 1
         semantic_counts[semantic_status] += 1
         key_controls += 1
@@ -2825,9 +2875,15 @@ def scan_window(
 
         synchronize(directory, [r for _p, r in knowledge.iter_records(directory, "control")],
                     {r["id"] for r in scanned_records})
+    if observation_geometry is not None:
+        scanned_records = [
+            {**record, "normalized_rect": observation_geometry[record["id"]]}
+            if record["id"] in observation_geometry else record
+            for record in scanned_records
+        ]
     annotated_path, annotation_markers = visualization.save_scan_annotation(
         directory,
-        page_id,
+        f"{page_id}.expanded" if popup_without_layout else page_id,
         screenshot,
         window_rect,
         scanned_records,
@@ -2835,7 +2891,8 @@ def scan_window(
     page_record["annotated_image"] = str(annotated_path.relative_to(directory)).replace(
         "\\", "/"
     )
-    knowledge.save_page(directory, page_record)
+    if not popup_without_layout:
+        knowledge.save_page(directory, page_record)
     overlay = {"shown": False, "controls": 0, "detail": "disabled"}
     if show_overlay:
         live_markers = visualization.control_markers(

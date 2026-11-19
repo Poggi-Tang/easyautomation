@@ -314,9 +314,15 @@ def test_changed_regions_reduces_pixel_diff_to_local_boxes() -> None:
     assert regions[0]["width"] < 200
 
 
-def test_learn_command_effect_persists_before_after_and_success(monkeypatch, tmp_path) -> None:
+@pytest.mark.parametrize(("summary", "expected"), [
+    ("结果区域显示保存状态。", "结果区域显示保存状态。"),
+    ("Result changed.", "保存当前文档。"),
+])
+def test_learn_command_effect_persists_before_after_and_success(
+    monkeypatch, tmp_path, summary, expected
+) -> None:
     directory = knowledge.initialize_app("example", "Example", tmp_path)
-    knowledge.save_control(directory, _record())
+    knowledge.save_control(directory, {**_record(), "description": "保存当前文档。"})
     knowledge.rebuild_index(directory)
     before = _snapshot(_image(), "before-state")
     after = _snapshot(_image(True), "after-state")
@@ -346,7 +352,7 @@ def test_learn_command_effect_persists_before_after_and_success(monkeypatch, tmp
         interaction_learning,
         "_interpret_effects",
         lambda *_args: {
-            "summary": "Result changed.",
+            "summary": summary,
             "effects": [
                 {"type": "property_changed", "description": "Result text changed."}
             ],
@@ -371,6 +377,7 @@ def test_learn_command_effect_persists_before_after_and_success(monkeypatch, tmp
     assert interactions[0]["before_state_id"] == "before-state"
     control = knowledge.find_control_record(directory, "save")[1]
     assert control["function_verification"]["status"] == "effect-observed"
+    assert control["description"] == expected
 
 
 def test_safe_exploration_excludes_state_changing_and_blocked_intents(

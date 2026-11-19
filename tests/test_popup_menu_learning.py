@@ -158,7 +158,8 @@ def test_deep_observation_planner_and_tree_receive_current_popup_items(popup, mo
     # A popup observation must use the original page without replacing its layout.
     scanner.scan_window("Example", "", "", "", "test", root=root, manual_layout=layout, semantic_mode="native")
     library = KnowledgeLibrary(root, page_id=layout["page_id"])
-    knowledge.save_page(library.directory("chosen-app"), {**library.page("chosen-app"), "layout_confirmed":True})
+    original_page = library.page("chosen-app")
+    assert not original_page.get("layout_confirmed")
     origin = library.regions("chosen-app")[0]
     entry = {"id": "file-entry", "name": "文件", "app_id":"chosen-app", "page_id":layout["page_id"],
              "control_type":"MenuItemControl", "status":"observed",
@@ -174,6 +175,7 @@ def test_deep_observation_planner_and_tree_receive_current_popup_items(popup, mo
     backend.transition=dict(before_windows=set(),controls={entry["id"]},steps=[workflows.click_step(entry)])
     monkeypatch.setattr(backend, "stable_frame", lambda: frame)
     observation = backend.observe(route=[workflows.click_step(entry)])
+    assert observation["state_id"] == frame["state_id"]
     assert {r["name"] for r in observation["controls"]} == set(NAMES)
     assert all(r["window_scope"] == scope for r in observation["controls"])
     def plan(_settings, payload, _image):
@@ -197,8 +199,11 @@ def test_deep_observation_planner_and_tree_receive_current_popup_items(popup, mo
         region = next(r for r in snapshot["regions"] if r["id"] == record["region_id"])
         assert region["parent_control_id"] == entry["id"]
         saved=next(r for r in snapshot["controls"] if r["id"]==record["id"])
-        assert saved["normalized_rect"]["left"]==pytest.approx(355/400)
-        assert record["normalized_rect"]["left"]==pytest.approx(355/400)
+        assert "normalized_rect" not in saved and "normalized_rect" not in record
+        assert "normalized_rect" not in saved["detection"]
+        assert "normalized_rect" not in region and "visual_observation" not in region
+        assert region["location"]["Xpath"] and library.asset("chosen-app", region["image"]).is_file()
+    assert library.page("chosen-app") == original_page
     repeat = scanner.scan_window("Example", "", "", "", "test", root=root, manual_layout=layout,
         semantic_mode="native", navigation_context=dict(path=[entry["id"]], popup_handles=[2]))
     assert set(repeat["observed_control_ids"]) == {r["id"] for r in observation["controls"]}

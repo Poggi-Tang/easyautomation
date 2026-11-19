@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import math
 
+from .semantic_identity import generated_description
+
 
 def validate_regions(regions: list[dict]) -> list[dict]:
     """Accept flat, named, non-overlapping normalized rectangles."""
@@ -100,6 +102,60 @@ def adapt_to_window(layout: dict, window_rect: dict, *, window=None, owner=None)
     return layout
 
 
+def resolve_learning_region(region, screenshot, window_rect, *, window, owner, image_path):
+    """Obtain a live crop from identity or a unique template, never from a saved box."""
+    from PIL import Image
+
+    from ..library_actions import resolve_record
+    from ..utils import CONTROL_TYPE_IDS
+    from . import scanner
+    from .protocol import normalize_location
+    from .results import ActionError
+
+    location = normalize_location(region.get("location") or {})
+    # Position-mode picker paths contain sibling ordinals. They are not identities.
+    identifier = region.get("automation_id") or location["AutomationId"]
+    name = region.get("native_name") or location["Name"]
+    class_name = region.get("class_name") or location["ClassName"]
+    control_type = region.get("control_type") or location["ControlType"]
+    if identifier or name:
+        selector = {"AutomationId": identifier} if identifier else {"Name": name}
+        if class_name:
+            selector["ClassName"] = class_name
+        identity = dict(selector, ControlType=control_type)
+        root_matches = all(getattr(window, key, "") == value for key, value in selector.items()) and (
+            not control_type or getattr(window, "ControlTypeName", "") == control_type
+        )
+        try:
+            control = window if root_matches else resolve_record({"location": identity}, owner, window)
+        except ActionError as error:
+            if error.code != "control_not_found" or error.reason:
+                raise
+        else:
+            if not getattr(control, "IsOffscreen", False) and all(
+                getattr(control, key, "") == value for key, value in selector.items()
+            ) and (
+                not control_type or control.ControlTypeName == control_type
+            ):
+                if control_type:
+                    selector["ControlType"] = CONTROL_TYPE_IDS[control_type]
+                duplicate = window.Control(foundIndex=1 if root_matches else 2, **selector)
+                if duplicate.Refind(maxSearchSeconds=0, raiseException=False):
+                    raise ActionError("ambiguous_match", "区域属性匹配到多个控件，未扫描")
+                rectangle = scanner._rect(control)
+                if not (window_rect["left"] <= rectangle["left"] < rectangle["right"]
+                        <= window_rect["right"] and window_rect["top"] <= rectangle["top"]
+                        < rectangle["bottom"] <= window_rect["bottom"]):
+                    return None
+                return rectangle, "native-location", control
+    if image_path:
+        with Image.open(image_path) as image:
+            match = scanner.locate_template(image, screenshot, window_rect)
+        if match["found"]:
+            return match["rect"], "image-location", None
+    return None
+
+
 def segmentation(layout: dict, window_rect: dict) -> dict:
     """Map user rectangles to a same-size screenshot; never infer a new layout."""
     size = layout.get("image_size", {})
@@ -134,7 +190,7 @@ def native_semantics(candidate: dict) -> dict:
     return {"semantic_name": label, "intent": label, "role": "control",
             "name":name, "automation_id":candidate.get("automation_id", ""),
             "help_text":candidate.get("help_text", ""), "control_type":candidate.get("control_type", ""),
-            "description": candidate.get("help_text", ""),
+            "description": generated_description(candidate.get("help_text")),
             "actions": candidate.get("supported_actions", []), "aliases": [],
             "risk": "unknown", "requires_confirmation": True,
             "confidence": 1.0 if name else .4, "source": "uia-metadata",

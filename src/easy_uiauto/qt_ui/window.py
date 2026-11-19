@@ -601,12 +601,16 @@ class KnowledgeWindow(QMainWindow):
         actions=[]
         if kind=="vault":actions=[("添加软件",lambda:self.choose_window(new=True))]
         elif kind in {"application","controls-root","area"}:actions=[("添加区域",self.add_region),("查看区域",self.review_layout),("刷新截图",self.capture)]
+        elif kind=="region" and self.record.get("source")=="deep-learning":
+            actions=[("打开区域",self.open_region),("深度学习",self.deep_learn),("保存",self.save)]
         elif kind=="region":actions=[("打开区域",self.open_region),("查看区域",self.review_layout),("修改边界",lambda:self.pick_region(modify=True)),("基本学习",self.learn),("深度学习",self.deep_learn),("添加状态",self.add_variant),("保存",self.save)]
         elif kind=="control":actions=[("验证定位",self.verify),("执行",self.execute_control),("深度学习",self.deep_learn),("学习展开内容",self.expand),("插入前置步骤",self.insert_entries),("保存",self.save)]
         elif kind in {"actions-root","workflow"}:actions=[("新建",self.new_flow),("参数",self.parameters),("运行",self.run_flow),("运行结果",self.show_results),("保存",self.save)]
         if kind=="workflow":actions.insert(2,("插入前置步骤",self.insert_entries))
         if kind=="region" and dynamic_regions.is_dynamic(self.record):
-            actions=[("打开区域",self.open_region),("细分区域",self.subdivide),("深度学习",self.deep_learn),("重新学习展开内容",self.relearn_dynamic),("保存",self.save)]
+            actions=[("打开区域",self.open_region),("深度学习",self.deep_learn),("重新学习展开内容",self.relearn_dynamic),("保存",self.save)]
+            if self.record.get("normalized_rect"):
+                actions.insert(1,("细分区域",self.subdivide))
         elif kind in {"usage-root","usage"}:actions=[("新建说明",self.new_usage),("保存",self.save)]
         elif kind=="references-root":actions=[("添加参考文件",self.import_reference_files),("添加网页",self.import_reference_url)]
         elif kind=="reference":actions=[("保存",self.save),("重新整理",self.reimport_reference),
@@ -948,7 +952,9 @@ class KnowledgeWindow(QMainWindow):
         window=self.bound_window()
         if not window:return
         page=next((p for p in self.snapshots[app_id]["pages"] if p["id"]==record.get("page_id")),{})
-        if not dynamic_regions.is_dynamic(record) and not page.get("layout_confirmed") and not self.review_layout(for_learning=True):return
+        if (record.get("source") != "deep-learning" and not dynamic_regions.is_dynamic(record)
+                and not page.get("layout_confirmed") and not self.review_layout(for_learning=True)):
+            return
         library=self.library;selected_key=self.current["key"]
         def choose(history):
             if self.library.root!=library.root or self.current.get("key")!=selected_key or self.task:return
@@ -1099,8 +1105,9 @@ class KnowledgeWindow(QMainWindow):
     def show_reference(self):
         r=self.record;page=next((p for p in self.snapshots[self.app_id]["pages"] if p["id"]==r.get("page_id")),{})
         observation=r.get("visual_observation",{})
-        ref=observation.get("context_image") or page.get("layout_image") or page.get("image") or r.get("image")
         n=observation.get("normalized_rect") or r.get("normalized_rect")
+        ref=((r.get("image") if not n else None) or observation.get("context_image")
+             or page.get("layout_image") or page.get("image") or r.get("image"))
         path=self.library.asset(self.app_id,ref or "")
         markers=[(n,r.get("semantic_name") or r.get("name",""),True)] if n and ref!=r.get("image") else []
         self.image.show_image(path,markers);self.center.setCurrentWidget(self.image)
@@ -1128,12 +1135,17 @@ class KnowledgeWindow(QMainWindow):
                 def write():library.update_control(app_id,r["id"],**values);return key
             elif kind=="region":
                 name=self.name.text();description=self.description.toPlainText()
-                if dynamic_regions.is_dynamic(r):
+                if dynamic_regions.is_dynamic(r) and not r.get("normalized_rect"):
+                    def write():
+                        scope.configure_region(app_id,r["id"],name=name,description=description,
+                            steps=r.get("entry_steps",[]),condition=r.get("state_condition"),state_name=r.get("state_name",""))
+                        return key
+                elif dynamic_regions.is_dynamic(r):
                     def write():
                         library.save_dynamic_region(app_id,name,r["normalized_rect"],region_id=r["id"],description=description)
                         return key
                 else:
-                    if r.get("source")!="manual":raise ValueError("历史自动区域请重新添加后维护")
+                    if r.get("source") not in {"manual","deep-learning"}:raise ValueError("历史自动区域请重新添加后维护")
                     condition=deepcopy(self.entry_condition)
                     if condition:condition["kind"]=self.condition_kind.currentData()
                     steps=deepcopy(self.entry_editor.steps);state_name=self.state_name.text()

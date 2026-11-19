@@ -79,7 +79,7 @@ def _atomic_owner(control, xpath, absolute, window, passive_cache):
     return control, xpath
 
 
-def detect(image, bounds, segmentation, directory, progress, *, expanded=False):
+def detect(image, bounds, segmentation, directory, progress, *, expanded=False, store_geometry=True):
     """Use the same quality settings as the image CLI, without a vision API."""
     from ..local_image_worker import analyze
     from .diagram_geometry import is_text
@@ -93,15 +93,19 @@ def detect(image, bounds, segmentation, directory, progress, *, expanded=False):
         rect = area["rect"]
         crop = image.crop(tuple(rect[k] for k in ("left", "top", "right", "bottom")))
         progress(f"本地标注区域：{area.get('name', area['id'])}（YOLO＋RapidOCR）")
-        # Intermediate annotations are kept together, separately from reference crops.
+        # Deep learning consumes detector coordinates only within this scan.
         with TemporaryDirectory(prefix="easy-uiauto-region-") as temporary:
             source = Path(temporary) / "region.png"
             crop.save(source)
-            result = analyze(source, directory / "analysis", progress=progress)
-        reports.append({"region_id": area["id"], "offset": {"x": rect["left"], "y": rect["top"]},
-                        "result": str(Path(result["coordinates_json"]).relative_to(directory)).replace("\\", "/"),
-                        "annotated_image": str(Path(result["annotated_image"]).relative_to(directory)).replace("\\", "/"),
-                        "elements": result["element_count"], "truncated": result.get("truncated", False)})
+            analysis_dir = (directory if store_geometry else source.parent) / "analysis"
+            result = analyze(source, analysis_dir, progress=progress)
+        report = {"region_id": area["id"], "elements": result["element_count"],
+                  "truncated": result.get("truncated", False)}
+        if store_geometry:
+            report.update(offset={"x": rect["left"], "y": rect["top"]},
+                result=Path(result["coordinates_json"]).relative_to(directory).as_posix(),
+                annotated_image=Path(result["annotated_image"]).relative_to(directory).as_posix())
+        reports.append(report)
         for element in result["elements"]:
             r = element["rect"]
             values = [r[k] for k in ("left", "top", "right", "bottom")]
@@ -122,12 +126,12 @@ def detect(image, bounds, segmentation, directory, progress, *, expanded=False):
                     "relative_rect": {**pr, "left": pr["left"]+rect["left"],
                                       "right": pr["right"]+rect["left"],
                                       "top": pr["top"]+rect["top"], "bottom": pr["bottom"]+rect["top"]},
-                    "analysis_result": reports[-1]["result"]})
+                    "analysis_result": report.get("result", "")})
             targets.append({**element, "id": len(targets)+1, "relative_rect": relative,
                 "region_id": area["id"], "semantic_name": text or element.get("semantic_name") or "图形控件",
                 "observed_value": text, "role": "label" if is_text(element) else "control",
                 "source": "local-yolo-rapidocr", "evidence": [element.get("source", "local detection")],
-                "analysis_result": reports[-1]["result"], "visual_components": parts})
+                "analysis_result": report.get("result", ""), "visual_components": parts})
     return targets, reports
 
 
@@ -340,7 +344,7 @@ def resolve_menu(window, bounds, limit, progress):
     return (controls, semantics, failures, paths) if controls or failures else None
 
 
-def expanded_regions(directory, controls, context, bounds, frame, app_id, page_id, *, paths=None, scopes=None):
+def expanded_regions(directory, controls, context, bounds, frame, app_id, page_id, *, paths=None, scopes=None, store_geometry=True):
     """Retain detected menu ancestors as regions, never extra control records."""
     from ..utils import get_control_xpath
     from . import scanner, control_observation
@@ -367,14 +371,20 @@ def expanded_regions(directory, controls, context, bounds, frame, app_id, page_i
                 destination=directory/"images/regions"/image_path;destination.parent.mkdir(parents=True,exist_ok=True)
                 crop.save(destination)
                 old=next((r for _p,r in knowledge.iter_records(directory,"region") if r["id"]==identifier),{})
-                knowledge.save_region(directory,{**old,"id":identifier,"app_id":app_id,"page_id":page_id,
+                geometry = {}
+                if store_geometry:
+                    geometry = dict(coordinate_space="main-window", geometry_role="visual-hint-only",
+                        normalized_rect=knowledge.normalized_rect(rectangle,bounds),
+                        visual_observation=control_observation.describe(reference,capture_bounds,rectangle,bounds,phase="located"))
+                else:
+                    old = {k:v for k,v in old.items() if k not in
+                           {"coordinate_space", "geometry_role", "normalized_rect", "visual_observation"}}
+                knowledge.save_region(directory,{**old,**geometry,"id":identifier,"app_id":app_id,"page_id":page_id,
                     "name":old.get("name") or (getattr(current,"Name","") or "展开菜单"),
-                    "source":"local-visual-container","coordinate_space":"main-window",
+                    "source":"local-visual-container",
                     "parent_control_id":context["path"][-1],"navigation_path":context["path"],
                     "location":location_from_xpath(xpath),
                     "window_scope":(scopes or {}).get(id(control),(None,context.get("scope",{"kind":"main"})))[1],
-                    "geometry_role":"visual-hint-only","normalized_rect":knowledge.normalized_rect(rectangle,bounds),
-                    "visual_observation":control_observation.describe(reference,capture_bounds,rectangle,bounds,phase="located"),
                     "image":str(destination.relative_to(directory)).replace("\\","/"),
                     **({"entry_steps":context["entry_steps"]} if "entry_steps" in context else {})})
                 break

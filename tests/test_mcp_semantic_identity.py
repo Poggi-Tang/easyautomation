@@ -164,3 +164,46 @@ def test_visual_target_rejects_adjacent_conflicting_native_item():
         point_lookup=lambda *_a: control,
     )
     assert selected is None
+
+
+@pytest.mark.parametrize(
+    "native, expected, entity_type",
+    [
+        (
+            {"name": "保存(&S)...\tCtrl+S", "control_type": "ButtonControl"},
+            "保存当前文件、文档或工程。",
+            "ui-element",
+        ),
+        (
+            {"name": "Save", "control_type": "MenuItemControl"},
+            "保存当前文件、文档或工程。",
+            "ui-element",
+        ),
+        (
+            {"name": "查找内容(N):", "control_type": "EditControl"},
+            "输入要查找的文字或内容。",
+            "input",
+        ),
+        (
+            {"name": "Find what:", "control_type": "EditControl"},
+            "输入要查找的文字或内容。",
+            "input",
+        ),
+    ],
+)
+def test_native_semantics_describe_function_not_recognition_source(native, expected, entity_type):
+    result = semantic_identity.literal_semantics(native)
+    assert result["description"] == expected
+    assert result["observed_value"] == native["name"]
+    assert "identified" not in result["description"].lower()
+    assert "uia" not in result["description"].lower()
+    assert result["entity_type"] == entity_type
+    assert result["description_source"] == "uia-native-label"
+    assert result["description_status"] == "inferred"
+
+
+def test_every_recognized_native_action_has_a_function_description():
+    assert set(semantic_identity._ACTION_DESCRIPTIONS) == set(semantic_identity._ACTIONS)
+    for description in semantic_identity._ACTION_DESCRIPTIONS.values():
+        assert semantic_identity.generated_description(description) == description
+        assert not any(term in description for term in ("识别", "定位", "尚未验证"))

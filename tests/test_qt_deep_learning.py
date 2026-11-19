@@ -32,6 +32,27 @@ def test_deep_dialog_and_toolbar_use_separate_job(app,library,window,tmp_path,mo
     assert request["learning_options"]["allow_commit"] and request["learning_options"]["inputs"]=={"工程名称":"测试"}
 
 
+def test_learned_dialog_reopens_deep_learning_without_manual_geometry(app,library,window,monkeypatch):
+    from easy_uiauto.mcp import knowledge
+
+    identifier="learned-dialog.dialog"
+    directory=library.directory("demo")
+    knowledge.save_page(directory,dict(id="learned-dialog",app_id="demo",name="新建项目"))
+    knowledge.save_region(directory,dict(id=identifier,app_id="demo",page_id="learned-dialog",
+        name="新建项目",source="deep-learning",window_scope=dict(kind="owned",title="新建项目")))
+    window.reload("region:demo:"+identifier);settle(app,lambda:not window.jobs)
+    buttons={b.text():b for b in window.context_buttons}
+    assert "深度学习" in buttons and "修改边界" not in buttons
+    calls=[]
+    monkeypatch.setattr(window,"bound_window",lambda:dict(handle=123))
+    monkeypatch.setattr(window,"review_layout",lambda **_:pytest.fail("要求旧布局"))
+    monkeypatch.setattr(window,"start_task",lambda *a,**kw:calls.append(a))
+    monkeypatch.setattr(DeepLearningDialog,"exec",lambda _:QDialog.DialogCode.Accepted)
+    buttons["深度学习"].click()
+    settle(app,lambda:bool(calls))
+    assert calls[0][1]["region_id"] == identifier
+
+
 @pytest.mark.parametrize("entry", ["toolbar", "context-menu"])
 def test_control_deep_learning_uses_fixed_entry_and_restores_selection(app,library,window,tmp_path,monkeypatch,entry):
     from PySide6.QtGui import QAction

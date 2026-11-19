@@ -21,13 +21,16 @@ def test_entire_document_is_understood_and_explanations_need_no_literal_match(li
         assert '软件' in system and '持久化' in payload['software_understanding']
         return dict(controls=[dict(id=1,description='将正在编辑的工程持久化，供以后继续使用。',
             basis='根据工程持久化流程和Core_save的动作含义归纳',reference_ids=['guide'],uncertainty=False),
-            dict(id=2,uncertainty=True,reason='缺少可辨识的控件身份')])
+            dict(id=2,uncertainty=True,reason='缺少可辨识的控件身份'),
+            dict(id=3,description='Load a model.',basis='根据部署流程归纳',
+                 reference_ids=['guide'])])
     monkeypatch.setattr(refs,'complete',complete)
-    semantics={1:dict(semantic_name='Core_save'),2:dict(semantic_name='ButtonControl')}
+    semantics={1:dict(semantic_name='Core_save'),2:dict(semantic_name='ButtonControl'),3:dict(semantic_name='Load')}
     report={};result=refs.descriptions(directory,semantics,report=report,settings=SETTINGS)
     assert set(result)=={1} and result[1]['description_method']=='software-understanding'
     assert 'quote' not in result[1]['reference_evidence'][0]
     assert report['matched']==1 and report['unmatched'][0]['id']==2
+    assert report['unmatched'][1]['id']==3 and '中文功能说明' in report['unmatched'][1]['reason']
     parts=[p['reference']['text'] for p in seen if 'reference' in p]
     original=refs.documents(directory)[0]['body'].split('## 来源原文',1)[0]
     assert ''.join(parts)==original

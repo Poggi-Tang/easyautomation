@@ -51,6 +51,32 @@ def test_manual_scan_uses_exact_window_and_regions_without_api(setup):
     assert all(r["control_type"] != "WindowControl" for r in index["controls"])
 
 
+def test_scan_can_keep_geometry_only_in_the_live_observation(setup):
+    layout, _native, root = setup
+    layout["geometry_adapted"] = "native-location"
+    geometry = {}
+    result = run(layout, root, observation_geometry=geometry)
+    directory = knowledge.app_dir("chosen-app", root)
+    assert set(geometry) == set(result["observed_control_ids"])
+    assert result["annotated_controls"] > 0
+    for _, record in knowledge.iter_records(directory, "control"):
+        assert "normalized_rect" not in record
+        assert "normalized_rect" not in record["visual_observation"]
+        assert "main_rect" not in record["visual_observation"]
+        assert record["location"]["Xpath"] and (directory / record["image"]).is_file()
+    region = knowledge.load_index(directory)["regions"]
+    assert all("normalized_rect" not in record for record in region)
+
+
+def test_new_owned_surface_page_has_no_saved_geometry(setup):
+    layout, _native, root = setup
+    layout.update(geometry_adapted="owned-dialog", window_scope={"kind": "owned", "title": "Example"})
+    run(layout, root, observation_geometry={})
+    page = KnowledgeLibrary(root).page("chosen-app")
+    assert page["region_source"] == "deep-learning" and page["window_scope"] == layout["window_scope"]
+    assert "observed_window_size" not in page and "layout_fingerprint" not in page
+
+
 def test_repeat_learning_updates_instead_of_duplicate_records(setup):
     layout, _native, root = setup
     first = run(layout, root)

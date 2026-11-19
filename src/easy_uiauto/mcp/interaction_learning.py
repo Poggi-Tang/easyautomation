@@ -9,17 +9,25 @@ import io
 import json
 import re
 import time
-from uuid import uuid4
 from collections.abc import Callable
 from pathlib import Path
 from urllib import error as urlerror
 from urllib import request as urlrequest
+from uuid import uuid4
 
 import pyautogui
 import uiautomation
 
 from ..ctrl import Controller
-from . import configuration, image_storage, knowledge, native_windows, scanner, ui_cli
+from . import (
+    configuration,
+    image_storage,
+    knowledge,
+    native_windows,
+    scanner,
+    semantic_identity,
+    ui_cli,
+)
 
 BLOCKED_INTENT = re.compile(
     r"(send|publish|post|purchase|pay|delete|remove|upload|logout|log-out|close-window|exit)",
@@ -435,7 +443,10 @@ def _interpret_effects(
     prompt = (
         "Compare these before and after screenshots of one desktop UI operation. Only describe "
         "changes supported by the images and metadata. Generalize dynamic text as placeholders "
-        "such as {result}; do not hard-code one observed value as the rule. Return strict JSON: "
+        "such as {result}; do not hard-code one observed value as the rule. Write the summary, "
+        "effect descriptions and success condition in Simplified Chinese. Preserve exact UI labels "
+        "and placeholders. In the summary, state the user-facing effect, not how it was observed. "
+        "Return strict JSON: "
         '{"summary":"","effects":[{"type":"property_changed","description":"",'
         '"control_hint":"","property":"Name","value_pattern":""}],'
         '"success_condition":"","response_regions":[1],"confidence":0.95}. '
@@ -832,9 +843,10 @@ def learn_command_effect(
         found = knowledge.find_control_record(directory, record["id"])
         if found:
             _path, updated = found
+            description = semantic_identity.generated_description(interpretation.get("summary"))
             if (changed and not interference["detected"] and interpretation.get("confidence",0)>=.72
-                    and interpretation.get("summary") and updated.get("semantic_source")!="manual"):
-                updated.update(description=interpretation["summary"],description_source="interaction-observation",
+                    and description and updated.get("semantic_source")!="manual"):
+                updated.update(description=description,description_source="interaction-observation",
                                description_status="observed",description_effect_record=str(path.relative_to(directory)).replace("\\","/"))
             updated["function_verification"] = {
                 **updated.get("function_verification", {}),
