@@ -20,7 +20,7 @@ def dialog_frame(backend):
 
 
 @pytest.mark.parametrize("entry_only",[False,True])
-@pytest.mark.parametrize("change",["missing","moved","condition","replacement"])
+@pytest.mark.parametrize("change",["missing","outside","condition","replacement"])
 @pytest.mark.parametrize("owned",[False,True])
 def test_scope_failure_never_creates_unrelated_regions(backend,library,monkeypatch,content_frame,entry_only,change,owned):
     from easy_uiauto import region_actions
@@ -34,7 +34,7 @@ def test_scope_failure_never_creates_unrelated_regions(backend,library,monkeypat
     if change=="missing":
         def missing(*a,**kw):raise ActionError("control_not_found","panel gone")
         monkeypatch.setattr(library_actions,"resolve_record",missing)
-    elif change=="moved":content_frame["root"]._children[0].BoundingRectangle.bottom+=20
+    elif change=="outside":content_frame["root"]._children[0].BoundingRectangle.bottom=content_frame["bounds"]["bottom"]+20
     elif change=="replacement":content_frame["root"]._children[0].AutomationId="other-panel"
     else:
         backend.region["state_condition"]={"kind":"selected"}
