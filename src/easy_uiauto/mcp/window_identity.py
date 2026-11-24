@@ -84,7 +84,8 @@ def resolve(target):
         # Compatibility for old visual-only records containing the provider's Name.
         return _native_window_scope(title, {})
     if len(candidates) != 1:
-        captions = [dict(title=w.get("title", ""), handle=w.get("handle", 0)) for w in candidates[:10]]
+        captions = [dict(title=w.get("title", ""), handle=w.get("handle", 0), class_name=w.get("class_name", ""),
+                         process_id=w.get("process_id", 0)) for w in candidates[:10]]
         raise ActionError("ambiguous_match", f"Multiple visible windows match: {title}; candidates={captions}")
     control = uiautomation.ControlFromHandle(candidates[0]["handle"])
     if control is None:

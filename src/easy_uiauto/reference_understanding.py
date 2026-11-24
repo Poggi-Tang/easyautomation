@@ -47,7 +47,7 @@ _EXPLAIN = """你已经获得软件资料的阅读理解。现在结合这份理
 def _read_understanding(result):
     text=result.get("understanding")
     if not isinstance(text,str) or not text.strip():
-        raise RuntimeError("参考资料未生成有效的软件功能理解")
+        raise refs.ReferenceResponseError("参考资料未生成有效的软件功能理解", reason="invalid_understanding")
     return text.strip()
 
 
@@ -59,6 +59,29 @@ def _understand(system,payload,settings):
         # provider's output budget must not force another complete reading.
         concise=system+'\n输出预算有限：请只输出不超过1500字的核心理解，压缩术语细节，保留主要对象关系和UI操作逻辑。'
         return _read_understanding(refs.complete(concise,payload,settings=settings))
+
+
+def _reading_notes(part, checkpoint, *, settings, progress, label):
+    cached = refs._read_json(checkpoint)
+    if isinstance(cached,dict) and isinstance(cached.get("understanding"),str) and cached["understanding"].strip():
+        return [cached["understanding"]], []
+    size = len(part["text"])
+    try:
+        text = _understand(_UNDERSTAND, dict(reference=part), settings)
+    except refs.ReferenceResponseError as error:
+        if size <= 4000:
+            return [], [f"{label}「{part['name']}」({size} 字符)：{error}"]
+        progress(f"{label}：返回格式无效，缩小分段重试")
+        midpoint = size // 2
+        notes, failures = [], []
+        for index, text in enumerate((part["text"][:midpoint], part["text"][midpoint:]), 1):
+            result, errors = _reading_notes({**part, "text":text},
+                checkpoint.with_stem(checkpoint.stem+f"-{index}"), settings=settings,
+                progress=progress, label=label+f"/{index}")
+            notes.extend(result); failures.extend(errors)
+        return notes, failures
+    refs._write_json(checkpoint, dict(understanding=text))
+    return [text], []
 
 
 def understanding(directory, *, progress=lambda _:None, settings=None):
@@ -75,7 +98,7 @@ def understanding(directory, *, progress=lambda _:None, settings=None):
     settings=settings or configuration.load_gui_configuration()
     fingerprint=hashlib.sha256(json.dumps(dict(sources=sources,model=settings.get("api_model"),
         url=settings.get("api_url"),prompt=_UNDERSTAND,synthesis=_SYNTHESIZE),ensure_ascii=False,sort_keys=True).encode()).hexdigest()
-    folder=directory/"references/.understanding"/fingerprint
+    folder=directory/"references/.understanding"/fingerprint[:24]
     cache=folder/"model.json"
     if image_storage._safe_path(directory,cache) is None:raise ValueError("软件理解缓存路径无效")
     saved=refs._read_json(cache)
@@ -86,16 +109,19 @@ def understanding(directory, *, progress=lambda _:None, settings=None):
     for source in sources:
         for offset in range(0,len(source["text"]),16000):
             parts.append({**source,"text":source["text"][offset:offset+16000]})
-    notes=[]
+    notes, failures=[], []
+    refs._check_cache_path(folder/"part-0001-1-1.json")
     for index,part in enumerate(parts,1):
         progress(f"理解软件资料：{index}/{len(parts)}")
         checkpoint=folder/f"part-{index:04d}.json"
         if image_storage._safe_path(directory,checkpoint) is None:raise ValueError("软件理解缓存路径无效")
-        note=refs._read_json(checkpoint)
-        if not isinstance(note,dict) or not isinstance(note.get("understanding"),str) or not note["understanding"].strip():
-            note=dict(understanding=_understand(_UNDERSTAND,dict(reference=part),settings))
-            refs._write_json(checkpoint,note)
-        notes.append(dict(reference_id=part['reference_id'],part=index,text=note['understanding']))
+        readings, errors = _reading_notes(part, checkpoint, settings=settings, progress=progress,
+                                         label=f"第 {index}/{len(parts)} 段")
+        notes.extend(dict(reference_id=part['reference_id'],part=index,text=text) for text in readings)
+        failures.extend(errors)
+    if failures:
+        raise refs.ReferenceResponseError("；".join(failures)+"。已缓存成功段，未覆盖原控件说明。",
+                                          reason="incomplete_understanding")
     progress("形成软件整体功能理解")
     text=_understand(_SYNTHESIZE,dict(reading_notes=notes),settings) if len(notes)>1 else notes[0]['text']
     model=dict(text=text,source_ids=[s['reference_id'] for s in sources],updated_at=knowledge.utc_now(),

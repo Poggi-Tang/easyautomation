@@ -152,6 +152,38 @@ def test_scan_writes_native_title_without_changing_uia_location(setup):
     assert all(r['location']['Xpath'][0]['Name'] == 'Example' for r in index['controls'])
 
 
+def test_scan_blocks_minimized_window_before_capture_or_write(setup,monkeypatch):
+    from test_manual_region_scan import run
+    from types import SimpleNamespace
+    layout,native,root=setup
+    monkeypatch.setattr(scanner.native_windows,'_api',lambda:(SimpleNamespace(IsIconic=lambda h:h==native['handle']),None))
+    monkeypatch.setattr(scanner,'_screenshot_window',lambda *_:pytest.fail('must not capture minimized window'))
+    with pytest.raises(RuntimeError,match='最小化'):
+        run(layout,root)
+    assert not (root/'applications').exists()
+
+
+def test_explicit_handle_selects_same_title_popup_but_never_saves_it_as_main(setup,monkeypatch):
+    _layout,main,root=setup
+    popup={**main,'handle':2,'class_name':'Qt5152QWindowPopupSaveBits'}
+    windows=[main,popup]
+    monkeypatch.setattr(scanner.native_windows,'matching_windows',
+                        lambda _name,handle=0,**_kw:[w for w in windows if not handle or w['handle']==handle])
+    window=scanner.uiautomation.ControlFromHandle(1)
+    window.NativeWindowHandle=2
+    calls=[]
+    def bind(handle):
+        calls.append(handle)
+        return window
+    monkeypatch.setattr(scanner.uiautomation,'ControlFromHandle',bind)
+    with pytest.raises(ValueError,match='不能独立存为页面'):
+        scanner.scan_window('Example','','','','test',root=root,window_handle=2)
+    assert calls==[2] and not (root/'applications').exists()
+    with pytest.raises(ValueError,match='does not match'):
+        scanner.scan_window('Unrelated','','','','test',root=root,window_handle=2)
+    assert calls==[2]
+
+
 def test_manual_rescan_keeps_previous_screenshot_and_annotation_in_history(setup, monkeypatch):
     from test_manual_region_scan import run
     layout, _native, root = setup

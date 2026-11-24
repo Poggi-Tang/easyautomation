@@ -16,6 +16,19 @@ DOCUMENT = b'''<w:document xmlns:w="http://schemas.openxmlformats.org/wordproces
 <w:body><w:p><w:r><w:t>Save the project to disk.</w:t></w:r></w:p></w:body></w:document>'''
 
 
+def test_import_checkpoints_and_source_fit_customer_length(tmp_path,understand):
+    from easy_uiauto.mcp import knowledge
+    pad = 173-len(str(tmp_path/'applications/demo'))-1
+    root = tmp_path/('v'*pad)
+    directory = knowledge.initialize_app('demo','Demo',root)
+    assert len(str(directory))==173
+    source=tmp_path/'guide.md';source.write_text('Save the project to disk.',encoding='utf-8')
+    result=refs.import_reference(directory,source,settings=SETTINGS)
+    assert (directory/result['source_asset']).read_bytes()==source.read_bytes()
+    assert list(directory.glob('references/.imports/*/0001.json'))
+
+
+
 def digest(path):
     checksum = hashlib.sha256()
     with path.open("rb") as stream:

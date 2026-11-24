@@ -88,6 +88,7 @@ def _rect(control) -> dict:
 def _window_rect(window, bounds: dict | None = None) -> dict:
     """Use the same visible frame for capture, normalized hints and coordinate mapping."""
     handle = int(getattr(window, "NativeWindowHandle", 0) or 0)
+    native_windows.require_restored_window(handle)
     if bounds is None and handle:
         # Some Qt providers omit a frame pixel from UIA BoundingRectangle.
         # Capture and GUI picking must both use the current physical HWND frame.
@@ -1876,6 +1877,7 @@ def scan_window(
     navigation_context: dict | None = None,
     observation_owner: dict | None = None,
     observation_geometry: dict | None = None,
+    window_handle: int = 0,
 ) -> dict:
     """Scan one visible application window and persist its UI command knowledge."""
     started = time.perf_counter()
@@ -1910,6 +1912,10 @@ def scan_window(
     elif strategy == "local-visual":
         raise ValueError("local-visual requires defined regions and a bound window")
     progress("Finding target window through Win32")
+    if window_handle < 0:
+        raise ValueError("window_handle must be a positive Win32 HWND")
+    if manual_layout is not None and window_handle and window_handle != manual_layout.get("window_handle"):
+        raise ValueError("window_handle conflicts with the selected layout window")
     if manual_layout is not None:
         candidates = native_windows.matching_windows(
             window_name, handle=int(manual_layout.get("window_handle", 0)))
@@ -1923,10 +1929,22 @@ def scan_window(
         window = uiautomation.ControlFromHandle(selected["handle"])
         if window is None:
             raise ValueError("无法读取所选软件的 UI Automation 窗口")
+    elif window_handle:
+        matches = native_windows.matching_windows("", handle=window_handle)
+        if len(matches) != 1 or not matches[0]["visible"]:
+            raise ValueError("window_handle is closed or not visible; refresh list_windows")
+        selected = matches[0]
+        if window_name and selected["title"] != window_name:
+            raise ValueError("window_handle does not match the current native window title")
+        window = _find_window(dict(target_handle=window_handle, target_process_id=selected["process_id"],
+                                   target_native_class=selected["class_name"]))
     else:
         window = _find_window(window_name)
     progress("Reading target window through UI Automation")
+    native_windows.require_restored_window(int(getattr(window, "NativeWindowHandle", 0) or 0))
     identity = window_identity.describe(window, window_name)
+    if manual_layout is None and identity["class_name"].endswith("QWindowPopupSaveBits"):
+        raise ValueError("Qt 菜单弹窗不能独立存为页面；请从主窗口的菜单入口执行展开控件或区域深度学习")
     owner_identity = dict(identity)
     actual_name = (identity["title"] or identity["uia_name"] or window_name).strip()
     access = native_windows.check_uia_access(int(getattr(window, "ProcessId", 0) or 0))
@@ -2709,6 +2727,10 @@ def scan_window(
         target = failure.get("observation")
         if not isinstance(target, dict) or not isinstance(target.get("relative_rect"), dict):
             continue
+        # Recovered repetitions are detector evidence. Without a UIA binding
+        # they do not identify an individual control in the knowledge library.
+        if target.get("geometry_kind") == "repeated-icon":
+            continue
         rectangle = target["relative_rect"]
         semantic_name = target.get("semantic_name") or "Visual element"
         intent = target.get("intent") or knowledge.slugify(semantic_name, "visual-element")
@@ -2904,7 +2926,10 @@ def scan_window(
 
     progress("Pruning unreferenced knowledge images")
     try:
-        storage_result = image_storage.cleanup_images(directory, dry_run=False)
+        # Deep observations are provisional until their exploration plan is
+        # accepted. Cleanup must not remove assets of records being replaced.
+        storage_result = (image_storage.cleanup_images(directory, dry_run=False)
+                          if observation_geometry is None else {"ok": True, "deferred": True})
     except (OSError, ValueError) as error:
         storage_result = {"ok": False, "detail": f"Image cleanup deferred: {error}"}
     progress("Finalizing knowledge index and command catalog")

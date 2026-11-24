@@ -1192,6 +1192,7 @@ async def scan_window_knowledge(
     show_overlay: bool = True,
     overlay_duration_ms: int = 3000,
     vault: str = "",
+    window_handle: int = 0,
 ) -> str:
     """Scan one application window into an Obsidian-compatible UI knowledge vault.
 
@@ -1217,6 +1218,8 @@ async def scan_window_knowledge(
         show_overlay: Draw all controls learned by this scan in one click-through overlay.
         overlay_duration_ms: Overlay lifetime from 300 to 30000 milliseconds.
         vault: Shared knowledge directory; omit to use the configured default.
+        window_handle: Exact HWND from list_windows for otherwise ambiguous captions.
+            When set, window_name can be empty or the exact current Win32 title.
     """
     try:
         task_id = learning_progress.begin(window_name, strategy)
@@ -1245,6 +1248,7 @@ async def scan_window_knowledge(
                     show_overlay=show_overlay,
                     overlay_duration_ms=overlay_duration_ms,
                     progress=update_progress,
+                    window_handle=window_handle,
                     **({"root": Path(vault)} if vault else {}),
                 )
             result["learning_task_id"] = task_id

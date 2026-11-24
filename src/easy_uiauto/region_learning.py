@@ -1,6 +1,7 @@
 """Native adapter for regional interaction exploration using the configured API."""
 from __future__ import annotations
 
+from contextlib import contextmanager
 from copy import deepcopy
 import base64
 import io
@@ -392,6 +393,39 @@ class NativeBackend:
             layout["region_entry_location"] = location_from_xpath(path)
         manual_layout.segmentation(layout, frame["bounds"])
         return layout
+
+    @contextmanager
+    def observation_transaction(self):
+        """Restore live records on failure; retain new content-addressed evidence."""
+        patterns = ("app.md", "pages/*.md", "regions/*.md", "controls/*.md", "quarantine/*.md",
+                    "operations/UI-CLI.md", ".easy_uiauto/index.json", "images/pages/latest.png",
+                    "images/pages/*.annotated.png")
+
+        def mutable_files():
+            return {path for pattern in patterns for path in self.directory.glob(pattern)
+                    if not (path.name.endswith(".annotated.png") and re.fullmatch(
+                        r"[0-9a-f]{64}\.annotated\.png", path.name)) and path.is_file()}
+
+        with image_storage._vault_lock(self.library.root):
+            files = mutable_files()
+            if self.revision:files.add(self.revision.path)
+            if any(image_storage._safe_path(self.directory, path) is None for path in files):
+                raise ValueError("深度学习记录路径不能包含链接")
+            before = {path:path.read_bytes() for path in files}
+            revision = (deepcopy((self.revision.seen, self.revision.missing, self.revision.conflicts))
+                        if self.revision else None)
+            try:
+                yield
+            except BaseException:
+                for path in mutable_files() - before.keys():
+                    path.unlink()
+                for path, content in before.items():
+                    if not path.is_file() or path.read_bytes() != content:
+                        path.write_bytes(content)
+                if revision is not None:
+                    self.revision.seen, self.revision.missing, self.revision.conflicts = revision
+                self.cache.clear()
+                raise
 
     def observe(self, *, root=False, route=()):
         from . import __version__

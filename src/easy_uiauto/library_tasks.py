@@ -272,6 +272,13 @@ def _run_worker(folder: Path):
             from .popup_guard import assert_unblocked
             assert_unblocked(expected)
             Controller.activate_window_handle(window["handle"])
+            native_windows.require_restored_window(window["handle"])
+            current = native_windows.matching_windows("", handle=window["handle"])
+            if (len(current) != 1 or not current[0]["visible"]
+                    or current[0]["process_id"] != expected["process_id"]
+                    or current[0]["class_name"] != expected["class_name"]):
+                raise ValueError("截图前所选软件窗口已经失效，请重新选择")
+            window = current[0]
             bounds = native_windows.visible_window_bounds(
                 window["handle"], window["bounds"], class_name=window["class_name"])
             if bounds["width"] < 2 or bounds["height"] < 2:

@@ -5,6 +5,7 @@ are supplied by region_learning.NativeBackend and can be tested independently.
 """
 from __future__ import annotations
 
+from contextlib import nullcontext
 from copy import deepcopy
 import json
 from pathlib import Path
@@ -42,6 +43,9 @@ def normalize_plan(plan):
         raise ValueError("深度学习规划缺少 branches")
     plan = deepcopy(plan)
     if len(plan["branches"]) > 200:raise ValueError("单个状态的分支超过 200 项")
+    terminal = plan.get("terminal")
+    if isinstance(terminal, str) and terminal.strip().lower() in {"true", "false"}:
+        plan["terminal"] = terminal.strip().lower() == "true"
     if type(plan.get("terminal",False)) is not bool:raise ValueError("terminal 必须为布尔值")
     if "name" in plan and not isinstance(plan["name"], str):raise ValueError("状态名称必须为文本")
     for branch in plan["branches"]:
@@ -391,8 +395,9 @@ class Explorer:
         self.graph["states"][identifier] = node;self.replanned.add(identifier);self.persist()
         return node
 
-    def visit(self, observation, route, depth=0):
-        node = self.node(observation, route);identifier = node["id"]
+    def visit(self, observation, route, depth=0, *, node=None):
+        if node is None:node = self.node(observation, route)
+        identifier = node["id"]
         self.visited.add(identifier)
         if identifier in self.active:return
         if node["terminal"] and not node["verified_terminal"]:
@@ -422,15 +427,19 @@ class Explorer:
                 try:
                     evidence = self.backend.execute(branch["steps"])
                     child_route = [*route, *deepcopy(branch["steps"])]
-                    child = self.backend.observe(route=child_route)
-                    child["return_context"] = dict(name=node["name"], steps=deepcopy(branch["steps"]),
-                        input_values=deepcopy(evidence.get("input_values", {})))
-                    branch.update(target_state=self.identifier(child), evidence=evidence, status="observed",executed_run=len(self.graph["runs"]))
+                    branch.update(target_state=None, evidence=evidence, status="observed",executed_run=len(self.graph["runs"]))
                     self.persist()
-                    if self.identifier(child) in self.active:
+                    with getattr(self.backend, "observation_transaction", nullcontext)():
+                        child = self.backend.observe(route=child_route)
+                        child["return_context"] = dict(name=node["name"], steps=deepcopy(branch["steps"]),
+                            input_values=deepcopy(evidence.get("input_values", {})))
+                        child_id = self.identifier(child)
+                        child_node = self.node(child, child_route) if child_id not in self.active else None
+                    branch["target_state"] = child_id
+                    if child_id in self.active:
                         branch.update(status="cycle", reason="回到已在探索的状态，已记录交互，未重复进入")
                     else:
-                        self.visit(child, child_route, depth+1)
+                        self.visit(child, child_route, depth+1, node=child_node)
                         branch["status"] = "done" if not self.stop_reason else "observed"
                     self.persist()
                     if self.stop_reason:return
@@ -451,6 +460,8 @@ class Explorer:
                         execution=getattr(error,"execution_result",{})
                         branch.update(status="failed" if execution.get("input_attempted") is False else "uncertain",
                                       reason=str(error), evidence=execution)
+                    elif branch["status"] == "observed" and not branch.get("target_state") and not branch.get("replayable"):
+                        branch.update(status="uncertain", reason=str(error)+"；操作已执行，请先核对实际结果")
                     else:branch["reason"] = str(error)
                     self.stop_reason = str(error);self.persist();return
         finally:self.active.discard(identifier)
@@ -534,13 +545,15 @@ class Explorer:
     def run(self):
         error=None
         try:
-            observation = self.backend.observe(root=True, route=[])
-            identifier = self.identifier(observation)
-            if self.graph["root"] and identifier != self.graph["root"] and identifier not in self.graph["states"]:
-                raise ValueError("未能匹配已有学习状态，已保留进度；请恢复原界面后继续，同一界面可选“改进学习结果”重新观察，软件版本变化时再选“适配软件更新”")
+            with getattr(self.backend, "observation_transaction", nullcontext)():
+                observation = self.backend.observe(root=True, route=[])
+                identifier = self.identifier(observation)
+                if self.graph["root"] and identifier != self.graph["root"] and identifier not in self.graph["states"]:
+                    raise ValueError("未能匹配已有学习状态，已保留进度；请恢复原界面后继续，同一界面可选“改进学习结果”重新观察，软件版本变化时再选“适配软件更新”")
+                route=self.graph["states"].get(identifier,{}).get("route",[])
+                node=self.node(observation, route)
             self.graph["root"] = self.graph["root"] or identifier;self.graph["status"]="running";self.persist()
-            route=self.graph["states"].get(identifier,{}).get("route",[])
-            self.visit(observation, route)
+            self.visit(observation, route, node=node)
             # Continue directly at a saved result state without repeating its commit.
             if identifier != self.graph["root"] and not self.stop_reason:
                 for node in self.graph["states"].values():

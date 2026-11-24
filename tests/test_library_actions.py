@@ -15,6 +15,17 @@ def record(identifier, **extra):
                                              {"ControlType": "MenuItemControl", "Name": identifier}]), **extra}
 
 
+def test_too_small_reference_image_reports_dimensions_without_activating_window(tmp_path):
+    from PIL import Image
+
+    path = tmp_path / "reference.png"
+    Image.new("RGB", (12, 7)).save(path)
+    with pytest.raises(ActionError, match="12×7.*每边至少需要 8 像素") as failure:
+        actions.resolve_image({"image": path.name}, tmp_path, {}, None,
+                              ActionError("control_not_found", "此目标为图片定位"))
+    assert failure.value.reason == "reference_image_missing"
+
+
 def test_plan_preserves_explicit_order_and_ignores_xpath_ancestry():
     controls = [record("File"), record("Recent", navigation_path=["File"]),
                 record("New", navigation_path=["File", "Recent"])]

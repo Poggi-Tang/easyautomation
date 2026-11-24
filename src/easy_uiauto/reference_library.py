@@ -6,6 +6,7 @@ import hashlib
 from html.parser import HTMLParser
 import io
 import json
+import os
 from pathlib import Path
 import re
 import shutil
@@ -32,13 +33,21 @@ class ReferenceResponseError(RuntimeError):
 
 
 def _write_json(path, value):
+    _check_cache_path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(path.name+"."+uuid4().hex+".tmp")
+    temporary = path.with_name(path.name+"."+uuid4().hex[:12]+".tmp")
     try:
         temporary.write_text(json.dumps(value, ensure_ascii=False), encoding="utf-8")
         temporary.replace(path)
     finally:
         temporary.unlink(missing_ok=True)
+
+
+def _check_cache_path(path):
+    # Reserve the suffix for the atomic temporary write on Windows hosts
+    # without long-path support. Win32 measures the limit in UTF-16 units.
+    if os.name == "nt" and len(str(path.absolute()).encode("utf-16-le"))//2 + 17 >= 260:
+        raise ValueError(f"参考资料缓存路径过长；请使用路径较短的知识库：{path}")
 
 
 def _read_json(path):
@@ -467,9 +476,13 @@ def _import_staged(directory, path, suffix, title, origin, digest, *, force, pro
     existing=next((d for d in documents(directory) if d["id"]==identifier),None)
     if existing and not force: return existing
     if existing: title,origin=existing["name"],existing["source"]
-    cache=directory/"references/.imports"/digest
+    cache=directory/"references/.imports"
     if image_storage._safe_path(directory,cache) is None: raise ValueError("参考资料缓存路径无效")
-    extraction_path=cache/"extracted-v1.json"
+    extraction_path=cache/f"{digest[:24]}-extract-v1.json"
+    source_asset=f"references/sources/{digest[:24]}{suffix}"
+    _check_cache_path(extraction_path)
+    _check_cache_path(cache/("0"*24)/"0001-1-1-1.json")
+    _check_cache_path(directory/source_asset)
     if image_storage._safe_path(directory,extraction_path) is None: raise ValueError("参考资料缓存路径无效")
     chunks=_read_json(extraction_path)
     if (not isinstance(chunks,list) or not chunks or any(not isinstance(c,list) or not c or
@@ -480,14 +493,14 @@ def _import_staged(directory, path, suffix, title, origin, digest, *, force, pro
     settings = settings or configuration.load_gui_configuration()
     topics, blocks, number = [], [], 0
     app=knowledge.read_markdown(directory/"app.md")[0]
-    cache_key=hashlib.sha256(json.dumps(dict(prompt=_UNDERSTAND,repair=_REPAIR_CITATIONS,
+    cache_key=hashlib.sha256(json.dumps(dict(source_sha256=digest,prompt=_UNDERSTAND,repair=_REPAIR_CITATIONS,
         api_url=settings.get("api_url"),model=settings.get("api_model"),title=title,
         application=app.get("name"),chunks=chunks),ensure_ascii=False,sort_keys=True).encode("utf-8")).hexdigest()
     for index, chunk in enumerate(chunks,1):
         for block in chunk:
             number+=1; block["id"]=f"S{number}"; blocks.append(block)
         label=f"参考资料第 {index}/{len(chunks)} 段（{chunk[0]['origin']}起）"
-        checkpoint=cache/cache_key/f"{index:04d}.json"
+        checkpoint=cache/cache_key[:24]/f"{index:04d}.json"
         if image_storage._safe_path(directory,checkpoint) is None: raise ValueError("参考资料缓存路径无效")
         topics.extend(_chunk_topics(chunk,checkpoint,force=force,application=app.get("name"),title=title,
                                     settings=settings,progress=progress,label=label))
@@ -505,14 +518,14 @@ def _import_staged(directory, path, suffix, title, origin, digest, *, force, pro
     for b in blocks: lines.extend(["",f"### {b['id']} · {b['origin']}",b["text"]])
     body="\n".join(lines)+"\n"
     record=dict(id=identifier,kind="reference",app_id=directory.name,name=title,source=origin,
-                source_sha256=digest,source_format=suffix,source_asset=f"references/sources/{digest}{suffix}",
+                source_sha256=digest,source_format=suffix,source_asset=source_asset,
                 schema_version=1,status="ready",enabled=True,model=settings.get("api_model",""),
                 updated_at=knowledge.utc_now(),topic_count=len(topics))
     with image_storage._vault_lock(directory.parent.parent):
         sources=directory/"references/sources";sources.mkdir(parents=True,exist_ok=True)
         asset=directory/record["source_asset"]
         if image_storage._safe_path(directory,asset) is None: raise ValueError("参考来源路径无效")
-        temporary=asset.with_name(asset.name+"."+uuid4().hex+".tmp")
+        temporary=asset.with_name(asset.name+"."+uuid4().hex[:12]+".tmp")
         try:
             with path.open("rb") as incoming, temporary.open("wb") as output:
                 shutil.copyfileobj(incoming,output,length=COPY_BYTES)

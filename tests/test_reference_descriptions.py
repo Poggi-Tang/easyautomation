@@ -51,6 +51,27 @@ def test_edited_reference_invalidates_software_understanding(library,monkeypatch
     assert len(seen)>count and first['document_path']!=second['document_path']
 
 
+def test_bad_reference_segment_is_split_and_successful_parts_are_checkpointed(library,monkeypatch):
+    from easy_uiauto.reference_understanding import understanding
+    directory=library.directory('demo'); calls=[]; fail=True
+    knowledge.write_markdown(directory/'references/guide.md',
+        dict(id='guide',name='用户手册',status='ready',enabled=True),'坏'*4000+'好'*14000)
+    def complete(system,payload,**_):
+        if 'reading_notes' in payload:return dict(understanding='整合结果')
+        text=payload['reference']['text'];calls.append(text)
+        if len(text)>8000 or fail and '坏' in text:
+            raise refs.ReferenceResponseError('无效 JSON',reason='invalid_json')
+        return dict(understanding='阅读笔记')
+    monkeypatch.setattr(refs,'complete',complete)
+    with pytest.raises(refs.ReferenceResponseError,match='用户手册.*4000 字符.*已缓存成功段'):
+        understanding(directory,settings=SETTINGS)
+    assert not list(directory.glob('references/.understanding/*/model.json'))
+    assert any(2000<=len(text)<=2010 and '坏' not in text for text in calls)
+    fail=False;calls.clear()
+    assert understanding(directory,settings=SETTINGS)['text']=='整合结果'
+    assert not any(2000<=len(text)<=2010 and '坏' not in text for text in calls)
+
+
 def test_short_document_is_used_in_full_without_keyword_retrieval(library,monkeypatch):
     directory=library.directory('demo')
     knowledge.write_markdown(directory/'references/guide.md',dict(id='guide',status='ready',enabled=True),

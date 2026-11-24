@@ -108,6 +108,38 @@ def test_invalid_plan_preserves_partial_progress(library,tmp_path):
     assert any("深度学习进度" in r["name"] for r in library.usage_documents("demo"))
 
 
+def test_invalid_plan_rolls_back_provisional_native_observation(library,tmp_path):
+    from types import SimpleNamespace
+    from easy_uiauto.region_learning import NativeBackend
+    from easy_uiauto.mcp import knowledge
+
+    library.save_picked_region("demo",picked(tmp_path));backend=Backend(library)
+    directory = library.directory('demo')
+    control = add_control(library)
+    path = knowledge.find_control_record(directory,control['id'])[0]
+    original = path.read_bytes()
+    new_page = directory/'pages/provisional.md'
+    state = SimpleNamespace(directory=directory,library=library,revision=None,cache={})
+    backend.observation_transaction = lambda: NativeBackend.observation_transaction(state)
+    observe = backend.observe
+    def provisional(**kwargs):
+        path.write_text('changed',encoding='utf-8')
+        new_page.write_text('provisional',encoding='utf-8')
+        return observe(**kwargs)
+    backend.observe = provisional
+    backend.plan = lambda *args: dict(branches=[],terminal='unknown')
+    with pytest.raises(ValueError,match='terminal'):
+        Explorer(library,'demo',library.regions('demo')[0],backend).run()
+    assert path.read_bytes()==original and not new_page.exists()
+    assert not backend.executed
+
+
+@pytest.mark.parametrize('value,expected',[(' true ',True),('False',False),(False,False)])
+def test_plan_normalizes_only_unambiguous_boolean_strings(value,expected):
+    from easy_uiauto.deep_learning import normalize_plan
+    assert normalize_plan(dict(branches=[],terminal=value))['terminal'] is expected
+
+
 def test_failed_restore_preserves_verified_flow_and_reports_stop(library,tmp_path):
     library.save_picked_region("demo",picked(tmp_path));backend=Backend(library)
     def fail(*args):raise ValueError("cannot return")

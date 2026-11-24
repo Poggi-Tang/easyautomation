@@ -6,6 +6,7 @@ import json
 from contextlib import nullcontext
 from types import SimpleNamespace
 
+import pytest
 from PIL import Image, ImageDraw, ImageGrab
 
 from easy_uiauto.mcp import knowledge, scanner
@@ -720,14 +721,16 @@ def test_visual_first_scan_skips_full_tree_and_second_ai_request(monkeypatch, tm
     assert knowledge.find_control_record(directory, "previous-key-control") is not None
 
 
+@pytest.mark.parametrize("geometry_kind", ["graphic", "repeated-icon"])
 def test_visual_first_scan_retains_visual_entity_without_distinct_uia_node(
-    monkeypatch, tmp_path
+    monkeypatch, tmp_path, geometry_kind
 ) -> None:
     window = FakeControl("Example", "WindowControl", (0, 0, 400, 300))
     target = {
         "id": 1,
         "region_id": "content",
         "semantic_name": "Current contact avatar",
+        "geometry_kind": geometry_kind,
         "intent": "identify-current-contact-avatar",
         "description": "Avatar for the current conversation contact.",
         "role": "identity",
@@ -797,6 +800,10 @@ def test_visual_first_scan_retains_visual_entity_without_distinct_uia_node(
 
     directory = knowledge.app_dir("example-app", tmp_path)
     records = knowledge.search_controls(directory, "contact avatar")
+    if geometry_kind == "repeated-icon":
+        assert result["visual_only_observations"] == 0
+        assert not records
+        return
     assert result["visual_only_observations"] == 1
     assert records[0]["status"] == "observed"
     assert records[0]["entity_type"] == "contact-avatar"

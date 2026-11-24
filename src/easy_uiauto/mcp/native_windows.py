@@ -14,6 +14,11 @@ def _dwm_api():
     return get
 
 
+def require_restored_window(handle: int) -> None:
+    if handle and _api()[0].IsIconic(handle):
+        raise RuntimeError("软件窗口已最小化，请先恢复窗口再截图或学习")
+
+
 def visible_window_bounds(handle: int, bounds: dict, *, class_name: str = "") -> dict:
     """Exclude invisible resize margins using DWM's physical screen coordinates.
 

@@ -225,16 +225,24 @@ def resolve_record(record: dict, expected: dict, main_window, *, require_visible
 def resolve_image(record, directory, expected, root, location_error):
     """Use fresh window pixels only after an ordinary, valid UIA miss."""
     from PIL import Image, ImageStat
-    templates=[]
-    for path in reference_images(directory,record):
+    templates = []
+    rejected = []
+    for path in reference_images(directory, record):
         try:
             with Image.open(path) as image:
-                template=image.convert("RGB")
-            if min(template.size)>=8 and ImageStat.Stat(template.convert("L")).stddev[0]>=2:
-                templates.append((path,template))
-        except (OSError,ValueError):continue
+                template = image.convert("RGB")
+        except (OSError, ValueError):
+            rejected.append(f"{path.name} 无法读取")
+            continue
+        if min(template.size) < 8:
+            rejected.append(f"{path.name} 为 {template.width}×{template.height} 像素，定位图片每边至少需要 8 像素")
+        elif ImageStat.Stat(template.convert("L")).stddev[0] < 2:
+            rejected.append(f"{path.name} 缺少可用于匹配的图像细节")
+        else:
+            templates.append((path, template))
     if not templates:
-        raise ActionError("control_not_found",f"{location_error.message}；没有可用的定位图片",
+        detail = "、".join(rejected) if rejected else "没有可用的定位图片"
+        raise ActionError("control_not_found", f"{location_error.message}。{detail}",
                           reason="reference_image_missing") from location_error
     handle=int(getattr(root,"NativeWindowHandle",0) or expected["handle"])
     menu=record.get("window_scope",{}).get("class_name")=="#32768"

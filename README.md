@@ -14,7 +14,7 @@ Learn Windows applications in a GUI and save their controls and workflows for re
 
 Select a window, mark regions, learn controls, compose workflows, and run them again.
 The GUI, MCP and Python share one local Markdown knowledge vault, including manual edits
-and learned results. Current version: **1.1.5**. Windows only. The GUI is primarily
+and learned results. Current version: **1.1.6**. Windows only. The GUI is primarily
 Chinese; documentation is available in English and Chinese.
 
 **Free for individuals; enterprise use requires a paid license.** The same policy

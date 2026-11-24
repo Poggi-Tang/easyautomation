@@ -1,10 +1,10 @@
 """Bind local annotations, or enumerate visible items inside a bound popup."""
 from __future__ import annotations
 
+import hashlib
 import math
 import time
 from pathlib import Path
-import shutil
 from tempfile import TemporaryDirectory
 
 from . import knowledge, manual_layout
@@ -449,15 +449,17 @@ def archive_record(directory, path, scan_id, *, reason=None):
     """Keep the original record and its images before removing it from the tree."""
     target=directory/".easy_uiauto/archive"/scan_id/"controls"/path.name
     target.parent.mkdir(parents=True,exist_ok=True)
-    archive=target.parent.parent
     def preserve(value):
         if isinstance(value,dict):return {k:preserve(v) for k,v in value.items()}
         if isinstance(value,list):return [preserve(v) for v in value]
         if isinstance(value,str) and value.startswith("images/"):
             source=(directory/value).resolve()
             if source.is_relative_to(directory.resolve()) and source.is_file():
-                destination=archive/value;destination.parent.mkdir(parents=True,exist_ok=True)
-                shutil.copy2(source,destination)
+                # Do not nest the original (already long) asset path inside
+                # the scan directory. Identical immutable copies are shared.
+                digest=hashlib.sha256(source.read_bytes()).hexdigest()[:32]
+                destination=directory/".easy_uiauto/archive/assets"/(digest+source.suffix)
+                if not destination.is_file():knowledge.replace_image(source,destination)
                 return destination.relative_to(directory).as_posix()
         return value
     metadata,body=knowledge.read_markdown(path)

@@ -43,6 +43,8 @@ result = json.loads(upsert_control_record(
 
 ## 迁移旧数据
 
+本节适用于尚未入库的旧格式导出；修正已经入库的区域、控件和流程请看 [历史学习知识修复与转换指南](legacy-knowledge-repair.zh-CN.md)。
+
 先从原存储导出 JSON 或 JSONL，再调用 `import_control_records`。接受记录数组、`{"records": [...]}`、单条记录或每行一条的 JSONL。支持旧 `LOCATION` 和小写 `xpath` 字段。不执行外部 Python 模块，不删除或修改原导出文件。
 
 ```python
