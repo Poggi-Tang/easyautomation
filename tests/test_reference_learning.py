@@ -12,7 +12,7 @@ def reference(root):
                              '# 保存\n保存当前工程。')
 
 
-def test_local_scanning_uses_reference_description_without_changing_xpath_or_actions(local,monkeypatch):
+def test_local_scanning_keeps_control_metadata_and_ignores_archived_reference(local,monkeypatch):
     layout,root,*_=local
     scan(layout,root);before=records(root)[0];reference(root)
     seen=[]
@@ -21,18 +21,18 @@ def test_local_scanning_uses_reference_description_without_changing_xpath_or_act
         return dict(controls=[dict(id=1,description='保存当前工程',reference_id='guide',quote='保存当前工程。')])
     monkeypatch.setattr(refs,'complete',complete)
     scan(layout,root);after=records(root)[0]
-    assert after['description']=='保存当前工程' and after['description_status']=='inferred'
+    assert after['description']==before['description'] and not seen
     assert after['location']==before['location'] and after['actions']==before['actions']
-    assert after['function_verification']['executed'] is False and seen
+    assert after['function_verification']['executed'] is False
 
 
-def test_reference_api_failure_preserves_basic_scan_and_reports_failure(local,monkeypatch):
+def test_basic_scan_does_not_need_reference_api(local,monkeypatch):
     layout,root,*_=local
     scan(layout,root);reference(root)
     def fail(*a,**kw):raise RuntimeError('reference API unavailable')
     monkeypatch.setattr(refs,'complete',fail)
     result=scan(layout,root)
-    assert result['controls_saved_this_scan']==1 and 'unavailable' in result['reference_description_error']
+    assert result['controls_saved_this_scan']==1 and 'reference_description_error' not in result
     assert records(root)[0]['location']['Xpath']
 
 

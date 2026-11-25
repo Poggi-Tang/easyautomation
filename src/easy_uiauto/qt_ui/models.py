@@ -13,7 +13,7 @@ ROLE = Qt.ItemDataRole.UserRole + 1
 NODE_ICONS = {"vault":"library", "application":"window", "usage-root":"book-open",
               "usage":"documents", "references-root":"documents", "reference":"documents",
               "controls-root":"controls", "area":"region", "region":"region", "control":"control",
-              "actions-root":"workflow", "workflow":"workflow"}
+              "actions-root":"workflow", "workflow":"workflow", "business-root":"workflow", "business-process":"route"}
 
 
 def control_status(record):
@@ -68,9 +68,12 @@ class KnowledgeModel(QStandardItemModel):
                            "已连接" if app_id in windows else "未连接")
             usage = add(app, "usage-root:"+app_id, "使用知识", app_id, "usage-root", {})
             references = add(usage, "references-root:"+app_id, "参考资料", app_id, "references-root", {})
+            processes = add(app, "business-root:"+app_id, "业务流程", app_id, "business-root", {})
+            for r in index.get("business_processes", []):
+                add(processes, f"business:{app_id}:{r['id']}", r["name"], app_id, "business-process", r, r["status"])
             for r in index.get("references", []):
                 add(references, f"reference:{app_id}:{r['id']}", r["name"], app_id, "reference", r,
-                         "已整理" if r.get("enabled", True) else "已停用")
+                         "已归档")
             for r in index["usage"]:
                 add(usage, f"usage:{app_id}:{r['document_path']}", r["name"], app_id, "usage", r)
             controls_root = add(app, "controls-root:"+app_id, "控件库", app_id, "controls-root", {})

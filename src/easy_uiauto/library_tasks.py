@@ -223,13 +223,9 @@ def _run_worker(folder: Path):
                 imported.append(library.import_reference(request["app_id"],source,
                                 force=request.get("force",False),progress=progress))
             result=dict(ok=True,reference_ids=[r["id"] for r in imported],
-                        message=f"已整理 {len(imported)} 份参考资料；后续学习将读取标准 Markdown")
+                        message=f"已导入 {len(imported)} 份参考资料，业务流程及学习状态可在业务流程中查看")
         elif operation == "supplement-descriptions":
-            from .knowledge_library import KnowledgeLibrary
-            from . import reference_library
-            library=KnowledgeLibrary(request["vault"])
-            result=reference_library.supplement(library.directory(request["app_id"]),
-                control_ids=request.get("control_ids"),progress=progress)
+            raise ValueError("参考资料仅在导入时整理为业务流程，请从业务流程启动学习")
         elif operation == "deep-learn":
             import uiautomation
             from .knowledge_library import KnowledgeLibrary
@@ -238,7 +234,7 @@ def _run_worker(folder: Path):
             with uiautomation.UIAutomationInitializerInThread():
                 result=learn_region(library,request["app_id"],request["region_id"],request["window"],folder,
                     progress=progress,checkpoint=lambda value:_write(folder/"execution.json",value),
-                    **request.get("learning_options",{}))
+                    business_process_id=request.get("business_process_id", ""), **request.get("learning_options",{}))
         elif operation == "open-region":
             import uiautomation
             from .knowledge_library import KnowledgeLibrary

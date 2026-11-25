@@ -41,6 +41,28 @@ def test_first_import_interprets_and_persists_standard_md_source_and_citations(l
     assert SETTINGS['api_key'] not in (library.directory('demo')/record['document_path']).read_text(encoding='utf-8')
 
 
+def test_imported_procedure_tracks_ready_workflows_and_survives_archive_removal(library, tmp_path, understand):
+    from easy_uiauto import workflows
+    from test_knowledge_library import add_control
+
+    archived = library.import_reference("demo", source(tmp_path), settings=SETTINGS)
+    procedure, = library.read("demo")["business_processes"]
+    assert procedure["status"] == "待学习"
+    assert procedure["steps"] == ["点击保存"] and procedure["expected"] == ["工程写入磁盘"]
+    assert procedure["sources"][0]["id"] == archived["id"]
+    assert procedure["sources"][0]["quote"] in archived["body"]
+    library.archive("demo", "reference", archived["id"])
+    control = add_control(library)
+    title = procedure["name"] + "／确认保存（2）"
+    other = procedure["name"].split("-")[0] + "-工具栏"
+    library.save_workflow("demo", dict(keyword=other, steps=[workflows.click_step(control)]))
+    assert library.read("demo")["business_processes"][0]["status"] == "待学习"
+    flow = library.save_workflow("demo", dict(keyword=title, steps=[workflows.click_step(control)]))
+    ready, = library.read("demo")["business_processes"]
+    assert ready["status"] == "已学习" and ready["workflows"] == [dict(id=flow["id"], name=title)]
+    assert ready["sources"][0]["name"] == archived["name"] and len(understand) == 1
+
+
 def test_duplicate_import_reuses_edited_md_without_another_api_call(library,tmp_path,understand):
     original=source(tmp_path)
     first=library.import_reference('demo',original,settings=SETTINGS)

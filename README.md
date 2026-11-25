@@ -14,7 +14,7 @@ Learn Windows applications in a GUI and save their controls and workflows for re
 
 Select a window, mark regions, learn controls, compose workflows, and run them again.
 The GUI, MCP and Python share one local Markdown knowledge vault, including manual edits
-and learned results. Current version: **1.1.6**. Windows only. The GUI is primarily
+and learned results. Current version: **1.2.0**. Windows only. The GUI is primarily
 Chinese; documentation is available in English and Chinese.
 
 **Free for individuals; enterprise use requires a paid license.** The same policy
@@ -46,7 +46,7 @@ See the [GUI guide](docs/knowledge-gui.zh-CN.md) for detailed steps. Choose an i
 | GUI editing, manual controls, composing and running saved workflows | None | Local execution; the target application may itself need a network |
 | Image annotation, YOLO detection, RapidOCR text recognition | None | Offline after the model files are installed |
 | GUI basic learning | None for local scanning; required for added semantic descriptions | Local scanning; enabling API descriptions sends window images and control information |
-| Importing and understanding references, reference-assisted descriptions | Required | Local extraction; reference excerpts and relevant control information go to the API for interpretation. Import currently includes interpretation |
+| Importing references and extracting business procedures | Required | Local extraction; reference excerpts and application information go to the API during import |
 | Deep learning of a region or single control | Multimodal model with image input and JSON output | Screenshots, task context and relevant test inputs go to the API to plan interactions |
 | CLI / MCP visual-first scanning and effect interpretation | Multimodal model | Selected-window images, or before/after images and related popup crops |
 | Remote vision lookup fallback | Required only when explicitly enabled | Sends the requested screenshot area; UIA, templates and local OCR need no API |
@@ -481,7 +481,7 @@ the local `vision` dependencies; its result includes `image`, `rect_in_input`,
 
 The package includes two Codex skills:
 
-- `$easy-uiauto-learning` learns controls, uses saved GUI regions and references,
+- `$easy-uiauto-learning` learns controls, uses saved GUI regions and business procedures,
   and saves requested workflows.
 - `$easy-uiauto-operate` runs commands from an existing application vault.
 
@@ -499,7 +499,7 @@ same absolute vault path and the application name. For example:
 
 ```text
 Use $easy-uiauto-learning. In vault D:/UI-Knowledge, learn the saved regions for
-My Application using my descriptions and enabled references. Keep the existing
+My Application using my descriptions and saved business procedures. Keep the existing
 region IDs and boundaries, and save each control under its region and Tab state.
 Save a "Create project" workflow using the recorded controls, a project-name
 parameter and result checks. Keep missing steps as a draft and report them.

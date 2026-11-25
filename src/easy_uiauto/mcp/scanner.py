@@ -1902,10 +1902,11 @@ def scan_window(
     popup_only = bool(navigation_context and navigation_context.get("popup_handles"))
     popup_without_layout = bool(popup_only and observation_geometry is not None and manual_layout is not None
                                 and not manual_layout.get("regions"))
+    business_process_scope = bool(observation_geometry is not None and (manual_layout or {}).get("business_process_scope"))
     if manual_layout is not None:
         from . import manual_layout as layout_rules
 
-        if not popup_without_layout:
+        if not (popup_without_layout or business_process_scope):
             layout_rules.validate_regions(manual_layout.get("regions", []))
         if strategy == "visual-first":
             strategy = "local-visual"
@@ -1964,8 +1965,8 @@ def scan_window(
     if window_rect["width"] <= 1 or window_rect["height"] <= 1:
         raise RuntimeError(f"Window has no visible bounds: {actual_name}")
     manual_segmentation = None
-    if popup_without_layout:
-        # The owned menu has its own capture; no main-page crop is needed.
+    if popup_without_layout or business_process_scope:
+        # These observations use the live window without laying out regions.
         manual_segmentation = dict(page=dict(id=manual_layout["page_id"]), regions=[], controls=[], coverage={})
     elif manual_layout is not None:
         if observation_geometry is None:
@@ -1998,7 +1999,8 @@ def scan_window(
             if not popup_only and local_native_menu is None:
                 segmentation["controls"], local_reports = local_learning.detect(
                     screenshot, window_rect, segmentation, directory, progress,
-                    expanded=bool(navigation_context), store_geometry=observation_geometry is None)
+                    expanded=bool(navigation_context or business_process_scope),
+                    store_geometry=observation_geometry is None)
     elif strategy == "visual-first" and _is_desktop_window(window):
         progress("Resolving native desktop items")
         segmentation = _segment_desktop(
@@ -2273,23 +2275,6 @@ def scan_window(
         meanings=analyze_control_semantics(screenshot,candidates,page,segmentation["regions"],api_url,api_key,model,version)
         for identifier,meaning in meanings.items():semantics[identifier].update(meaning)
         semantic_candidates=candidates
-    from .. import reference_library
-    reference_description_error = ""
-    reference_description_report = {}
-    try:
-        reference_settings = (dict(api_url=api_url,api_key=api_key,api_model=model)
-                              if api_url and api_key and model else None)
-        additions = reference_library.descriptions(directory,semantics,progress=progress,settings=reference_settings,
-                                                  report=reference_description_report)
-        for identifier, fields in additions.items():
-            semantics[identifier].update(fields)
-        for item in reference_description_report.get("unmatched",[]):
-            semantics[item["id"]].update(description_status="unmatched",description_reason=item["reason"])
-    except (ValueError, RuntimeError) as error:
-        reference_description_error = str(error)
-        for semantic in semantics.values():
-            semantic.update(description_status="error",description_reason=reference_description_error)
-        progress("参考资料说明未能补充，继续保存定位和图片："+str(error))
     verification_screenshot = _screenshot_window(window_rect)
     counts = {"observed": 0, "verified": 0, "suspect": 0, "quarantined": 0}
     key_controls = 0
@@ -2333,6 +2318,10 @@ def scan_window(
     popup_history = ([r for _p, r in knowledge.iter_records(directory, "control")]
                      if popup_regions else [])
     def save_observed_control(record):
+        if business_process_scope:
+            previous = previous_by_id.get(record["id"])
+            if previous and previous.get("region_id"):
+                record = {**record, "region_id": previous["region_id"]}
         if observation_geometry is not None:
             observation_geometry[record["id"]] = record["normalized_rect"]
             record = {key: value for key, value in record.items() if key != "normalized_rect"}
@@ -2885,7 +2874,8 @@ def scan_window(
         for _path, record in knowledge.iter_records(directory, "control")
         if record.get("scan_id") == scan_id
     ]
-    if manual_layout is not None and any(r.get("region_id") == "unassigned" for r in scanned_records):
+    if (manual_layout is not None and not business_process_scope
+            and any(r.get("region_id") == "unassigned" for r in scanned_records)):
         knowledge.save_region(directory, {
             "id": f"{page_id}.unassigned", "page_id": page_id, "app_id": app_id,
             "name": "待归档", "description": "未被区域覆盖或跨区归属不明确的控件",
@@ -2954,8 +2944,6 @@ def scan_window(
         "overlay": overlay,
         "regions": len(segmentation["regions"]),
         "strategy": effective_strategy,
-        "reference_description_error": reference_description_error,
-        "reference_descriptions": reference_description_report,
         "archived_layout_records": archived_layout_records,
         "archived_component_records": len(archived_component_ids),
         "component_reconciliation": component_reconciliation_report,

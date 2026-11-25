@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """easy-uiauto - UI automation toolkit based on pyautogui and uiautomation"""
 
-__version__ = "1.1.6"
+__version__ = "1.2.0"
 __author__ = "Poggi-Tang"
 
 from importlib import import_module

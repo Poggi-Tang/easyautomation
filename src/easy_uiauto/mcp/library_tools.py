@@ -12,7 +12,7 @@ from .. import workflows
 from . import dynamic_regions, image_storage, knowledge, native_windows
 
 
-SECTIONS = {"pages", "regions", "controls", "references", "usage", "workflows"}
+SECTIONS = {"pages", "regions", "controls", "references", "usage", "workflows", "business_processes"}
 OPERATIONS = {"learn-region", "deep-learn-region", "deep-learn-control", "expand-control", "run-workflow", "supplement-descriptions"}
 
 

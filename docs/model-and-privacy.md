@@ -18,9 +18,9 @@ remote reference pages and cloud model services may still need network access.
 | Operation | Local processing | Data sent to the configured model endpoint |
 | --- | --- | --- |
 | GUI basic learning without semantic descriptions | Screenshots, YOLO, OCR, UIA matching, vault writes | None |
-| Added semantic descriptions | Local scanning and matching | Window images, control properties and region information; reference-assisted descriptions also include relevant excerpts |
-| Reference import | File reading, text extraction, progress caching | Reference text chunks, source information and application context for indexing and citation checks |
-| Deep learning | UI interaction, observation, saving regions/controls/workflows | Current images, exploration progress, user instructions, relevant references and test inputs |
+| Added semantic descriptions | Local scanning and matching | Window images, control properties and region information |
+| Reference import | File reading, text extraction, progress caching | Reference text chunks, source information and application context for business procedure extraction and citation checks |
+| Deep learning | UI interaction, observation, saving regions/controls/workflows | Current images, exploration progress, user instructions, the selected business procedure and test inputs |
 | CLI / MCP visual-first scan | UIA matching, locator checks, knowledge storage | Selected-window images or image tiles |
 | Effect interpretation | Before/after observation and change detection | Target-window images, related popup crops and control changes |
 | Explicit remote vision lookup | Validation of returned coordinates | Requested screenshot area and target description |

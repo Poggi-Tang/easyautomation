@@ -19,7 +19,7 @@ from ..library_tasks import LibraryTask
 from ..mcp import configuration, knowledge, dynamic_regions, native_windows
 from ..locator_images import reference_images, is_image_location, record_location
 from ..mcp.protocol import CONTROL_IDENTITY_KEYS, normalize_location, with_control_identity
-from .. import workflows
+from .. import business_processes, workflows
 from .models import KnowledgeModel, KnowledgeFilter, ROLE
 from .widgets import ImageView, IoJob, StepEditor, ControlChooser, button, ACTION_NAMES
 from .dialogs import CapturedControlDialog, DeepLearningDialog, ParameterDialog, SettingsDialog, WindowDialog
@@ -467,7 +467,7 @@ class KnowledgeWindow(QMainWindow):
             value=r.get(key,"") if is_image_location(native_location) else native_location.get(CONTROL_IDENTITY_KEYS[key],r.get(key,""))
             field.setText(str(value or ""));field.setReadOnly(kind!="control" or is_image_location(native_location))
         self.details.setVisible(kind in {"region","control","area","workflow","reference"})
-        for i in range(4):self.details.setTabVisible(i,(i==3) if kind=="workflow" else i==0 if kind=="reference" else i<3)
+        for i in range(4):self.details.setTabVisible(i,(i==3) if kind=="workflow" else i==0 if kind in {"reference", "business-process"} else i<3)
         for field in [self.description,self.state_name,self.hierarchy,*self.native_fields.values(),
                       self.entry_summary,self.condition_label,self.condition_kind,self.pick_condition_button]:
             self.form.setRowVisible(field,kind!="reference")
@@ -503,14 +503,19 @@ class KnowledgeWindow(QMainWindow):
         if kind=="workflow":
             self.flow=deepcopy(r);self.flow_title.setText(r["keyword"]);self.flow_steps.set_parameters(r.get("parameters",{}));self.flow_steps.load(r["steps"]);self.center.setCurrentWidget(self.flow_page)
         elif kind=="usage":self.usage.setPlainText(r.get("body",""));self.usage.setReadOnly(not r.get("editable"));self.center.setCurrentWidget(self.usage)
-        elif kind=="reference":self.usage.setPlainText(r.get("body",""));self.usage.setReadOnly(False);self.center.setCurrentWidget(self.usage)
+        elif kind=="reference":self.usage.setPlainText(r.get("body",""));self.usage.setReadOnly(True);self.center.setCurrentWidget(self.usage)
+        elif kind=="business-process":
+            self.usage.setPlainText(business_processes.display(r))
+            self.usage.setReadOnly(True)
+            self.center.setCurrentWidget(self.usage)
         elif kind in {"region","control","area"}:self.show_reference()
         else:
             index=self.snapshots.get(self.app_id,{})
             self.overview.setPlainText(("选择软件窗口 → 添加区域 → 基本学习 / 深度学习\n\n" if kind in {"vault","application","controls-root"} else "")+
                 (f"控件：{len(index.get('controls',[]))}    区域：{len(index.get('regions',[]))}    组合动作：{len(index.get('workflows',[]))}\n\n" if index else "")+
                 {"vault":"从左侧选择已有软件，或点击“添加软件”。","actions-root":"选择已有组合动作查看步骤，或新建组合动作。","usage-root":"选择文档查看软件使用说明，也可以新建说明。",
-                 "references-root":"添加用户手册、测试用例、脑图或网页。首次使用设置中的 API 整理为标准 Markdown；可直接编辑，学习时读取修订后的内容。参考资料只用于推断，不会自动执行其中的步骤。"}.get(kind,"选中区域可查看参考图和前置步骤。"))
+                 "business-root":"导入参考资料后，选择一条业务流程查看来源、预期结果和匹配的组合动作，或直接启动学习。",
+                 "references-root":"导入用户手册、测试用例、脑图或网页。AI 在导入时整理业务流程，资料在此归档供查看。"}.get(kind,"选中区域可查看参考图和前置步骤。"))
             self.center.setCurrentWidget(self.overview)
         self.loading=False;self.dirty=False;self.build_toolbar();self.adapt_details()
 
@@ -613,8 +618,12 @@ class KnowledgeWindow(QMainWindow):
                 actions.insert(1,("细分区域",self.subdivide))
         elif kind in {"usage-root","usage"}:actions=[("新建说明",self.new_usage),("保存",self.save)]
         elif kind=="references-root":actions=[("添加参考文件",self.import_reference_files),("添加网页",self.import_reference_url)]
-        elif kind=="reference":actions=[("保存",self.save),("重新整理",self.reimport_reference),
-                                        ("停用参考" if self.record.get("enabled",True) else "启用参考",self.toggle_reference)]
+        elif kind=="reference":actions=[("重新整理",self.reimport_reference)]
+        elif kind=="business-root":actions=[("添加参考文件",self.import_reference_files),("添加网页",self.import_reference_url)]
+        elif kind=="business-process":
+            actions=[("学习业务流程",self.deep_learn)]
+            if self.record["workflows"]:
+                actions.append(("打开组合动作",lambda:self.goto(f"workflow:{self.app_id}:{self.record['workflows'][0]['id']}")))
         if kind in {"application","controls-root","area","region"}:actions.insert(1,("添加控件",self.add_control))
         if multiple:
             actions=[(f"删除所选（{len(deletable)}）",self.remove),("取消多选",self.clear_multiselection)]
@@ -624,8 +633,6 @@ class KnowledgeWindow(QMainWindow):
         if self.app_id:extras.append(('处理弹窗',self.inspect_popups))
         if kind in {"application","usage-root","usage","control","region"}:
             extras.extend([("添加参考文件",self.import_reference_files),("添加参考网页",self.import_reference_url)])
-        if kind in {"application","controls-root","control","region","reference","references-root"}:
-            extras.append(("补充控件说明",self.supplement_descriptions))
         if kind=="control" or kind=="region" and self.record.get("source")=="manual":extras.extend([("拾取入口控件",self.pick_entry),("录制步骤",self.record_entries)])
         if kind=="control":
             if self.record.get("reference_evidence"):
@@ -943,7 +950,7 @@ class KnowledgeWindow(QMainWindow):
         self.mutate(app_id,lambda:scope.learning_layout(app_id,window,region_id=record["id"]),prepared,message="正在准备区域学习…")
 
     def deep_learn(self, mode=None):
-        if (self.current.get("kind") not in {"region","control"} or self.task or self.saving or self.deleting
+        if (self.current.get("kind") not in {"region","control","business-process"} or self.task or self.saving or self.deleting
                 or not self.maybe_save(lambda:self.deep_learn(mode))):return
         from ..relearning import sessions, control_region
         app_id=self.app_id;entry=deepcopy(self.record) if self.current.get("kind")=="control" else None
@@ -952,7 +959,8 @@ class KnowledgeWindow(QMainWindow):
         window=self.bound_window()
         if not window:return
         page=next((p for p in self.snapshots[app_id]["pages"] if p["id"]==record.get("page_id")),{})
-        if (record.get("source") != "deep-learning" and not dynamic_regions.is_dynamic(record)
+        process = self.current["kind"] == "business-process"
+        if (not process and record.get("source") != "deep-learning" and not dynamic_regions.is_dynamic(record)
                 and not page.get("layout_confirmed") and not self.review_layout(for_learning=True)):
             return
         library=self.library;selected_key=self.current["key"]
@@ -960,14 +968,15 @@ class KnowledgeWindow(QMainWindow):
             if self.library.root!=library.root or self.current.get("key")!=selected_key or self.task:return
             snapshot=self.snapshots[app_id]
             controls=[r for r in snapshot["controls"] if r.get("region_id")==record["id"]]
-            dialog=DeepLearningDialog(record,snapshot["workflows"],self,sessions=history,controls=controls,mode=mode,entry_control=entry)
+            dialog=DeepLearningDialog(record,snapshot["workflows"],self,sessions=history,controls=controls,mode=mode,entry_control=entry,business_process=process)
             try:
                 if dialog.exec()!=QDialog.DialogCode.Accepted:return
                 options=dialog.values()
             finally:dialog.deleteLater()
             def finished(result):
                 self.reload(selected_key,message=result.get("message"),app_ids={app_id})
-            self.start_task("deep-learn",dict(vault=str(self.library.root),app_id=app_id,region_id=record["id"],
+            self.start_task("deep-learn",dict(vault=str(self.library.root),app_id=app_id,region_id="" if process else record["id"],
+                                            business_process_id=record["id"] if process else "",
                                             window=window,learning_options=options),finished,hide=True)
         self.async_io(lambda:sessions(library.directory(app_id),record["id"],entry_control_id=(entry or {}).get("id","")),choose)
 
@@ -1197,18 +1206,6 @@ class KnowledgeWindow(QMainWindow):
             "参考资料 (*.pdf *.docx *.md *.markdown *.txt *.html *.htm *.xmind *.mm *.opml)")
         if paths:self.import_references(paths)
 
-    def supplement_descriptions(self):
-        if not self.app_id or not self.maybe_save(self.supplement_descriptions):return
-        kind=self.current.get("kind");app_id=self.app_id;key=self.current["key"]
-        identifiers=None
-        if kind=="control":identifiers=[self.record["id"]]
-        elif kind=="region":
-            local=self.record["id"].removeprefix(self.record.get("page_id",PAGE_ID)+".")
-            identifiers=[r["id"] for r in self.snapshots[app_id]["controls"]
-                         if r.get("page_id")==self.record.get("page_id") and r.get("region_id") in {local,self.record["id"]}]
-        def completed(result):self.reload(key,message=result.get("message"))
-        self.start_task("supplement-descriptions",dict(vault=str(self.library.root),app_id=app_id,control_ids=identifiers),completed)
-
     def import_reference_url(self):
         if not self.app_id or not self.maybe_save(self.import_reference_url):return
         url,ok=QInputDialog.getText(self,"添加参考网页","网页地址（http / https）")
@@ -1220,22 +1217,16 @@ class KnowledgeWindow(QMainWindow):
     def import_references(self,sources,*,force=False):
         app_id=self.app_id
         def imported(result):
-            identifiers=result.get("reference_ids",[])
-            self.reload(f"reference:{app_id}:{identifiers[-1]}" if identifiers else "references-root:"+app_id)
+            self.reload("business-root:"+app_id,message=result.get("message"),app_ids={app_id})
         self.start_task("import-reference",dict(vault=str(self.library.root),app_id=app_id,sources=sources,force=force),imported)
 
     def reimport_reference(self):
         if not self.maybe_save(self.reimport_reference):return
         record=self.record
-        if QMessageBox.question(self,"重新整理参考资料","使用保存的原始资料重新理解，覆盖当前标准 Markdown？")!=QMessageBox.StandardButton.Yes:return
+        if QMessageBox.question(self,"重新整理参考资料","使用保存的原始资料重新整理业务流程和归档内容？")!=QMessageBox.StandardButton.Yes:return
         asset=self.library.asset(self.app_id,record["source_asset"])
         if not asset:self.error("无法重新整理","原始资料已不存在");return
         self.import_references([str(asset)],force=True)
-
-    def toggle_reference(self):
-        if not self.maybe_save(self.toggle_reference):return
-        library=self.library;app_id=self.app_id;identifier=self.record["id"];body=self.usage.toPlainText();enabled=not self.record.get("enabled",True)
-        self.mutate(app_id,lambda:library.save_reference(app_id,identifier,body,enabled=enabled),key=self.current["key"])
 
     def export(self):
         if not self.app_id:return

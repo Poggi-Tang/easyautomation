@@ -333,11 +333,12 @@ class Explorer:
         scoped = [control for control in observation["controls"]
                   if (not self.scope_controls or followup or control["id"] in self.scope_controls)
                   and (not followup or control["id"] not in self.excluded_entries())]
+        process = getattr(self.backend, "business_process", None)
         # Give the planner concrete omissions to repair before desktop input.
         # A bounded retry is not completion: remaining gaps stay resumable.
         for attempt in range(3):
             plan = validate_plan(self.backend.plan(observation, route), observation["controls"])
-            gaps = interaction_gaps(scoped, plan["branches"])
+            gaps = [] if process else interaction_gaps(scoped, plan["branches"])
             blocked = [dict(name=branch["name"], reason=branch["blocked"], effect=branch.get("effect"))
                        for branch in plan["branches"] if branch.get("blocked")
                        and branch.get("effect") in {"navigation", "input", "unknown"}]
@@ -391,9 +392,12 @@ class Explorer:
         if node["terminal"] and (not route or self.scope_controls and not followup):
             node["terminal"] = False
             node["issues"].append("尚未执行范围内交互，不能仅凭起点界面确认学习完成")
+        if process and node["terminal"] and node["workflow_title"] != process["name"].rpartition("-")[0] + "-结果校验":
+            node["terminal"] = False
+            node["issues"].append("未验证所选业务流程的预期结果")
         if previous and self.mode == "resume" and node["terminal"] and previous.get("verified_terminal") and previous.get("completion_checks")==node["completion_checks"]:
             node.update(verified_terminal=True, terminal_evidence=previous.get("terminal_evidence"))
-        gaps = interaction_gaps(scoped, branches)
+        gaps = [] if process else interaction_gaps(scoped, branches)
         node["interaction_gaps"] = gaps
         node["issues"].extend("未规划交互："+gap["label"]+" / "+gap["action"] for gap in gaps)
         # Reaching one result never exempts other actions in that same state.
@@ -478,6 +482,7 @@ class Explorer:
         memo = {}
         created = []
         titles = {}
+        process = getattr(self.backend, "business_process", None)
 
         def suffixes(identifier, trail):
             if identifier in memo:return memo[identifier]
@@ -537,7 +542,8 @@ class Explorer:
                     if isinstance(value,str):
                         for parameter,example in self.inputs.items():
                             if isinstance(example,str) and example and value==example:item[field]="${"+parameter+"}";break
-            name = f"{heading}-{'／'.join(path) or '结果校验'}"
+            root_process = process and state == self.graph["root"]
+            name = process["name"] if root_process else f"{heading}-{'／'.join(path) or '结果校验'}"
             if existing:
                 keyword = existing["keyword"]
                 name = existing.get("name") or keyword
@@ -553,6 +559,8 @@ class Explorer:
                       id=identifier, keyword=keyword, name=name, steps=steps,
                       precondition="软件已启动", parameters=self.inputs, source="deep-learning",
                       learning_session=self.graph["id"], entry_state=state, learning_verified=True)
+            if root_process:
+                flow["business_process_id"] = process["id"]
             flow["learning_definition_hash"]=workflows.definition_hash(flow,catalog)
             flow["learning_steps_hash"]=relearning.steps_key(steps)
             flow["learning_branch_id"]=branch_id

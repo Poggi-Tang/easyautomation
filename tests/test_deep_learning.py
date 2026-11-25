@@ -98,6 +98,39 @@ def test_generated_titles_follow_outcome_and_distinguish_entry_paths(library, tm
     }
 
 
+@pytest.mark.parametrize("correct_result", [True, False])
+def test_business_learning_archives_only_after_the_target_result_is_verified(library, monkeypatch, correct_result):
+    from easy_uiauto.business_processes import from_topics
+
+    process, = from_topics([dict(title="新建工程", process_title="【工程管理】新建工程-文件菜单",
+                                 description="创建工程", steps=["打开菜单", "填写名称并确定"],
+                                 expected=["工程出现在树中"], quote="新建工程")], dict(id="guide", name="用户手册"))
+    backend = Backend(library)
+    backend.business_process = process
+    original_plan = backend.plan
+
+    def plan(observation, route):
+        result = original_plan(observation, route)
+        if observation["state_id"] == "root":
+            result["branches"] = result["branches"][:1]
+        if result.get("terminal"):
+            result["workflow_title"] = "【工程管理】新建工程-结果校验" if correct_result else "【文件】打开-结果校验"
+        return result
+
+    monkeypatch.setattr(backend, "plan", plan)
+    explorer = Explorer(library, "demo", dict(id=process["id"], name=process["name"]), backend)
+    run = explorer.run()
+    catalog = workflows.load_catalog(library.directory("demo"))
+    assert backend.executed == ["menu", "fill"]
+    if correct_result:
+        assert run["complete"]
+        entry, = [catalog[i] for i in explorer.graph["entry_workflow_ids"]]
+        assert entry["keyword"] == process["name"] and entry["business_process_id"] == process["id"]
+        assert sum(flow.get("business_process_id") == process["id"] for flow in catalog.values()) == 1
+    else:
+        assert not run["complete"] and not catalog
+
+
 def test_missing_inputs_are_partial_not_successful_workflows(library,tmp_path):
     library.save_picked_region("demo",picked(tmp_path));backend=Backend(library,blocked=True)
     result=Explorer(library,"demo",library.regions("demo")[0],backend).run()

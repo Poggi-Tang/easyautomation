@@ -250,13 +250,18 @@ class KnowledgeLibrary:
         if not (directory / "app.md").is_file():
             raise ValueError("软件尚未加入知识库")
         metadata, _body = knowledge.read_markdown(directory / "app.md")
+        from . import business_processes, workflows
+        catalog = workflows.load_catalog(directory)
+        controls = [r for _p, r in knowledge.iter_records(directory, "control")]
         return {"schema_version": knowledge.INDEX_VERSION, "application": metadata,
                 "workflows": self.workflows(app_id),
+                "controls": controls,
+                "business_processes": business_processes.records(directory, controls, catalog),
                 "usage": self.usage_documents(app_id),
                 "references": self.reference_documents(app_id),
                 **{plural: [r for _p, r in knowledge.iter_records(directory, kind)]
                    for plural, kind in (("pages", "page"), ("regions", "region"),
-                                        ("controls", "control"), ("interactions", "interaction"))}}
+                                        ("interactions", "interaction"),)}}
 
     def reference_documents(self, app_id):
         from . import reference_library

@@ -171,11 +171,7 @@ and `reference_description_error`. Read the resulting controls using the same
 remain image observations; never invent XPath. Confirm actual assignments and
 entry paths from records, not just the detected-count total.
 
-Enabled imported references are used by the shared backend when configured. For
-existing controls needing reference explanations, use
-`operation="supplement-descriptions"`, optionally with `region_id` or `control_id`.
-It requires the reference API, sends no desktop input, and preserves manual or
-interaction-observed explanations. Inferred explanations are not execution proof.
+Use `get_ui_library(section="business_processes")` to read the procedures extracted during reference import. Each procedure has its steps, expected results, provenance and current workflow matches.
 
 ## Menus and dropdowns
 

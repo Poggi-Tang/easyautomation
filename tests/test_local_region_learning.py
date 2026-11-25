@@ -113,6 +113,36 @@ def test_deep_content_states_reuse_manual_region_through_real_scanner(local, mon
     assert all("normalized_rect" not in r for r in snapshot["controls"])
 
 
+def test_business_process_observes_main_window_without_creating_regions(local, monkeypatch):
+    from easy_uiauto import region_learning
+    from easy_uiauto.knowledge_library import KnowledgeLibrary
+
+    layout, root, window, _button, _detections, calls, _points = local
+    store = KnowledgeLibrary(root)
+    scan(layout, root)
+    initial = store.read("chosen-app")
+    existing_regions = [record["id"] for record in initial["regions"]]
+    existing_controls = {record["id"]: record["region_id"] for record in initial["controls"]}
+    process = dict(id="process-save", name="【工程管理】保存-工具栏")
+    scope = dict(**process, page_id=layout["page_id"], window_scope={"kind": "main"})
+    expected = dict(handle=1, process_id=123, class_name="WindowControl", title="Example")
+    monkeypatch.setattr(region_learning.configuration, "load_gui_configuration", lambda:dict(
+        api_url="https://example.invalid/v1", api_key="test", api_model="test"))
+    backend = region_learning.NativeBackend(store, "chosen-app", scope, expected, root, business_process=process)
+    frame = dict(state_id="initial", image=scanner._screenshot_window(scanner._rect(window)), target=expected,
+                 scope={"kind": "main"}, bounds=scanner._rect(window), root=window, issues=[])
+    monkeypatch.setattr(backend, "stable_frame", lambda:frame)
+
+    observation = backend.observe()
+
+    assert observation["controls"] and not observation["region_ids"]
+    assert calls[-1] == frame["image"].size
+    snapshot = store.read("chosen-app")
+    assert [record["id"] for record in snapshot["regions"]] == existing_regions
+    assert {record["id"]: record["region_id"] for record in snapshot["controls"]} == existing_controls
+    assert all("normalized_rect" not in record for record in observation["controls"])
+
+
 @pytest.mark.parametrize("failure_first", [False, True])
 def test_one_stale_point_keeps_other_controls_and_failed_visual_observation(local, monkeypatch, failure_first):
     layout, root, _window, _button, detections, *_ = local

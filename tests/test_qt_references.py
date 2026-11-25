@@ -8,7 +8,7 @@ from test_knowledge_library import library
 from test_qt_knowledge_gui import app,settle
 
 
-def test_reference_is_listed_under_usage_and_edited_md_is_saved(app,library):
+def test_reference_is_listed_under_usage_as_read_only_archive(app,library):
     directory=library.directory('demo')
     knowledge.write_markdown(directory/'references/guide.md',dict(id='guide',kind='reference',app_id='demo',name='用户手册',status='ready',enabled=True,source='manual.pdf'),
                              '# 原功能\n保存当前模型。')
@@ -19,12 +19,8 @@ def test_reference_is_listed_under_usage_and_edited_md_is_saved(app,library):
         assert item.parent() is window.model.nodes['references-root:demo']
         assert item.parent().parent() is window.model.nodes['usage-root:demo']
         window.goto('reference:demo:guide');app.processEvents()
-        assert '原功能' in window.usage.toPlainText() and not window.usage.isReadOnly()
-        window.usage.setPlainText('# 新功能\n先选择模型，再保存。');assert window.dirty
-        assert window.save();settle(app,lambda:not window.jobs)
-        assert '先选择模型' in library.reference_documents('demo')[0]['body']
-        window.goto('reference:demo:guide');window.toggle_reference();settle(app,lambda:not window.jobs)
-        assert library.reference_documents('demo')[0]['enabled'] is False
+        assert '原功能' in window.usage.toPlainText() and window.usage.isReadOnly()
+        assert {b.text() for b in window.context_buttons} == {"重新整理", "删除所选"}
         assert len(window.deletable_nodes([window.current]))==1
     finally:window.dirty=False;window.close();app.processEvents()
 
@@ -44,19 +40,33 @@ def test_import_files_uses_background_job_and_selected_software(app,library,monk
     finally:window.dirty=False;window.close();app.processEvents()
 
 
-def test_supplement_description_uses_saved_control_without_requiring_live_window(app,library,monkeypatch):
-    from test_knowledge_library import add_control
-    record=add_control(library);record.update(description_status='unmatched',description_reason='手册未找到明确依据')
-    knowledge.save_control(library.directory('demo'),record)
-    window=KnowledgeWindow(library.root,remember=False);calls=[]
+def test_business_process_can_start_without_a_region(app,library,monkeypatch):
+    from easy_uiauto.business_processes import from_topics
+    from easy_uiauto.qt_ui.dialogs import DeepLearningDialog
+    from PySide6.QtWidgets import QDialog
+
+    process, = from_topics([dict(title="新建工程", description="创建本地工程", entry="文件菜单",
+                                 steps=["点击文件菜单"], expected=["工程显示在树中"], quote="点击文件")],
+                           dict(id="guide", name="测试手册"))
+    knowledge.write_markdown(library.directory("demo") / "business-processes/guide.md", {"processes": [process]}, "")
+    window=KnowledgeWindow(library.root,remember=False)
+    calls=[]
+    key=f"business:demo:{process['id']}"
     try:
-        settle(app,lambda:'control:demo:control-one' in window.model.nodes)
-        window.goto('control:demo:control-one');app.processEvents()
-        assert '手册未找到' in window.description.placeholderText()
-        assert '手册未找到' in window.reference_info.text()
-        monkeypatch.setattr(window,'start_task',lambda *a,**k:calls.append((a,k)))
-        window.supplement_descriptions()
+        settle(app,lambda:key in window.model.nodes)
+        window.goto(key)
+        app.processEvents()
+        assert "待学习" in window.usage.toPlainText() and "测试手册" in window.usage.toPlainText()
+        assert "学习业务流程" in {b.text() for b in window.context_buttons}
+        monkeypatch.setattr(window,"bound_window",lambda:{"handle": 1})
+        monkeypatch.setattr(DeepLearningDialog,"exec",lambda self:QDialog.DialogCode.Accepted)
+        monkeypatch.setattr(window,"start_task",lambda *args,**kwargs:calls.append((args,kwargs)))
+        window.deep_learn()
+        settle(app,lambda:bool(calls))
         args,kwargs=calls[0]
-        assert args[0]=='supplement-descriptions' and args[1]['control_ids']==['control-one']
-        assert not kwargs.get('hide') and 'window' not in args[1]
-    finally:window.dirty=False;window.close();app.processEvents()
+        assert args[0]=="deep-learn" and args[1]["region_id"]=="" and args[1]["business_process_id"]==process["id"]
+        assert kwargs["hide"] and not library.read("demo")["regions"]
+    finally:
+        window.dirty=False
+        window.close()
+        app.processEvents()

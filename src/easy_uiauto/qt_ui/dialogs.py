@@ -121,19 +121,22 @@ class CapturedControlDialog(QDialog):
 
 
 class DeepLearningDialog(QDialog):
-    def __init__(self, region, flows, parent=None, *, sessions=(), controls=(), mode=None, entry_control=None):
+    def __init__(self, region, flows, parent=None, *, sessions=(), controls=(), mode=None, entry_control=None, business_process=False):
         from ..relearning import MODES
         self.entry_control=entry_control or {}
+        self.business_process=business_process
         title=(self.entry_control.get("semantic_name") or self.entry_control.get("name") or region.get("name","区域"))
         super().__init__(parent);self.setWindowTitle("深度学习 · "+title);self.resize(760,790)
         self.sessions=list(sessions)
         layout=QVBoxLayout(self)
-        hint=QLabel((f"从控件“{title}”开始，探索它打开的菜单、弹窗及后续流程；同区域其他入口不参与。" if entry_control else
-                     "探索指定区域内各控件的可操作流程，并继续探索其打开的菜单、弹窗和后续状态。")+
+        scope_hint = "从已绑定的软件主窗口开始，按所选业务流程探索。" if business_process else None
+        hint=QLabel((scope_hint or (f"从控件“{title}”开始，探索它打开的菜单、弹窗及后续流程；同区域其他入口不参与。" if entry_control else
+                     "探索指定区域内各控件的可操作流程，并继续探索其打开的菜单、弹窗和后续状态。"))+
                     "实际操作、验证结果并恢复起点；不会把扫描或生成计划当作完成。请使用测试工程，遗漏与阻塞会保留在学习进度中。")
         hint.setWordWrap(True);layout.addWidget(hint);form=QFormLayout();layout.addLayout(form)
         self.mode=QComboBox()
-        for value in ("resume","improve","update","new"):self.mode.addItem(MODES[value],value)
+        for value in (("resume","improve","new") if business_process else ("resume","improve","update","new")):
+            self.mode.addItem(MODES[value],value)
         self.mode.setCurrentIndex(self.mode.findData(mode or ("resume" if sessions else "new")))
         self.session=QComboBox()
         for graph in sessions:
@@ -142,7 +145,7 @@ class DeepLearningDialog(QDialog):
         if not sessions:self.session.addItem("暂无历史记录，将建立首次学习记录","")
         self.mode_hint=QLabel();self.mode_hint.setWordWrap(True)
         form.addRow("本次目的",self.mode);form.addRow("已有学习记录",self.session);form.addRow(self.mode_hint)
-        self.instructions=QPlainTextEdit();self.instructions.setPlaceholderText("学习范围、需要覆盖的业务流程，以及参考资料中的要求")
+        self.instructions=QPlainTextEdit();self.instructions.setPlaceholderText("补充本次学习的范围和要求")
         self.instructions.setMaximumHeight(110)
         self.inputs=QPlainTextEdit("{}");self.inputs.setPlaceholderText('必要业务输入，例如：{"工程名称":"学习测试", "保存路径":"D:/测试工程"}；本地搜索可使用当前可见条目名称')
         self.inputs.setMaximumHeight(110)
@@ -166,7 +169,7 @@ class DeepLearningDialog(QDialog):
         self.scope.header().setSectionResizeMode(0,QHeaderView.ResizeMode.Stretch)
         self.scope.header().setSectionResizeMode(1,QHeaderView.ResizeMode.ResizeToContents)
         layout.addWidget(self.scope)
-        self.scope.setVisible(not bool(entry_control))
+        self.scope.setVisible(not (entry_control or business_process))
         self.pending=QTreeWidget();self.pending.setHeaderLabels(["未完成分支","原因"]);self.pending.setMaximumHeight(150)
         self.pending.setColumnWidth(0,280)
         layout.addWidget(self.pending)
@@ -186,7 +189,7 @@ class DeepLearningDialog(QDialog):
         inputs=json.loads(self.inputs.toPlainText())
         if not isinstance(inputs,dict):raise ValueError("测试输入必须为 JSON 对象")
         selected={"control":[],"workflow":[]}
-        if self.mode.currentData()=="improve" and not self.entry_control:
+        if self.mode.currentData()=="improve" and not (self.entry_control or self.business_process):
             for n in range(self.scope.topLevelItemCount()):
                 item=self.scope.topLevelItem(n)
                 if item.checkState(0)==Qt.CheckState.Checked:
@@ -204,7 +207,7 @@ class DeepLearningDialog(QDialog):
         mode=self.mode.currentData();self.session.setEnabled(mode!="new");self.scope.setEnabled(mode=="improve")
         self.pending.setEnabled(mode!="new")
         self.mode_hint.setText({
-            "resume":"保留已完成结果，重新分析受阻分支；可以补充输入和参考资料后继续。请打开原起点或已记录的结果界面。",
+            "resume":"保留已完成结果，重新分析受阻分支；可以补充测试输入后继续。请打开原起点或已记录的结果界面。",
             "improve":"重新分析指定内容，更新原控件和组合动作；保留人工修改，并报告冲突。",
             "update":"请先打开并确认当前区域边界。比较新旧控件、更新定位，并验证受影响流程；未找到的控件保留为待定位。",
             "new":"建立新的学习记录；已有控件继续按身份合并。已有学习建议选择继续、改进或适配，避免重复生成流程。"}[mode])
