@@ -61,6 +61,43 @@ def test_three_entries_share_one_verified_suffix(library,tmp_path):
     assert any("深度学习进度" in r["name"] for r in library.usage_documents("demo"))
 
 
+@pytest.mark.parametrize("provider_title", ["【工程管理】新建工程-结果校验", "创建成功", None])
+def test_generated_titles_follow_outcome_and_distinguish_entry_paths(library, tmp_path, monkeypatch, provider_title):
+    library.save_picked_region("demo", picked(tmp_path))
+    region = {**library.regions("demo")[0], "name": "工程管理"}
+    backend = Backend(library)
+    original_plan = backend.plan
+    labels = {"menu": "文件菜单", "toolbar": "工具栏", "context": "右键菜单", "fill": "填写并确认"}
+
+    def plan(observation, route):
+        response = original_plan(observation, route)
+        for branch in response["branches"]:
+            branch["name"] = labels[branch["name"]]
+        if response.get("terminal"):
+            response["workflow_title"] = provider_title
+        return response
+
+    monkeypatch.setattr(backend, "plan", plan)
+    feature = "新建工程" if provider_title == "【工程管理】新建工程-结果校验" else "创建成功"
+    heading = f"【工程管理】{feature}"
+    existing_title = f"{heading}-文件菜单／填写并确认"
+    library.save_workflow("demo", dict(keyword=existing_title, name=existing_title,
+        steps=[dict(id="manual", action="manual")]))
+
+    explorer = Explorer(library, "demo", region, backend)
+    assert explorer.run()["complete"]
+    catalog = workflows.load_catalog(library.directory("demo"))
+    generated = [catalog[identifier] for identifier in explorer.graph["workflow_ids"]]
+    assert {flow["keyword"] for flow in generated} == {
+        f"{heading}-结果校验", f"{heading}-填写并确认", f"{existing_title}（2）",
+        f"{heading}-工具栏／填写并确认", f"{heading}-右键菜单／填写并确认",
+    }
+    assert all(flow["name"] == flow["keyword"] for flow in generated)
+    assert {catalog[identifier]["keyword"] for identifier in explorer.graph["entry_workflow_ids"]} == {
+        f"{existing_title}（2）", f"{heading}-工具栏／填写并确认", f"{heading}-右键菜单／填写并确认",
+    }
+
+
 def test_missing_inputs_are_partial_not_successful_workflows(library,tmp_path):
     library.save_picked_region("demo",picked(tmp_path));backend=Backend(library,blocked=True)
     result=Explorer(library,"demo",library.regions("demo")[0],backend).run()

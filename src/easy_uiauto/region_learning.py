@@ -57,6 +57,11 @@ saving business data. Provide concrete completion_checks (result text, selection
 distinguish it from the start; a generic window/input exists check does not prove search/filter success.
 Even at a terminal outcome, enumerate all remaining actionable entries; terminal never skips coverage.
 Opening a dialog/menu alone is not completion of its subsequent workflows. Observe and explore them.
+For a terminal outcome, provide workflow_title in the exact form 【模块】功能点-结果校验.
+Use the software's business module and an outcome-oriented feature, for example 【工程管理】新建工程-结果校验.
+Name each branch in concise Simplified Chinese after its real entry or scenario, e.g. 文件菜单 or 工具栏.
+The saved entry workflow inherits the verified outcome's module and feature and uses the branch path
+as its suffix. For a new-project outcome, the entry must describe 新建工程 and an actual path.
 return_steps must restore the branch start: cancel/close the opened menu/dialog, restore the prior
 selection, or restore an input's exact original value from return_context.input_values using set-text.
 The controller records these values from the live input before writing, and can restore them automatically.
@@ -68,7 +73,8 @@ the current evidence; submitting that dialog is commit. A menu label alone does 
 Observed or locatable items blocked by policy, missing inputs or recovery are not executed results.
 Set replayable=true only for reversible navigation which can be repeated without duplicating a business
 effect; committing, saving, creating or deleting data is never replayable. Do not invoke shells or run code.
-Return a JSON object with name, terminal, completion_checks, return_steps, unresolved (string array),
+Return a JSON object with name, terminal, workflow_title (for terminal outcomes), completion_checks,
+return_steps, unresolved (string array),
 branches (array of {name,steps,effect,replayable,control_id?,blocked?}), and semantics (optional array
 of {control_id,name,description}). Each description explains the control's user-facing function,
 relevant object, and any useful prerequisite. Write these descriptions in Simplified Chinese,

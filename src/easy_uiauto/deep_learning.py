@@ -9,10 +9,16 @@ from contextlib import nullcontext
 from copy import deepcopy
 import json
 from pathlib import Path
+import re
 
 from . import workflows
 from . import relearning
 from .mcp import image_storage, knowledge
+
+
+def _title_part(value, fallback):
+    text = " ".join(value.replace("【", "").replace("】", "").split()).strip(" -")
+    return text or fallback
 
 
 def step_ids(steps, prefix="s"):
@@ -378,6 +384,7 @@ class Explorer:
                     controls=[r["id"] for r in observation["controls"]], branches=branches,
                     return_steps=step_ids(plan.get("return_steps", []), "back"),
                     completion_checks=plan.get("completion_checks", []), terminal=bool(plan.get("terminal")),
+                    workflow_title=plan.get("workflow_title"),
                     verified_terminal=False, issues=list(observation.get("issues", []))+list(plan.get("unresolved", [])),
                     route=deepcopy(route), region_ids=observation.get("region_ids", []), fingerprint=observation["state_id"],
                     state_evidence=deepcopy(observation.get("state_evidence",{})))
@@ -468,7 +475,10 @@ class Explorer:
 
     def archive(self):
         """Each suffix is one workflow; all converging entry paths call that ID."""
-        memo = {};created = [];catalog=workflows.load_catalog(self.directory)
+        memo = {}
+        created = []
+        titles = {}
+
         def suffixes(identifier, trail):
             if identifier in memo:return memo[identifier]
             if identifier in trail:return []
@@ -476,7 +486,15 @@ class Explorer:
             if node.get("verified_terminal"):
                 checks = deepcopy(node["completion_checks"])
                 steps = [dict(action="inspect", target=checks[0]["target"], checks=checks, description="确认业务结果")]
-                result.append(save(identifier, "result", node["name"], steps, verified=node.get("verified_run")==len(self.graph["runs"])))
+                title = node.get("workflow_title")
+                parts = re.fullmatch(r"【([^【】\r\n]+)】([^【】\r\n]+)-结果校验", title.strip()) if isinstance(title, str) else None
+                if parts and all(part.strip(" -") for part in parts.groups()):
+                    module, feature = parts.groups()
+                else:
+                    module, feature = self.region.get("name", "") or "界面操作", node["name"]
+                heading = f"【{_title_part(module, '界面操作')}】{_title_part(feature, '校验操作结果')}"
+                result.append(save(identifier, "result", heading, (), steps,
+                                   verified=node.get("verified_run") == len(self.graph["runs"])))
             for branch in node["branches"]:
                 if not self.branch_in_scope(branch,node):continue
                 target = branch.get("target_state")
@@ -484,13 +502,16 @@ class Explorer:
                 for child in suffixes(target, [*trail, identifier]):
                     verified=(branch.get("executed_run")==len(self.graph["runs"]) and
                               catalog[child].get("learning_evidence",{}).get("verified_run")==len(self.graph["runs"]))
-                    result.append(save(identifier, branch["id"]+child, branch["name"], [*branch["steps"],
+                    heading, child_path = titles[child]
+                    label = _title_part(branch["name"], "交互入口")
+                    path = child_path if child_path and label == child_path[0] else (label, *child_path)
+                    result.append(save(identifier, branch["id"]+child, heading, path, [*branch["steps"],
                         dict(action="call", workflow_id=child, description="复用后续流程", parameters={})],
                         verified=verified,branch_id=branch["id"]))
                     if len(created) >= 500:
                         self.stop_reason = "组合动作归档达到 500 项上限";return result
             memo[identifier]=result;return result
-        def save(state, key, name, steps, verified=False,branch_id=""):
+        def save(state, key, heading, path, steps, verified=False, branch_id=""):
             identifier=knowledge.stable_id("deep-flow", self.graph["id"], state, key)
             if len(created)>=500:raise ValueError("组合动作归档达到 500 项上限")
             existing=catalog.get(identifier)
@@ -501,6 +522,7 @@ class Explorer:
                             relearning.steps_key(steps[:-1],anchor=True))]
                 if len(candidates)==1 and candidates[0]["id"] not in created:
                     existing=candidates[0];identifier=existing["id"]
+            titles[identifier] = (heading, path)
             if existing and ((existing.get("learning_authored_hash") and existing["learning_authored_hash"] != relearning.authored_key(existing)) or
                              not existing.get("learning_authored_hash") and existing.get("learning_definition_hash") != existing.get("definition_hash")):
                 # A user-edited generated workflow belongs to the user now.
@@ -515,8 +537,20 @@ class Explorer:
                     if isinstance(value,str):
                         for parameter,example in self.inputs.items():
                             if isinstance(example,str) and example and value==example:item[field]="${"+parameter+"}";break
+            name = f"{heading}-{'／'.join(path) or '结果校验'}"
+            if existing:
+                keyword = existing["keyword"]
+                name = existing.get("name") or keyword
+            else:
+                keyword = name
+                number = 2
+                while keyword in used_keywords:
+                    keyword = f"{name}（{number}）"
+                    number += 1
+                name = keyword
+                used_keywords.add(keyword)
             flow=dict(**{k:v for k,v in (existing or {}).items() if k not in {"id","keyword","name","steps","precondition","parameters","source","learning_session","entry_state","learning_verified"}},
-                      id=identifier, keyword=(existing or {}).get("keyword") or name+" · "+identifier[-8:], name=name, steps=steps,
+                      id=identifier, keyword=keyword, name=name, steps=steps,
                       precondition="软件已启动", parameters=self.inputs, source="deep-learning",
                       learning_session=self.graph["id"], entry_state=state, learning_verified=True)
             flow["learning_definition_hash"]=workflows.definition_hash(flow,catalog)
@@ -532,13 +566,21 @@ class Explorer:
             catalog[identifier]=saved;created.append(identifier)
             if identifier not in self.graph["workflow_ids"]:self.graph["workflow_ids"].append(identifier)
             return identifier
-        if self.graph["root"] in self.graph["states"]:
-            roots=suffixes(self.graph["root"], [])
-            entries=getattr(self.backend,"root_entry",[])
-            if entries:
-                roots=[save(self.graph["root"],"entry-"+flow,self.region.get("name","区域")+"入口",
-                       [*entries,dict(action="call",workflow_id=flow,description="执行已学习流程",parameters={})]) for flow in roots]
-            self.graph["entry_workflow_ids"]=roots
+        with image_storage._vault_lock(self.library.root):
+            catalog = workflows.load_catalog(self.directory)
+            used_keywords = {flow["keyword"] for flow in catalog.values()}
+            root = self.graph["root"]
+            if root in self.graph["states"]:
+                roots = suffixes(root, [])
+                entries = getattr(self.backend, "root_entry", [])
+                if entries:
+                    with_entry = []
+                    for flow in roots:
+                        heading, path = titles[flow]
+                        with_entry.append(save(root, "entry-" + flow, heading, ("区域入口", *path),
+                            [*entries, dict(action="call", workflow_id=flow, description="执行已学习流程", parameters={})]))
+                    roots = with_entry
+                self.graph["entry_workflow_ids"] = roots
         self.graph["workflow_ids"] = sorted(set(self.graph.get("workflow_ids", [])) | set(created))
         self.graph["run_workflow_ids"] = sorted(set(created))
 

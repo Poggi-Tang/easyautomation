@@ -25,7 +25,8 @@
 
 ```json
 {
-  "keyword": "新建项目",
+  "keyword": "【工程管理】新建项目-文件菜单",
+  "name": "【工程管理】新建项目-文件菜单",
   "precondition": "软件已启动",
   "steps": [
     {"id": "before-create", "action": "inspect", "target": {"control_id": "example.project-tree"}, "checks": [
